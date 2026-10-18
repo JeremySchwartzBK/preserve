@@ -25,7 +25,7 @@ npx wrangler pages deploy app --project-name preserve-app --branch main         
 # serving Worker: copy platform/worker/src/index.js to <dir>/_worker.js (+ _routes.json), deploy <dir> to preserve-view
 ```
 
-Database changes: the SQL files in `platform/` are applied in order (`schema.sql`, `schema-actions.sql`, `schema-findings.sql`, `schema-pages-captures.sql`, `schema-page-serving.sql`).
+Database changes: the SQL files in `platform/` are applied in order (`schema.sql`, `schema-actions.sql`, `schema-findings.sql`, `schema-pages-captures.sql`, `schema-page-serving.sql`, `schema-runner.sql`).
 
 ## Rules of the road
 

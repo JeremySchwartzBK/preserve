@@ -3,18 +3,27 @@
 // while the copy is being built or refined, and deletes it when the retention rules say so (sweepCaptures). It also keeps the edge lookup (KV) in step with the database, so
 // approving, renaming, archiving or deleting in the app reaches visitors within a few seconds.
 //
+// Any number of runners can run at once, on one machine or several (schema-runner.sql): each job is claimed with a
+// lease the runner renews while it works, so a runner that dies or is redeployed hands its job to another one. On
+// SIGTERM a runner stops its jobs and gives them straight back to the queue.
+//
 // Usage: node runner.mjs [--once]
-// Env: SUPABASE_PROJECT (ref), HARNESS (default ../harness in this checkout), RUN_DIR (default /root/runs).
+// Env: SUPABASE_PROJECT (ref), HARNESS (default ../harness in this checkout), RUN_DIR (default /root/runs),
+//      RUNNER_SLOTS (jobs at a time, default 1), RUNNER_IDLE_EXIT (seconds with nothing to do before exiting; unset =
+//      run forever). v1 hosting sleeps when idle to keep costs down (Jeremy, 2026-10-18): a new copy request starts a
+//      runner, which exits once the queue has been empty this long; a once-a-minute check is the safety net.
 // Database access goes through the Supabase management API with the access token (injected by the proxy here); a
 // production runner would use a direct database connection instead.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { cloudflareStore, uploadPages, setCopy, setNames } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => r.kill(sig));
   r.on('close', (c) => process.exit(c));
 } else {
   await main();
@@ -71,8 +80,17 @@ async function main() {
     await sql(`insert into notification (person_id, kind, copy_id, body) select sm.person_id, ${lit(kind)}, c.id, ${lit(body)} from copy c join studio_member sm on sm.studio_id = c.studio_id where c.id = ${lit(copyId)}`);
   }
 
+  const WORKER = `${os.hostname()}:${process.pid}`;
+  const SLOTS = Math.max(1, +process.env.RUNNER_SLOTS || 1);
+  const LEASE = 120;  // seconds; renewed every 30
+  const running = new Map();  // job id -> { child }
+  let stopping = false;
+  const IDLE_EXIT = +process.env.RUNNER_IDLE_EXIT || 0;
+  let lastBusy = Date.now();
+
   async function runJob(j) {
     log('job', j.copy_id, 'attempt', j.attempt, j.url);
+    const ctl = running.get(j.id);
     const work = path.join(RUN, 'work'), out = path.join(RUN, 'ready');
     fs.mkdirSync(work, { recursive: true });
     if (j.user_context) fs.writeFileSync(path.join(work, `${j.copy_id}.user-notes.json`), JSON.stringify(j.user_context, null, 1));
@@ -85,13 +103,23 @@ async function main() {
         if (st && st !== lastStep) { lastStep = st; await sql(`update copy_job set step = ${lit(STEP[st] || st)} where id = ${lit(j.id)}`); }
       } catch {}
     }, 3000);
+    // Keep the lease. If another runner has taken the job over (this one was unreachable too long), stop here.
+    const beat = setInterval(async () => {
+      try {
+        const [r] = await sql(`select renew_copy_job(${lit(j.id)}, ${lit(WORKER)}, ${LEASE}) as ok`);
+        if (!r?.ok) { ctl.lost = true; stopChild(ctl); }
+      } catch (e) { log('lease renewal failed', j.copy_id, e.message); }
+    }, 30e3);
     const code = await new Promise((res) => {
-      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Own process group, so stopping the job also stops the browsers and servers it started.
+      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      ctl.child = p;
       const jl = fs.createWriteStream(path.join(work, `${j.copy_id}.a${j.attempt}.log`), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
       p.on('exit', res);  // not 'close': a leftover browser holding the output pipe must not stall the runner
     });
-    clearInterval(watch);
+    clearInterval(watch); clearInterval(beat);
+    if (ctl.lost || stopping) throw Object.assign(new Error(ctl.lost ? 'lease lost to another runner' : 'runner stopping'), { quiet: true });
     let job;
     try { job = JSON.parse(fs.readFileSync(jobFile, 'utf8')); } catch { job = { state: 'failed', verdict: { result: 'fail', reasons: [{ code: 'job-error', detail: `make-copy exited ${code} without a job file` }] } }; }
     const v = job.verdict || { result: 'fail', reasons: [] };
@@ -153,8 +181,8 @@ async function main() {
   }
 
   // Keep KV in step: one record per copy, plus friendly names once a copy has been approved.
-  async function syncServing() {
-    const rows = await sql(`select c.id, c.status, c.live_version, c.served, s.slug,
+  async function syncServing(ids = null) {
+    const rows = ids?.length === 0 ? [] : await sql(`select c.id, c.status, c.live_version, c.served, s.slug,
         (select max(version) from copy_version v where v.copy_id = c.id) as latest,
         (select jsonb_object_agg(version, jsonb_build_object('fmt', storage_format, 'pages', pages)) from copy_version v where v.copy_id = c.id) as stored,
         (select name from copy_name n where n.copy_id = c.id and n.is_current) as name,
@@ -163,7 +191,7 @@ async function main() {
           from copy_pin p where p.copy_id = c.id and p.kind = 'tour' and p.block_id is not null), '[]') as spots,
         coalesce((select jsonb_agg(jsonb_build_object('role', coalesce(p.meta->>'role', ''), 'name', p.body, 'url', p.meta->>'url') order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'credit'), '[]') as credits
-      from copy c join studio s on s.id = c.studio_id`);
+      from copy c join studio s on s.id = c.studio_id ${ids ? `where c.id in (${ids.map(lit).join(',')})` : ''}`);
     for (const r of rows) {
       if (!r.latest) continue;
       const status = r.status === 'ready' ? 'live' : ['paused', 'archived'].includes(r.status) && r.live_version ? 'paused' : 'review';
@@ -192,32 +220,64 @@ async function main() {
     }
   }
 
-  // Only one runner runs at a time, so a job still marked working when it starts was cut off (stopped or restarted
-  // mid-job): put it back in the queue.
-  await sql(`update copy_job set state = 'queued', step = null, started_at = null where state = 'working'`).catch((e) => log('requeue failed', e.message));
-  let swept = 0;
-  for (;;) {
-    try {
-      await syncServing();
-      if (Date.now() - swept > 15 * 60e3) { swept = Date.now(); await sweepCaptures().catch((e) => log('capture sweep failed', e.message)); }
-      const [j] = await sql(`update copy_job set state = 'working', started_at = now(), step = 'check-url'
-        where id = (select id from copy_job where state = 'queued' order by queued_at limit 1 for update skip locked)
-        returning id, copy_id, attempt, url, user_context, tries, version,
-          (select page_id from copy_page p where p.copy_id = copy_job.copy_id and p.path = '') as page_id`);
-      if (j) { await runJob(j).catch(async (e) => {
-        // Our own trouble (storage, database, a crash), not the site's: try the job again a couple of times before
-        // telling anyone, and keep the real cause for triage.
-        log('runner error', j.copy_id, e.message);
-        const tries = (j.tries || 0) + 1;
-        if (tries < 3) {
-          await sql(`update copy_job set state = 'queued', step = null, tries = ${tries}, internal_error = ${lit(String(e.message).slice(0, 1000))} where id = ${lit(j.id)}`).catch(() => {});
-          return;
-        }
-        await sql(`update copy_job set state = 'failed', step = null, finished_at = now(), tries = ${tries}, error = ${lit('Something went wrong on our side while making this copy. We’ve logged it and will try again.')}, internal_error = ${lit(String(e.message).slice(0, 1000))} where id = ${lit(j.id)};
-          update copy set status = case when exists (select 1 from copy_version where copy_id = ${lit(j.copy_id)}) then 'review' else 'failed' end, updated_at = now() where id = ${lit(j.copy_id)};`).catch(() => {});
-      }); await syncServing(); continue; }
-    } catch (e) { log('loop error', e.message); }
-    if (once) break;
-    await new Promise((s) => setTimeout(s, 4000));
+  function stopChild(ctl) {
+    try { process.kill(-ctl.child.pid, 'SIGKILL'); } catch {}
   }
+
+  // One slot: claim a job, run it, repeat. A job that fails on our side (storage, database, a crash) goes back in the
+  // queue; the claim counts tries, and the third failure is reported to the person with the real cause kept for triage.
+  async function slot() {
+    while (!stopping) {
+      let j;
+      try { [j] = await sql(`select * from claim_copy_job(${lit(WORKER)}, ${LEASE})`); } catch (e) { log('claim failed', e.message); }
+      if (!j) {
+        if (once) return;
+        if (IDLE_EXIT && !running.size && Date.now() - lastBusy > IDLE_EXIT * 1000) { stopping = true; log('idle, exiting'); return; }
+        await new Promise((s) => setTimeout(s, 4000)); continue;
+      }
+      running.set(j.id, {}); lastBusy = Date.now();
+      try { await runJob(j); } catch (e) {
+        if (e.quiet) { if (!stopping) log('job dropped', j.copy_id, e.message); }
+        else {
+          log('runner error', j.copy_id, e.message);
+          const msg = lit(String(e.message).slice(0, 1000));
+          await (j.tries < 3
+            ? sql(`update copy_job set state = 'queued', step = null, worker_id = null, lease_until = null, internal_error = ${msg} where id = ${lit(j.id)} and worker_id = ${lit(WORKER)}`)
+            : sql(`update copy_job set state = 'failed', step = null, finished_at = now(), worker_id = null, lease_until = null, error = ${lit('Something went wrong on our side while making this copy. We’ve logged it and will try again.')}, internal_error = ${msg} where id = ${lit(j.id)};
+                update copy set status = case when exists (select 1 from copy_version where copy_id = ${lit(j.copy_id)}) then 'review' else 'failed' end, updated_at = now() where id = ${lit(j.copy_id)};`)).catch(() => {});
+        }
+      } finally { running.delete(j.id); lastBusy = Date.now(); }
+      if (once) return;
+    }
+  }
+
+  // Visitors' view: copies whose records changed (serving_outbox, filled by triggers) every few seconds, plus a full
+  // pass every hour as a safety net. Capture retention every 15 minutes.
+  async function upkeep() {
+    let full = 0, swept = 0;
+    while (!stopping) {
+      try {
+        if (Date.now() - full > 60 * 60e3) { full = Date.now(); await syncServing(); await sql(`delete from serving_outbox where queued_at < now() - interval '10 seconds'`); }
+        const ids = (await sql(`delete from serving_outbox where copy_id in (select copy_id from serving_outbox order by queued_at limit 50 for update skip locked) returning copy_id`)).map((r) => r.copy_id);
+        if (ids.length) lastBusy = Date.now();
+        await syncServing(ids);
+        if (Date.now() - swept > 15 * 60e3) { swept = Date.now(); await sweepCaptures().catch((e) => log('capture sweep failed', e.message)); }
+      } catch (e) { log('upkeep error', e.message); }
+      if (once) return;
+      await new Promise((s) => setTimeout(s, 3000));
+    }
+  }
+
+  // Shutting down (a deploy, a scale-down): stop the jobs and hand them straight back to the queue.
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => {
+    if (stopping) return;
+    stopping = true;
+    log('stopping;', running.size, 'job(s) back to the queue');
+    for (const [id, ctl] of running) { if (ctl.child) stopChild(ctl); await sql(`select release_copy_job(${lit(id)}, ${lit(WORKER)})`).catch((e) => log('release failed', e.message)); }
+    process.exit(0);
+  });
+
+  log('runner', WORKER, 'slots', SLOTS, 'pipeline', PIPELINE);
+  await Promise.all([upkeep(), ...Array.from({ length: SLOTS }, slot)]);
+  if (once) await syncServing();
 }
