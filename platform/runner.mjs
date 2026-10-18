@@ -1,15 +1,17 @@
 // Copy runner: takes queued copy jobs from the database, runs the copy job (harness/make-copy.mjs), uploads the result
-// to R2 as a new version, and records it for review. It also keeps the edge lookup (KV) in step with the database, so
+// to R2 as a new version, and records it for review. It keeps the original capture of each page (capture-store.mjs)
+// while the copy is being built or refined, and deletes it when the retention rules say so (sweepCaptures). It also keeps the edge lookup (KV) in step with the database, so
 // approving, renaming, archiving or deleting in the app reaches visitors within a few seconds.
 //
 // Usage: node runner.mjs [--once]
-// Env: SUPABASE_PROJECT (ref), HARNESS (default /root/proto), RUN_DIR (default /root/runs).
+// Env: SUPABASE_PROJECT (ref), HARNESS (default ../harness in this checkout), RUN_DIR (default /root/runs).
 // Database access goes through the Supabase management API with the access token (injected by the proxy here); a
 // production runner would use a direct database connection instead.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { cloudflareStore, uploadVersion, setCopy, setNames } from './worker/copy-store.mjs';
+import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -25,6 +27,9 @@ async function main() {
   const once = process.argv.includes('--once');
   const store = cloudflareStore({ account: '1dcf2dbf05caa4963ed872ff035bc9db', bucket: 'preserve-copies', kvNamespace: 'c67307a470e44d529efa87933c42942f' });
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+  // The code that makes each version is recorded with it, so a copy can be traced to the commit that built it.
+  const git = (...a) => { try { return execFileSync('git', ['-C', HARNESS, ...a], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
+  const PIPELINE = (git('rev-parse', '--short=12', 'HEAD') || 'unknown') + (git('status', '--porcelain', '--untracked-files=no') ? '+dirty' : '');
 
   const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
   async function sql(query) {
@@ -102,7 +107,8 @@ async function main() {
     }
 
     const dir = path.join(out, j.copy_id);
-    const [{ next }] = await sql(`select coalesce(max(version), 0) + 1 as next from copy_version where copy_id = ${lit(j.copy_id)}`);
+    // The version number was reserved when the job was queued (schema-pages-captures.sql).
+    const next = j.version ?? (await sql(`select coalesce(max(version), 0) + 1 as next from copy_version where copy_id = ${lit(j.copy_id)}`))[0].next;
     const up = await uploadVersion(store, { dir, id: j.copy_id, version: next });
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(fs.readFileSync(path.join(dir, 'desktop.html'), 'utf8'))?.[1] || '').trim().replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s*·\s*Preview copy$/i, '').split(/\s+[|–—-]\s+/)[0].replace(/\s*®\s*$/, '').slice(0, 120) || null;
     const findings = (v.reasons || []).map((r) => ({ code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.', pinned: !!r.spots?.length }))
@@ -113,15 +119,36 @@ async function main() {
     const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.' })))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
-    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes)
-        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes});
+    const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
+    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version)
+        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)});
       update copy_job set state = ${lit(job.state)}, step = null, finished_at = now(), version = ${next}, verdict = ${lit(JSON.stringify(v))}::jsonb where id = ${lit(j.id)};
       update copy set status = 'review', title = coalesce(title, ${lit(title)}), updated_at = now() where id = ${lit(j.copy_id)};
+      update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
-      ${findingPins.map((p, i) => `insert into copy_pin (copy_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null }))}::jsonb, ${next}, ${i});`).join('\n')}`);
+      ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null }))}::jsonb, ${next}, ${i});`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
     log('ready for review', j.copy_id, 'v' + next, v.result, up.files, 'files');
+    // Keep the original capture for refinements. Losing it doesn't stop the copy, so a failure here is only logged.
+    const prefix = capturePrefix({ copyId: j.copy_id, pageId: j.page_id, attempt: j.attempt });
+    try {
+      const k = await storeCapture(store, { dir: path.join(work, j.copy_id), prefix });
+      await sql(`insert into copy_capture (copy_id, page_id, job_id, attempt, prefix, parts, bytes, files)
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, ${lit(j.id)}, ${j.attempt}, ${lit(prefix)}, ${k.parts}, ${k.bytes}, ${k.files})
+        on conflict (prefix) do update set parts = excluded.parts, bytes = excluded.bytes, files = excluded.files, job_id = excluded.job_id, created_at = now(), deleted_at = null, deleted_why = null`);
+      log('capture stored', prefix, (k.bytes / 1e6).toFixed(1) + ' MB', k.parts, 'parts');
+    } catch (e) { log('capture not stored', prefix, e.message); }
+  }
+
+  // Retention for stored captures (Jeremy, 2026-10-18): gone once the copy is accepted or deleted, or after 30 days
+  // with no activity if it never is. The capture_due view decides; this only deletes and records it.
+  async function sweepCaptures() {
+    for (const k of await sql(`select id, prefix, parts, why from capture_due limit 50`)) {
+      await deleteCapture(store, k);
+      await sql(`update copy_capture set deleted_at = now(), deleted_why = ${lit(k.why)} where id = ${lit(k.id)}`);
+      log('capture deleted', k.prefix, k.why);
+    }
   }
 
   // Keep KV in step: one record per copy, plus friendly names once a copy has been approved.
@@ -162,12 +189,15 @@ async function main() {
   // Only one runner runs at a time, so a job still marked working when it starts was cut off (stopped or restarted
   // mid-job): put it back in the queue.
   await sql(`update copy_job set state = 'queued', step = null, started_at = null where state = 'working'`).catch((e) => log('requeue failed', e.message));
+  let swept = 0;
   for (;;) {
     try {
       await syncServing();
+      if (Date.now() - swept > 15 * 60e3) { swept = Date.now(); await sweepCaptures().catch((e) => log('capture sweep failed', e.message)); }
       const [j] = await sql(`update copy_job set state = 'working', started_at = now(), step = 'check-url'
         where id = (select id from copy_job where state = 'queued' order by queued_at limit 1 for update skip locked)
-        returning id, copy_id, attempt, url, user_context, tries`);
+        returning id, copy_id, attempt, url, user_context, tries, version,
+          (select page_id from copy_page p where p.copy_id = copy_job.copy_id and p.path = '') as page_id`);
       if (j) { await runJob(j).catch(async (e) => {
         // Our own trouble (storage, database, a crash), not the site's: try the job again a couple of times before
         // telling anyone, and keep the real cause for triage.
