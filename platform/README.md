@@ -13,6 +13,7 @@ how it is addressed, and how visitors are served.
 | `worker/copy-store.mjs` | Uploads a copy version to R2 and writes the lookup records to KV | Tested locally; real-account backend written, not yet run |
 | `schema-findings.sql` | Quality-check findings as pins (kind `finding`), refine/approve updated, `finding_triage` view | Loaded 2026-10-16 |
 | `schema-pages-captures.sql` | Page level (`copy_page`, `copy_pin.page_id`, `copy_version.pages` + `pipeline_version`, version reserved at queue time via `copy.next_version`, `copy.page_count`) and stored captures (`copy_capture`, `capture_due` retention view) | Loaded 2026-10-18 |
+| `schema-page-serving.sql` | `copy_version.storage_format`: 1 = original single-page R2 layout, 2 = page layout (shared `copies/<id>/a/`, pages under `v<n>/p/<page>/`); the runner writes 2 for new versions and the lookup record gains `fmt` and `pages` | Loaded 2026-10-18 |
 | `capture-store.mjs` | Packs a page's original capture into R2 `captures/<copy>/<page>/a<attempt>/` (tar.gz parts + index), restores and deletes it. Never served. Test: `node test-captures.mjs` | Used by the runner from 2026-10-18 |
 | `worker/wrangler.toml` | Config for deploying as a standalone Worker (needs Workers Scripts: Edit on the key, which it doesn't have) | Not used yet |
 | `worker/migrate.mjs`, `worker/test-live.mjs` | Upload the five test copies; check the deployed copies in a browser | Run 2026-10-16: 40 of 40 checks pass |

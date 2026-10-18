@@ -1,8 +1,9 @@
 // End-to-end test of the serving Worker on Miniflare (local R2 + KV), with a real browser.
 // Usage: node test-local.mjs <copyFolder> [<harnessDir>]
+import fs from 'node:fs';
 import path from 'node:path';
 import { Miniflare } from 'miniflare';
-import { bindingStore, uploadVersion, setCopy, setNames } from './copy-store.mjs';
+import { bindingStore, uploadVersion, uploadPages, setCopy, setNames } from './copy-store.mjs';
 
 const [dir, harness = new URL('../../harness', import.meta.url).pathname] = process.argv.slice(2);
 const { launch, PROFILES, sleep } = await import(path.join(harness, 'lib.mjs'));
@@ -75,6 +76,41 @@ await setCopy(store, { id, version: 2, studio: 'acme', name: 'minaa-b' });
 const anyAsset = (await (await mf.getR2Bucket('COPIES')).list({ prefix: `copies/${id}/v2/a/` })).objects[0].key.split('/v2/')[1];
 r = await get(`/c/${id}/${anyAsset}`, { range: 'bytes=0-99' }); ok('byte ranges', r.status === 206 && (await r.arrayBuffer()).byteLength === 100, anyAsset);
 r = await get('/robots.txt'); ok('robots.txt', (await r.text()).includes('GPTBot'));
+
+// Page layout (fmt 2): shared files, pages by path, the same files reused by the next version.
+const id2 = 'p4g3s7x2', pages = [{ page_id: 'home', path: '', title: 'Home', dir }, { page_id: 'ab12', path: 'work/kosa', title: 'Kosa', dir }];
+const up1 = await uploadPages(store, { id: id2, version: 1, pages });
+await setCopy(store, { id: id2, version: 1, studio: 'acme', name: 'paged', fmt: 2, pages: { '': 'home', 'work/kosa': 'ab12' } });
+await setNames(store, { studio: 'acme', id: id2, current: 'paged' });
+const up2 = await uploadPages(store, { id: id2, version: 2, pages });
+ok('next version reuses shared files', up2.files === 5 && up1.files > 5, `${up1.files} then ${up2.files} files`);
+const keys = (await (await mf.getR2Bucket('COPIES')).list({ prefix: `copies/${id2}/` })).objects.map((o) => o.key);
+ok('page layout in storage', keys.includes(`copies/${id2}/v1/p/ab12/mobile.html`) && keys.includes(`copies/${id2}/v2/manifest.json`) && !keys.some((k) => /\/v\d+\/a\//.test(k)));
+r = await get(`/c/${id2}/`, { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }); ok('page layout: entry page, phone', r.status === 200 && (await r.text()).includes('var m=true'));
+r = await get(`/c/${id2}/work/kosa/desktop`); ok('page layout: second page, one layout', r.status === 200 && (await r.text()).includes('var m=false'));
+r = await get(`/c/${id2}/work/kosa`); ok('page layout: page without slash redirects', r.status === 301 && r.headers.get('location').endsWith(`/c/${id2}/work/kosa/`));
+r = await get(`/acme/paged/work/kosa/`); ok('page layout: by friendly name', r.status === 200);
+r = await get(`/c/${id2}/work/nope/`); ok('page layout: unknown page 404', r.status === 404);
+const shared = keys.find((k) => k.startsWith(`copies/${id2}/a/`)).split('/a/')[1];
+r = await get(`/c/${id2}/work/kosa/a/${shared}`); ok('page layout: shared file from a nested page', r.status === 200 && r.headers.get('cache-control').includes('immutable'));
+r = await get(`/c/${id2}/v1/p/ab12/desktop.html`); ok('page layout: storage paths not reachable', r.status === 404);
+r = await get(`/c/${id2}/../../captures/x/index.json`); ok('captures never served', r.status === 404 || r.status === 301);
+await store.kvPut(`tour:${id2}`, { site: id2, spots: [{ id: 's1', sel: 'body', x: 0.5, y: 0.5, title: 'Home stop', body: '', page: 'home' }, { id: 's2', sel: 'body', x: 0.5, y: 0.5, title: 'Kosa stop', body: '', page: 'ab12' }], credits: [{ role: 'Design', name: 'Studio' }] });
+r = await get(`/c/${id2}/work/kosa/desktop`); const tt = await r.text(); ok('page layout: tour shows this page\'s stops only', tt.includes('Kosa stop') && !tt.includes('Home stop') && tt.includes('Studio'));
+await store.put('platform/tour.js', fs.readFileSync(new URL('../tour/tour.js', import.meta.url)), 'text/javascript');
+const browser2 = await launch();
+for (const prof of ['desktop', 'mobile']) {
+  const ctx = await browser2.newContext({ ...PROFILES[prof].context });
+  const page = await ctx.newPage();
+  const bad = [];
+  page.on('response', (res) => { if (res.status() >= 400) bad.push(res.status() + ' ' + res.url().slice(base.length, base.length + 80)); });
+  await page.goto(`${base}/acme/paged/work/kosa/`, { waitUntil: 'load' });
+  await sleep(1500);
+  const imgs = await page.evaluate(() => [...document.images].filter((i) => i.complete && i.naturalWidth === 0 && i.getBoundingClientRect().height > 20).length);
+  ok(`page layout: browser nested page ${prof}`, !bad.length && imgs === 0, `errors ${bad.slice(0, 3)}, broken images ${imgs}, final ${page.url().slice(base.length)}`);
+  await ctx.close();
+}
+await browser2.close();
 
 await mf.dispose();
 console.log(results.filter(Boolean).length, 'of', results.length, 'passed');
