@@ -4,12 +4,19 @@
 //   /c/<copyId>/                 the copy, phone or desktop layout picked from the request (shared links)
 //   /c/<copyId>/desktop|mobile   one layout (embed snippets point here; the page switches if its width disagrees)
 //   /c/<copyId>/a/<file>         the copy's files (content-hashed names, cached for a year)
+//   /c/<copyId>/<path>/...       another page of the copy, same rules (copies in the page layout only)
 //   /<studio>/<name>/...         the same, by friendly name; an old name redirects to the current one
 //
-// KV records (written by the app, see platform/README.md):
-//   copy:<copyId>           {"v": 3, "status": "live" | "review" | "paused" | "deleted", "studio": "acme", "name": "minaab"}
+// Lookup records (written by the copy runner, see platform/README.md):
+//   copy:<copyId>           {"v": 3, "status": "live" | "review" | "paused" | "deleted", "studio": "acme", "name": "minaab",
+//                            "fmt": 2, "pages": {"": "<pageId>", "about": "<pageId>"}}   (fmt and pages: page layout only)
 //   name:<studio>/<name>    {"id": "k7f2qx9m", "current": "minaab"}   (current != name means a renamed copy)
-// R2 layout: copies/<copyId>/v<version>/{desktop.html, mobile.html, a/<file>}
+// R2 layouts:
+//   original (no fmt):   copies/<copyId>/v<version>/{desktop.html, mobile.html, a/<file>}
+//   page layout (fmt 2): copies/<copyId>/a/<file>, shared by every page and version,
+//                        copies/<copyId>/v<version>/p/<pageId>/{desktop,mobile}.html
+//   In the page layout any request ending in /a/<file> is a shared file, whatever page path comes before it, so pages
+//   keep their relative a/... references at any depth.
 //
 // Copies are previews, never stand-ins for the real sites: every response says "don't index".
 
@@ -42,7 +49,7 @@ box=document.createElement('div');box.style.cssText='position:fixed;z-index:2147
 layer.addEventListener('mousemove',function(e){var b=under(e.clientX,e.clientY);if(!b)return;var r=b.getBoundingClientRect();box.style.cssText+=';display:block;left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px'});
 layer.addEventListener('mouseleave',function(){box.style.display='none'});
 layer.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var b=under(e.clientX,e.clientY);if(!b)return;var r=b.getBoundingClientRect();
-P.postMessage({type:'preserve-pin',blockId:idOf(b),x:+Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)).toFixed(3),y:+Math.min(1,Math.max(0,(e.clientY-r.top)/r.height)).toFixed(3),layout:innerWidth<768?'mobile':'desktop',label:(b.innerText||b.getAttribute('aria-label')||'').trim().replace(/\\s+/g,' ').slice(0,80)},'*')});
+P.postMessage({type:'preserve-pin',blockId:idOf(b),x:+Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)).toFixed(3),y:+Math.min(1,Math.max(0,(e.clientY-r.top)/r.height)).toFixed(3),layout:innerWidth<768?'mobile':'desktop',page:location.pathname,label:(b.innerText||b.getAttribute('aria-label')||'').trim().replace(/\\s+/g,' ').slice(0,80)},'*')});
 document.body.appendChild(box);document.body.appendChild(layer)}
 if(layer){layer.style.display=on?'block':'none';if(!on)box.style.display='none'}}
 addEventListener('message',function(m){var d=m.data||{};if(d.type==='preserve-pin-mode')mode(!!d.on);
@@ -65,16 +72,32 @@ async function serveCopy(req, env, ctx, id, rest) {
   const rec = await lookup(env, `copy:${id}`);
   if (!rec || rec.status === 'deleted') return rec ? page(410, 'Preview removed', 'This preview has been removed.') : notFound();
   // A copy waiting for its owner's approval is shown only in the app's review frame (and its files, by hashed name).
-  const inReview = rec.status === 'review' && (rest.startsWith('a/') || url(req).searchParams.has('review'));
-  if (rec.status !== 'live' && !inReview) return rest.startsWith('a/') ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
+  const sharedFile = rec.fmt === 2 ? /(?:^|\/)a\/([\w.-]+)$/.exec(rest) : null;
+  const asset = rec.fmt === 2 ? !!sharedFile : rest.startsWith('a/');
+  const inReview = rec.status === 'review' && (asset || url(req).searchParams.has('review'));
+  if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
 
-  let file = rest, vary = false;
-  if (rest === '') { file = isPhone(req) ? 'mobile' : 'desktop'; vary = true; }
-  if (file === 'desktop' || file === 'mobile') file += '.html';
-  else if (!/^a\/[\w.-]+$/.test(file)) return notFound();
-
-  const key = `copies/${id}/v${rec.v}/${file}`;
-  const asset = file.startsWith('a/');
+  let key, vary = false, pageId = null;
+  if (rec.fmt === 2) {
+    if (sharedFile) key = `copies/${id}/a/${sharedFile[1]}`;
+    else {
+      // <path>/ is a page (layout picked from the request); <path>/desktop or <path>/mobile is one layout of it.
+      const m = /^(?:(.*)\/)?(desktop|mobile)$/.exec(rest);
+      const pagePath = m ? m[1] || '' : rest.replace(/\/$/, '');
+      pageId = Object.hasOwn(rec.pages || {}, pagePath) ? rec.pages[pagePath] : null;
+      if (!pageId) return notFound();
+      if (!m && rest !== '' && !rest.endsWith('/')) { const u = url(req); u.pathname += '/'; return Response.redirect(u.href, 301); }
+      vary = !m;
+      key = `copies/${id}/v${rec.v}/p/${pageId}/${m ? m[2] : isPhone(req) ? 'mobile' : 'desktop'}.html`;
+    }
+  } else {
+    let file = rest;
+    if (rest === '') { file = isPhone(req) ? 'mobile' : 'desktop'; vary = true; }
+    if (file === 'desktop' || file === 'mobile') file += '.html';
+    else if (!/^a\/[\w.-]+$/.test(file)) return notFound();
+    key = `copies/${id}/v${rec.v}/${file}`;
+  }
+  const file = key;
   // Assets never change under a given key (content-hashed names inside a numbered version), so the edge cache can
   // keep them; pages are re-read so a new version or a pause shows within a minute.
   const cache = caches.default;
@@ -94,6 +117,8 @@ async function serveCopy(req, env, ctx, id, rest) {
   }
   if (!asset) {
     const tour = await lookup(env, `tour:${id}`);
+    // Tour stops belong to a page (credits are for the whole copy): show only this page's stops.
+    if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
     if (tour && ((tour.spots || []).length || (tour.credits || []).length)) {
       const html = (await obj.text()).replace(/<\/body>/i, tourTags(tour) + '</body>');
       return new Response(html, { headers: h });

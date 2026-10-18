@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { cloudflareStore, uploadVersion, setCopy, setNames } from './worker/copy-store.mjs';
+import { cloudflareStore, uploadPages, setCopy, setNames } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
@@ -109,7 +109,8 @@ async function main() {
     const dir = path.join(out, j.copy_id);
     // The version number was reserved when the job was queued (schema-pages-captures.sql).
     const next = j.version ?? (await sql(`select coalesce(max(version), 0) + 1 as next from copy_version where copy_id = ${lit(j.copy_id)}`))[0].next;
-    const up = await uploadVersion(store, { dir, id: j.copy_id, version: next });
+    // Page layout (storage format 2): shared files are uploaded once per copy, so a refinement only adds what changed.
+    const up = await uploadPages(store, { id: j.copy_id, version: next, pages: [{ page_id: j.page_id, path: '', dir }] });
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(fs.readFileSync(path.join(dir, 'desktop.html'), 'utf8'))?.[1] || '').trim().replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s*·\s*Preview copy$/i, '').split(/\s+[|–—-]\s+/)[0].replace(/\s*®\s*$/, '').slice(0, 120) || null;
     const findings = (v.reasons || []).map((r) => ({ code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.', pinned: !!r.spots?.length }))
       .filter((f, i, a) => a.findIndex((x) => x.text === f.text) === i);
@@ -120,8 +121,8 @@ async function main() {
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
-    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version)
-        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)});
+    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format)
+        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)}, 2);
       update copy_job set state = ${lit(job.state)}, step = null, finished_at = now(), version = ${next}, verdict = ${lit(JSON.stringify(v))}::jsonb where id = ${lit(j.id)};
       update copy set status = 'review', title = coalesce(title, ${lit(title)}), updated_at = now() where id = ${lit(j.copy_id)};
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
@@ -155,9 +156,10 @@ async function main() {
   async function syncServing() {
     const rows = await sql(`select c.id, c.status, c.live_version, c.served, s.slug,
         (select max(version) from copy_version v where v.copy_id = c.id) as latest,
+        (select jsonb_object_agg(version, jsonb_build_object('fmt', storage_format, 'pages', pages)) from copy_version v where v.copy_id = c.id) as stored,
         (select name from copy_name n where n.copy_id = c.id and n.is_current) as name,
         coalesce((select array_agg(name) from copy_name n where n.copy_id = c.id and not n.is_current), '{}') as old,
-        coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'block', p.block_id, 'x', p.x, 'y', p.y, 'title', coalesce(p.meta->>'title', ''), 'body', p.body) order by p.sort, p.created_at)
+        coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'page', p.page_id, 'block', p.block_id, 'x', p.x, 'y', p.y, 'title', coalesce(p.meta->>'title', ''), 'body', p.body) order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'tour' and p.block_id is not null), '[]') as spots,
         coalesce((select jsonb_agg(jsonb_build_object('role', coalesce(p.meta->>'role', ''), 'name', p.body, 'url', p.meta->>'url') order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'credit'), '[]') as credits
@@ -167,11 +169,15 @@ async function main() {
       const status = r.status === 'ready' ? 'live' : ['paused', 'archived'].includes(r.status) && r.live_version ? 'paused' : 'review';
       // Tour stops are pinned by block; the tour script finds the block by its id or Squarespace block id.
       const sel = (id) => (id.startsWith('el:') ? id.slice(3) : id.startsWith('section:') ? `section[data-section-id="${id.slice(8)}"]` : `[id="${id}"],[data-block-id="${id}"]`);
-      const tour = { site: r.id, spots: r.spots.map((p) => ({ id: p.id, sel: sel(p.block), x: p.x, y: p.y, title: p.title, body: p.body })), credits: r.credits.map((c) => (c.url ? c : { role: c.role, name: c.name })) };
-      const want = { v: status === 'review' ? r.latest : r.live_version || r.latest, status, studio: r.slug, name: r.name, old: r.old, tour: tour.spots.length + tour.credits.length ? tour : null };
+      const tour = { site: r.id, spots: r.spots.map((p) => ({ id: p.id, page: p.page, sel: sel(p.block), x: p.x, y: p.y, title: p.title, body: p.body })), credits: r.credits.map((c) => (c.url ? c : { role: c.role, name: c.name })) };
+      const v = status === 'review' ? r.latest : r.live_version || r.latest;
+      // A version in the page layout tells the viewer where its pages are.
+      const sv = r.stored?.[v] || {};
+      const layout = sv.fmt === 2 ? { fmt: 2, pages: Object.fromEntries((sv.pages || []).map((p) => [p.path, p.page_id])) } : {};
+      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null };
       const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((m, kk) => ((m[kk] = v[kk]), m), {}) : v));  // key order differs once stored as jsonb
       if (canon(want) === canon(r.served)) continue;
-      await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name });
+      await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
       if (canon(want.tour) !== canon(r.served?.tour ?? null)) await (want.tour ? store.kvPut(`tour:${r.id}`, want.tour) : store.kvDel(`tour:${r.id}`).catch(() => {}));
       await sql(`update copy set served = ${lit(JSON.stringify(want))}::jsonb where id = ${lit(r.id)}`);
