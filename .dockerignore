@@ -1,0 +1,10 @@
+**/node_modules
+.git
+.github
+app
+**/.wrangler
+work
+ready
+runs
+*.log
+.env

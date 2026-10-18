@@ -1,0 +1,9 @@
+{
+ "name": "preserve-runner-host",
+ "private": true,
+ "type": "module",
+ "dependencies": {
+  "@cloudflare/containers": "0.3.7",
+  "postgres": "3.4.9"
+ }
+}

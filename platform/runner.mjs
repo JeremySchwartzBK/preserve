@@ -38,10 +38,17 @@ async function main() {
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
   // The code that makes each version is recorded with it, so a copy can be traced to the commit that built it.
   const git = (...a) => { try { return execFileSync('git', ['-C', HARNESS, ...a], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return ''; } };
-  const PIPELINE = (git('rev-parse', '--short=12', 'HEAD') || 'unknown') + (git('status', '--porcelain', '--untracked-files=no') ? '+dirty' : '');
+  const PIPELINE = process.env.PIPELINE_VERSION || (git('rev-parse', '--short=12', 'HEAD') || 'unknown') + (git('status', '--porcelain', '--untracked-files=no') ? '+dirty' : '');
 
   const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
+  // With DATABASE_URL (a dedicated database role; how the hosted runner connects) queries go straight to Postgres.
+  // Without it they go through the Supabase management API with the access token the proxy injects (this workspace).
+  const pool = process.env.DATABASE_URL ? new (await import('pg')).default.Pool({ connectionString: process.env.DATABASE_URL, max: 4, ssl: { rejectUnauthorized: false } }) : null;  // Supabase's certificate isn't from a public CA; still encrypted
   async function sql(query) {
+    if (pool) {
+      const r = await pool.query(query);
+      return (Array.isArray(r) ? r.at(-1) : r).rows || [];
+    }
     for (let i = 0; ; i++) {
       const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer injected-by-proxy' }, body: JSON.stringify({ query }) });
       if (r.ok) return r.json();
@@ -276,6 +283,15 @@ async function main() {
     for (const [id, ctl] of running) { if (ctl.child) stopChild(ctl); await sql(`select release_copy_job(${lit(id)}, ${lit(WORKER)})`).catch((e) => log('release failed', e.message)); }
     process.exit(0);
   });
+
+  // Hosted (PORT set): a small status page the host polls to decide whether this runner may be put to sleep.
+  if (process.env.PORT) {
+    const http = await import('node:http');
+    http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ worker: WORKER, pipeline: PIPELINE, jobs: running.size, idleSeconds: running.size ? 0 : Math.round((Date.now() - lastBusy) / 1000), stopping }));
+    }).listen(+process.env.PORT);
+  }
 
   log('runner', WORKER, 'slots', SLOTS, 'pipeline', PIPELINE);
   await Promise.all([upkeep(), ...Array.from({ length: SLOTS }, slot)]);
