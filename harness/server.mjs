@@ -146,5 +146,6 @@ export function startServer(siteDir, port, variants) {
       res.writeHead(500); res.end();
     }
   });
-  return new Promise((resolve) => server.listen(port, () => resolve({ server, misses, hosts, siteHost, siteOrigin })));
+  // Port 0 lets the system pick a free port, so several jobs can run side by side; the chosen one is returned.
+  return new Promise((resolve) => server.listen(port, () => resolve({ server, port: server.address().port, misses, hosts, siteHost, siteOrigin })));
 }
