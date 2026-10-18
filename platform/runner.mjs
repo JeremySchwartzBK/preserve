@@ -9,7 +9,9 @@
 //
 // Usage: node runner.mjs [--once]
 // Env: SUPABASE_PROJECT (ref), HARNESS (default ../harness in this checkout), RUN_DIR (default /root/runs),
-//      RUNNER_SLOTS (jobs at a time, default 1).
+//      RUNNER_SLOTS (jobs at a time, default 1), RUNNER_IDLE_EXIT (seconds with nothing to do before exiting; unset =
+//      run forever). v1 hosting sleeps when idle to keep costs down (Jeremy, 2026-10-18): a new copy request starts a
+//      runner, which exits once the queue has been empty this long; a once-a-minute check is the safety net.
 // Database access goes through the Supabase management API with the access token (injected by the proxy here); a
 // production runner would use a direct database connection instead.
 import fs from 'node:fs';
@@ -83,6 +85,8 @@ async function main() {
   const LEASE = 120;  // seconds; renewed every 30
   const running = new Map();  // job id -> { child }
   let stopping = false;
+  const IDLE_EXIT = +process.env.RUNNER_IDLE_EXIT || 0;
+  let lastBusy = Date.now();
 
   async function runJob(j) {
     log('job', j.copy_id, 'attempt', j.attempt, j.url);
@@ -226,8 +230,12 @@ async function main() {
     while (!stopping) {
       let j;
       try { [j] = await sql(`select * from claim_copy_job(${lit(WORKER)}, ${LEASE})`); } catch (e) { log('claim failed', e.message); }
-      if (!j) { if (once) return; await new Promise((s) => setTimeout(s, 4000)); continue; }
-      running.set(j.id, {});
+      if (!j) {
+        if (once) return;
+        if (IDLE_EXIT && !running.size && Date.now() - lastBusy > IDLE_EXIT * 1000) { stopping = true; log('idle, exiting'); return; }
+        await new Promise((s) => setTimeout(s, 4000)); continue;
+      }
+      running.set(j.id, {}); lastBusy = Date.now();
       try { await runJob(j); } catch (e) {
         if (e.quiet) { if (!stopping) log('job dropped', j.copy_id, e.message); }
         else {
@@ -238,7 +246,7 @@ async function main() {
             : sql(`update copy_job set state = 'failed', step = null, finished_at = now(), worker_id = null, lease_until = null, error = ${lit('Something went wrong on our side while making this copy. We’ve logged it and will try again.')}, internal_error = ${msg} where id = ${lit(j.id)};
                 update copy set status = case when exists (select 1 from copy_version where copy_id = ${lit(j.copy_id)}) then 'review' else 'failed' end, updated_at = now() where id = ${lit(j.copy_id)};`)).catch(() => {});
         }
-      } finally { running.delete(j.id); }
+      } finally { running.delete(j.id); lastBusy = Date.now(); }
       if (once) return;
     }
   }
@@ -251,6 +259,7 @@ async function main() {
       try {
         if (Date.now() - full > 60 * 60e3) { full = Date.now(); await syncServing(); await sql(`delete from serving_outbox where queued_at < now() - interval '10 seconds'`); }
         const ids = (await sql(`delete from serving_outbox where copy_id in (select copy_id from serving_outbox order by queued_at limit 50 for update skip locked) returning copy_id`)).map((r) => r.copy_id);
+        if (ids.length) lastBusy = Date.now();
         await syncServing(ids);
         if (Date.now() - swept > 15 * 60e3) { swept = Date.now(); await sweepCaptures().catch((e) => log('capture sweep failed', e.message)); }
       } catch (e) { log('upkeep error', e.message); }
