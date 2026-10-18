@@ -4,14 +4,16 @@
 import sys, os, re, html, glob, subprocess
 site = sys.argv[1]
 text = set()
-for f in ('desktop.html', 'mobile.html'):
-    h = open(os.path.join(site, f), encoding='utf8').read()
+# Text of every page of the copy, so a shared font keeps every character any page needs.
+htmls = sorted(glob.glob(os.path.join(site, '**', '*.html'), recursive=True))
+for f in htmls:
+    h = open(f, encoding='utf8').read()
     h = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', h, flags=re.S)
     body = html.unescape(re.sub(r'<[^>]+>', ' ', h))
     attrs = ' '.join(html.unescape(v) for v in re.findall(r'(?:alt|placeholder|value|aria-label|title)="([^"]*)"', h))
     text.update(body + attrs)
 # CSS generated content, e.g. content: "→"
-for css in glob.glob(os.path.join(site, 'a', '*.css')) + [os.path.join(site, 'desktop.html'), os.path.join(site, 'mobile.html')]:
+for css in glob.glob(os.path.join(site, 'a', '*.css')) + htmls:
     for m in re.findall(r'content:\s*"([^"]*)"', open(css, encoding='utf8', errors='ignore').read()):
         text.update(re.sub(r'\\([0-9a-fA-F]{1,6})\s?', lambda e: chr(int(e.group(1), 16)), m).replace('\\', ''))
 text.update(chr(c) for c in range(0x20, 0x7f))

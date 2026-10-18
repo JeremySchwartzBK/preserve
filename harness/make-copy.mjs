@@ -46,29 +46,60 @@ async function step(name, fn) {
   catch (e) { job.steps.push({ name, s: Math.round((Date.now() - t0) / 1000), error: String(e.message).slice(0, 500) }); throw e; }
 }
 
-let verdict;
-try {
-  // 1. Is this a page we can copy at all? (v1: Squarespace only)
+// The copy is a set of pages (design A5). Each page is captured, built and exported on its own (pageTask, which could
+// run in parallel); the finishing steps then run once over all of them (finish). Today a copy is one page, the
+// submitted one, so this is the same steps in the same order as before.
+const pages = [{ path: '', url, siteDir, stage }];
+job.pages = pages.map((p) => ({ path: p.path, url: p.url }));
+
+// 1. Is this a page we can copy at all? (v1: Squarespace only) A reason not to is returned as a failed verdict.
+async function checkUrl(p) {
   const pre = await step('check-url', async () => {
-    const r = await fetch(url, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(30000) });
+    const r = await fetch(p.url, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(30000) });
     const html = await r.text();
     return { status: r.status, finalUrl: r.url, squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html), passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
   });
-  job.preflight = pre;
-  if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) {
-    verdict = { result: 'fail', reasons: [{ code: pre.status >= 400 ? 'page-unreachable' : pre.passwordPage ? 'password-protected' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
-  } else {
-    // 2-3. Capture the live page at phone and desktop width, build the script-free fast copy.
-    await step('capture-and-build', () => run('node', ['capbuild.mjs', id, url, WORK], 20 * 60e3));
-    // 4. Folder of plain files for a static host.
-    fs.rmSync(stage, { recursive: true, force: true });
-    const exp = await step('export', async () => { const o = await run('node', ['export-static.mjs', siteDir, id, path.dirname(stage)], 15 * 60e3); const r = JSON.parse(o.slice(o.indexOf('{'))); fs.writeFileSync(path.join(siteDir, 'export-report.json'), JSON.stringify(r, null, 1)); return r; });
-    // 5. Shrink fonts to the characters the copy uses; strip Squarespace leftovers, hide from search, replace contact details.
-    await step('subset-fonts', () => run('python3', ['subset-fonts.py', stage], 10 * 60e3));
-    const scrub = await step('scrub', () => run('python3', ['scrub.py', stage, url], 5 * 60e3));
-    fs.writeFileSync(path.join(siteDir, 'scrub-output.txt'), scrub);
-    // 6. Quality check: pass, ship with a note, or fail with the "can't process this site yet" message.
-    verdict = await step('quality-check', () => runGate({ id, url, siteDir, copyDir: stage, exportReport: exp, scrubOutput: scrub }));
+  if (p.path === '') job.preflight = pre;
+  if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.status >= 400 ? 'page-unreachable' : pre.passwordPage ? 'password-protected' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
+  return null;
+}
+
+// 2-4. One page: capture the live page at phone and desktop width, build the script-free fast copy, export it as plain
+// files for a static host.
+async function pageTask(p) {
+  await step('capture-and-build', () => run('node', ['capbuild.mjs', path.basename(p.siteDir), p.url, WORK], 20 * 60e3));
+  fs.rmSync(p.stage, { recursive: true, force: true });
+  p.exportReport = await step('export', async () => { const o = await run('node', ['export-static.mjs', p.siteDir, path.basename(p.stage), path.dirname(p.stage)], 15 * 60e3); const r = JSON.parse(o.slice(o.indexOf('{'))); fs.writeFileSync(path.join(p.siteDir, 'export-report.json'), JSON.stringify(r, null, 1)); return r; });
+}
+
+// 5-6. Once per copy: links between pages, shrink fonts to the characters any page uses, strip Squarespace leftovers,
+// hide from search, replace contact details; then the quality check of each page (pass, ship with a note, or fail).
+async function finish() {
+  if (pages.length > 1) await step('link-pages', () => run('node', ['link-pages.mjs', writePagesFile()], 5 * 60e3));
+  for (const p of pages) {
+    await step('subset-fonts', () => run('python3', ['subset-fonts.py', p.stage], 10 * 60e3));
+    p.scrub = await step('scrub', () => run('python3', ['scrub.py', p.stage, p.url], 5 * 60e3));
+    fs.writeFileSync(path.join(p.siteDir, 'scrub-output.txt'), p.scrub);
+  }
+  const verdicts = [];
+  for (const p of pages) verdicts.push(p.verdict = await step('quality-check', () => runGate({ id: path.basename(p.stage), url: p.url, siteDir: p.siteDir, copyDir: p.stage, exportReport: p.exportReport, scrubOutput: p.scrub })));
+  return mergeVerdicts(verdicts);
+}
+const writePagesFile = () => { const f = path.join(WORK, `${id}.pages.json`); fs.writeFileSync(f, JSON.stringify(pages.map((p) => ({ path: p.path, source_url: p.url, dir: p.stage })))); return f; };
+// The copy's verdict is its worst page's; findings keep which page they're on once there is more than one.
+function mergeVerdicts(vs) {
+  if (vs.length === 1) return vs[0];
+  const order = ['pass', 'ship-with-note', 'fail'];
+  const tag = (list, i) => (list || []).map((x) => ({ ...x, page: pages[i].path }));
+  return { result: vs.map((v) => v.result).sort((a, b) => order.indexOf(b) - order.indexOf(a))[0], reasons: vs.flatMap((v, i) => tag(v.reasons, i)), notes: vs.flatMap((v, i) => tag(v.notes, i)), warnings: vs.flatMap((v, i) => tag(v.warnings, i)), pages: vs.map((v, i) => ({ path: pages[i].path, result: v.result, info: v.info })) };
+}
+
+let verdict;
+try {
+  for (const p of pages) { verdict = await checkUrl(p); if (verdict) break; }
+  if (!verdict) {
+    for (const p of pages) await pageTask(p);
+    verdict = await finish();
   }
 } catch (e) {
   verdict = { result: 'fail', reasons: [{ code: 'job-error', detail: String(e.message).slice(0, 500) }], notes: [], warnings: [] };

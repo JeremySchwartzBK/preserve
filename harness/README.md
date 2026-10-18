@@ -139,6 +139,12 @@ the copy, sees the findings and may keep it, per Jeremy 2026-10-15) or `failed` 
 Squarespace, unreachable, job error). Every check failure appends a line to `<work>/gaps.jsonl`. Exit code 0 ready,
 2 needs-review, 1 failed. About 2-4 minutes per site.
 
+The job is shaped around pages (2026-10-18): each page gets a page task (capture, build, export) and the copy then gets
+one finishing pass (`link-pages.mjs` when there is more than one page, fonts and scrub over every page's HTML, a quality
+check per page, the worst page decides the verdict). A copy is still one page, so the steps run exactly as before.
+`link-pages.mjs` turns links to other captured pages into relative copy links marked `data-pv-internal`, which the
+replica note lets through; `node test-link-pages.mjs` checks it.
+
 `gate.mjs` (quality check): pass / ship-with-note / fail, following the rules at the top of known-limitations.md.
 Fails on: Squarespace or Google addresses left in the files, unhandled addresses (#17), outside requests, broken
 images, blocks that never appear, overlays left, phone menu or dropdown not opening, links that navigate instead of

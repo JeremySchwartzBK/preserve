@@ -14,5 +14,8 @@ jobs:
       - name: Stored captures
         working-directory: platform
         run: node test-captures.mjs
+      - name: Links between pages
+        working-directory: harness
+        run: npm ci --ignore-scripts && node test-link-pages.mjs
       - name: Scripts parse
         run: for f in platform/*.mjs platform/worker/*.mjs harness/*.mjs app/*.js; do node --check "$f" || exit 1; done

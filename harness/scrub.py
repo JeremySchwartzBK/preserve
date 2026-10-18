@@ -13,7 +13,8 @@ URL = re.compile(r'url\(\s*([\'"]?)([^\'")]*)\1\s*\)', re.I)
 bad = lambda u: bool(SQ.search(u)) or u.startswith('http') or u.startswith('//')
 
 css_files = glob.glob(os.path.join(site, 'a', '*.css'))
-htmls = [os.path.join(site, f) for f in ('desktop.html', 'mobile.html')]
+# Every page of the copy, at any depth (one page today: desktop.html and mobile.html).
+htmls = sorted(glob.glob(os.path.join(site, '**', '*.html'), recursive=True))
 read = lambda f: open(f, encoding='utf8', errors='ignore').read()
 # Families the page actually refers to (anywhere outside @font-face rules, including CSS variables and inline styles).
 usage = ' '.join(FACE.sub(' ', read(f)) for f in css_files + htmls).lower()
