@@ -16,7 +16,7 @@ export function cloudflareStore({ account, bucket, kvNamespace, token = process.
     for (let i = 0; ; i++) {
       let r, err;
       try { r = await fetch(base + p, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers || {}) } }); } catch (e) { err = e; }
-      if (r?.ok) return;
+      if (r?.ok) return r;
       const transient = err || r.status === 429 || r.status >= 500;
       const msg = err ? String(err.message) : `${r.status} ${(await r.text()).slice(0, 200)}`;
       if (!transient || i >= 5) throw new Error(`${init.method} ${p}: ${msg}`);
@@ -25,6 +25,7 @@ export function cloudflareStore({ account, bucket, kvNamespace, token = process.
   };
   return {
     put: (key, body, type) => call(`/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`, { method: 'PUT', body, headers: { 'content-type': type } }),
+    get: async (key) => Buffer.from(await (await call(`/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`, { method: 'GET' })).arrayBuffer()),
     del: (key) => call(`/r2/buckets/${bucket}/objects/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     // Lookup records live in R2 (lookup/<key>.json): KV's free tier allows only 1,000 writes a day.
     kvPut: (key, value) => call(`/r2/buckets/${bucket}/objects/${encodeURIComponent(lookupKey(key))}`, { method: 'PUT', body: JSON.stringify(value), headers: { 'content-type': 'application/json' } }),
@@ -35,6 +36,7 @@ export function cloudflareStore({ account, bucket, kvNamespace, token = process.
 export function bindingStore({ bucket, kv }) {
   return {
     put: (key, body, type) => bucket.put(key, body, { httpMetadata: { contentType: type } }),
+    get: async (key) => Buffer.from(await (await bucket.get(key)).arrayBuffer()),
     del: (key) => bucket.delete(key),
     kvPut: (key, value) => bucket.put(lookupKey(key), JSON.stringify(value), { httpMetadata: { contentType: 'application/json' } }),
     kvDel: (key) => bucket.delete(lookupKey(key)),
