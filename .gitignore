@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+.wrangler/
+# Outputs never go in the repo: captures, work folders, finished copies, logs.
+work/
+ready/
+runs/
+*.log
+.env

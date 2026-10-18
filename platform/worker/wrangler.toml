@@ -1,0 +1,16 @@
+name = "preserve-view"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+account_id = "1dcf2dbf05caa4963ed872ff035bc9db"
+
+# Copies are served on their own domain, separate from the app people sign in to (copies run site owners' code).
+# Until a domain is picked this runs on preserve-view.<subdomain>.workers.dev.
+workers_dev = true
+
+[[r2_buckets]]
+binding = "COPIES"
+bucket_name = "preserve-copies"
+
+[[kv_namespaces]]
+binding = "LOOKUP"
+id = "c67307a470e44d529efa87933c42942f"

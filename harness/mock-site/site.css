@@ -1,0 +1,7 @@
+body{margin:0;font-family:Georgia,serif} header{display:flex;justify-content:space-between;padding:20px;background:#fff}
+.hero img{width:100%;display:block} .preFade{opacity:0;transition:opacity .6s} .preFade.fadeIn{opacity:1}
+.header-burger-btn{display:none} @media(max-width:767px){.header-burger-btn{display:block}.nav{display:none}}
+.header-menu{position:fixed;inset:0;background:#fff;opacity:0;visibility:hidden} .header--menu-open .header-menu{opacity:1;visibility:visible}
+.gallery{position:relative;overflow:hidden;height:300px} .gallery img{width:100%;height:300px;object-fit:cover;display:none} .gallery img.active{display:block}
+.sqs-cookie-banner-v2{position:fixed;bottom:0;left:0;right:0;background:#222;color:#fff;padding:30px}
+.unused-rule-xyz{color:red} section{padding:40px;min-height:500px}

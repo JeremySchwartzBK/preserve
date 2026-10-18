@@ -1,0 +1,22 @@
+// Debug: serve a capture and list what a copy loads, slowest/largest first.
+import { startServer } from './server.mjs';
+import { serverVariants } from './build.mjs';
+import { PROFILES, launch, applyThrottle, sleep } from './lib.mjs';
+const [siteDir, variant, prof, port = 8790] = process.argv.slice(2);
+const srv = await startServer(siteDir, +port, serverVariants());
+const b = await launch();
+const ctx = await b.newContext({ ...PROFILES[prof].context });
+await ctx.route((u) => !/^(localhost|127\.0\.0\.1)$/.test(new URL(u).hostname), (r) => r.abort());
+const page = await ctx.newPage();
+await applyThrottle(page, PROFILES[prof]);
+const url = variant === 'opt-server' ? `http://127.0.0.1:${port}/${variant}/` : `http://127.0.0.1:${port}/${variant}/${prof}.html`;
+await page.goto(url, { waitUntil: 'load', timeout: 90000 }).catch(e => console.log('goto', e.message));
+await sleep(4000);
+const r = await page.evaluate(() => performance.getEntriesByType('resource').map(e => ({ n: e.name.replace(location.origin, '').replace(/^.*content\/v1\/[^/]+\//, 'IMG:').slice(0, 160), s: Math.round(e.startTime), d: Math.round(e.responseEnd), kb: Math.round(e.transferSize / 1024), t: e.initiatorType, p: e.renderBlockingStatus })));
+const nav = await page.evaluate(() => JSON.stringify(performance.getEntriesByType('navigation')[0].toJSON(), ['responseEnd','domContentLoadedEventEnd','loadEventEnd','transferSize']));
+console.log(nav);
+r.sort((a, b) => b.kb - a.kb);
+let tot = 0; for (const x of r) tot += x.kb;
+console.log('total', tot, 'KB', r.length);
+for (const x of r.slice(0, 30)) console.log(x.kb + 'KB', x.s + '-' + x.d, x.t, x.p, x.n);
+await b.close(); srv.server.close();

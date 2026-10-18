@@ -1,0 +1,11 @@
+{
+ "name": "preserve-worker",
+ "version": "1.0.0",
+ "scripts": {
+  "test": "node test-local.mjs"
+ },
+ "dependencies": {
+  "miniflare": "4.20260730.0"
+ },
+ "private": true
+}
