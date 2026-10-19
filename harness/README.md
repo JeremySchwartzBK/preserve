@@ -157,9 +157,10 @@ carries a note saying so. Only a face with neither (Google unreachable) is left 
 each family's license (OFL text with its copyright line) as `a/fonts-license-<hash>.txt`, linked from each page's
 `<link rel="license">`. The raw capture is left as captured.
 
-Our own stylesheet (Jeremy 2026-10-19, "a copy is a more robust screenshot"): with `--own-css` (or
-`PRESERVE_OWN_CSS=1`, which the runner passes through) the job runs `own-css.mjs <stage>` after export. It is off by
-default; turning it off is the rollback, and copies made either way stay as they are. For each layout it:
+Our own stylesheet (Jeremy 2026-10-19, "a copy is a more robust screenshot"): the job runs
+`own-css.mjs <stage>` after export. On by default for new copies since Jeremy's go-ahead (2026-10-19); `--no-own-css`
+or `PRESERVE_OWN_CSS=0` (the runner passes its environment through) turns it off, which is the rollback. Copies made
+either way stay as they are. For each layout it:
 - loads the exported page, runs `own-css-engine.js` inside it (the cascade worked out in one pass over every rule:
   conditions, layers, specificity, nesting, shorthands; every `var()` replaced by its value on that element) and
   records the winning declarations of every element at rest;

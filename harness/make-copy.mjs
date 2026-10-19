@@ -7,8 +7,8 @@
 //   --work     capture workspace (default ./work)
 //   --out      where finished copies are written, one folder per copy (default ./ready)
 //   --publish  after a pass or ship-with-note, deploy <out> to this Cloudflare Pages project
-//   --own-css  (or PRESERVE_OWN_CSS=1) replace Squarespace's stylesheets with our own (own-css.mjs). Off by default;
-//              turning it off again is the rollback.
+//   --no-own-css  (or PRESERVE_OWN_CSS=0) keep Squarespace's stylesheets instead of our own (own-css.mjs). Our own is
+//              the default for new copies since Jeremy's go-ahead 2026-10-19; turning it off is the rollback.
 // Exit code: 0 copy ready (pass or ship-with-note), 2 ready but the check found problems (needs-review), 1 couldn't copy.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ if (!url) { console.error('usage: node make-copy.mjs <url> [--id x] [--work dir]
 const id = opt('--id', new URL(url).hostname.replace(/^www\./, '').replace(/\.(squarespace\.com|com|net|org|co|io|nyc|live|studio|design|co\.uk)$/, '').replace(/[^a-z0-9]+/g, '-').slice(0, 40));
 const WORK = path.resolve(opt('--work', 'work'));
 const OUT = path.resolve(opt('--out', 'ready'));
-const OWN_CSS = args.includes('--own-css') || process.env.PRESERVE_OWN_CSS === '1';
+const OWN_CSS = !args.includes('--no-own-css') && process.env.PRESERVE_OWN_CSS !== '0';
 const siteDir = path.join(WORK, id);
 const stage = path.join(WORK, '_stage', id); // export goes here first; moved to OUT only if it passes
 fs.mkdirSync(siteDir, { recursive: true });
