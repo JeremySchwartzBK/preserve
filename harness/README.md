@@ -149,8 +149,11 @@ Fonts from Squarespace's own font library (Jeremy 2026-10-19): copies never reus
 Google Fonts families re-hosted under `file.squarespace-cdn.com/.../fonts/libraries/sqsp/`. `google-fonts.py <siteDir>`
 reads each such file's family, weight, style and subset from the page's @font-face rules (else the file's name table),
 downloads the same face from Google Fonts into `<siteDir>/fonts-google/` and lists it in `fonts-google.json`.
-`server.mjs` runs it on first start if needed and serves those files in place of Squarespace's; a face Google doesn't
-have is not served at all, and the quality check fails it as `font-not-on-google-fonts`. `export-static.mjs` ships
+`server.mjs` runs it on first start if needed and serves those files in place of Squarespace's. A face Google
+doesn't have gets a lookalike from Google Fonts instead (Jeremy 2026-10-19: Inter, Source Serif 4, Roboto Mono or Dancing
+Script by the kind of face, at the nearest weight; a stand-in until the curated lookalike list exists), and the copy
+carries a note saying so. Only a face with neither (Google unreachable) is left out, and the quality check fails it as
+`font-not-on-google-fonts`. `export-static.mjs` ships
 each family's license (OFL text with its copyright line) as `a/fonts-license-<hash>.txt`, linked from each page's
 `<link rel="license">`. The raw capture is left as captured.
 
