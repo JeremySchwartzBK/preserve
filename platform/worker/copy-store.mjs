@@ -62,7 +62,7 @@ export function bindingStore({ bucket, kv }) {
   };
 }
 
-const TYPES = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript', webp: 'image/webp', avif: 'image/avif', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', woff2: 'font/woff2', woff: 'font/woff' };
+const TYPES = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript', webp: 'image/webp', avif: 'image/avif', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', woff2: 'font/woff2', woff: 'font/woff', txt: 'text/plain; charset=utf-8' };
 
 // Upload a finished copy folder (desktop.html, mobile.html, a/*) as a new version. Visitors keep seeing the old
 // version until setCopy() points at the new one.

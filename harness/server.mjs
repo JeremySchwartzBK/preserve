@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import sharp from 'sharp';
+import { execFileSync } from 'node:child_process';
 
 export function rewriteUrls(text, variant, hosts, siteHost) {
   for (const h of hosts) {
@@ -20,6 +21,18 @@ export function rewriteUrls(text, variant, hosts, siteHost) {
     text = text.replace(new RegExp(`https?://${e}/`, 'g'), '/').replace(new RegExp(`https?:\\\\/\\\\/${e}\\\\/`, 'g'), '\\/');
   }
   return text;
+}
+
+// Fonts from Squarespace's font library are served from the Google Fonts originals google-fonts.py fetched, never from
+// Squarespace's files; a face Google doesn't have is not served at all (the quality check flags it).
+const LIBRARY_FONT = /\/fonts\/libraries\/sqsp\//;
+function libraryFonts(siteDir, manifest) {
+  const f = path.join(siteDir, 'fonts-google.json');
+  if (!fs.existsSync(f) && Object.keys(manifest).some((u) => LIBRARY_FONT.test(u))) {
+    execFileSync('python3', [new URL('./google-fonts.py', import.meta.url).pathname, siteDir], { stdio: ['ignore', 'ignore', 'inherit'], timeout: 5 * 60e3 });
+  }
+  const fonts = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')).fonts : {};
+  return (abs) => { const r = fonts[abs.split('?')[0].replace(/^http:/, 'https:')]; return r ? { status: 200, ct: r.ct, file: `../fonts-google/${r.file}`, type: 'font' } : null; };
 }
 
 const IMG_HOSTS = /^(images\.squarespace-cdn\.com|static1\.squarespace\.com)$/;
@@ -41,7 +54,9 @@ export function startServer(siteDir, port, variants) {
   const cacheDir = path.join(siteDir, 'img-cache');
   fs.mkdirSync(cacheDir, { recursive: true });
 
+  const google = libraryFonts(siteDir, manifest);
   const lookup = (abs) => {
+    if (LIBRARY_FONT.test(abs)) return google(abs);
     if (manifest[abs]) return manifest[abs];
     const alt = abs.startsWith('https:') ? 'http:' + abs.slice(6) : 'https:' + abs.slice(5);
     if (manifest[alt]) return manifest[alt];

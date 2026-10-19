@@ -117,6 +117,19 @@ async function embedStills(layout, pageUrl) {
 const stills = [];
 let videoCount = 0;
 
+// Fonts the copy took from Google Fonts (google-fonts.py) ship with their licenses: the OFL asks that its text and each
+// font's copyright line go along with the fonts. One text file beside the assets, linked from each page's head.
+let licenseFile = null;
+const gf = path.join(siteDir, 'fonts-google.json');
+const licenses = fs.existsSync(gf) ? JSON.parse(fs.readFileSync(gf, 'utf8')).licenses || {} : {};
+if (Object.keys(licenses).length) {
+  const text = 'Fonts in this copy, from Google Fonts (https://fonts.google.com), and their licenses.\n\n' +
+    Object.entries(licenses).sort().map(([family, l]) => `${'='.repeat(78)}\n${family}\n${'='.repeat(78)}\n\n${l.text.trim()}\n`).join('\n');
+  const buf = Buffer.from(text);
+  licenseFile = 'fonts-license-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12) + '.txt';
+  fs.writeFileSync(path.join(assetDir, licenseFile), buf);
+}
+
 for (const layout of ['desktop', 'mobile']) {
   const pageUrl = `${base}/${VARIANT}/${layout}.html`;
   const $ = cheerio.load(fs.readFileSync(path.join(siteDir, 'variants', VARIANT, `${layout}.html`), 'utf8'));
@@ -205,10 +218,11 @@ for (const layout of ['desktop', 'mobile']) {
   // Squarespace 7.1 fixed headers turn solid ("shrink") once the page scrolls; its script did that on the live site.
   $('body').append(`<script id="preserve-header">(function(){if(!document.body.classList.contains('tweak-fixed-header'))return;var h=document.querySelector('header.header,#header');if(!h)return;function f(){h.classList.toggle('shrink',scrollY>0)}addEventListener('scroll',f,{passive:true});f()})();</script>`);
   videoCount += videosWired;
+  if (licenseFile) $('head').append(`<link rel="license" href="a/${licenseFile}">`);
   fs.writeFileSync(path.join(outRoot, site, `${layout}.html`), $.html());
 }
 
 const left = [...new Set([...fs.readFileSync(path.join(outRoot, site, 'desktop.html'), 'utf8').matchAll(new RegExp(`/${VARIANT}/x/[^"'\\s)<>]{0,120}`, 'g'))].map((m) => m[0]))];
 srv.server.close();
-console.log(JSON.stringify({ site, videosWired: videoCount, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
+console.log(JSON.stringify({ site, videosWired: videoCount, fontLicense: licenseFile, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
 process.exit(0);
