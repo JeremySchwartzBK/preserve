@@ -157,6 +157,29 @@ carries a note saying so. Only a face with neither (Google unreachable) is left 
 each family's license (OFL text with its copyright line) as `a/fonts-license-<hash>.txt`, linked from each page's
 `<link rel="license">`. The raw capture is left as captured.
 
+Our own stylesheet (Jeremy 2026-10-19, "a copy is a more robust screenshot"): with `--own-css` (or
+`PRESERVE_OWN_CSS=1`, which the runner passes through) the job runs `own-css.mjs <stage>` after export. It is off by
+default; turning it off is the rollback, and copies made either way stay as they are. For each layout it:
+- loads the exported page, runs `own-css-engine.js` inside it (the cascade worked out in one pass over every rule:
+  conditions, layers, specificity, nesting, shorthands; every `var()` replaced by its value on that element) and
+  records the winning declarations of every element at rest;
+- records what changes at each width range the page's breakpoints make within the layout (desktop 768-2560, phone
+  320-767), with reduced motion, and in each state our scripts drive (entrance animations, phone menu and its
+  folders, accordions, nav dropdowns, the shrinking header) and on hover, written as rules on the elements that change;
+- writes it as one `<style id="pv-css">` (elements styled alike share a `z…` class; keyframes still in use renamed
+  `k…`), removes every Squarespace stylesheet, `<style>` and `preserve-critical`, renames `sqs-`/`sqsp-`/`sqsrte-`/
+  `tweak-` classes and `data-sqs-` attributes in the page and its scripts, drops the attributes only Squarespace's
+  scripts read, and deletes the stylesheet and font files nothing uses any more;
+- swaps Squarespace's UI icon font (carousel arrows, close, share) for `icons.py`'s `pv-icons`: our own drawing of each
+  icon, at the same code points, widths and boxes so nothing moves;
+- photographs the page before and after (motion off, every picture loaded and decoded, one pixel per CSS pixel; a
+  second look when they differ) and reports how much differs, at rest and with the phone menu open.
+Typical result: 2.3-2.8 MB of Squarespace CSS becomes 45-110 KB of ours; about 15-70 s per layout. Debug pictures:
+`OC_DEBUG=<dir> node own-css.mjs <stage>`. With the switch on, the quality check also fails `squarespace-styles-left`
+(any of those names, a stylesheet file or link left) and `own-stylesheet-mismatch` (more than 1% of the page or the open
+menu differs, page height changed, a state change not reproduced, or an icon not redrawn). The report is kept as
+`<work>/<id>/own-css-report.json`.
+
 `gate.mjs` (quality check): pass / ship-with-note / fail, following the rules at the top of known-limitations.md.
 Fails on: Squarespace or Google addresses left in the files, unhandled addresses (#17), outside requests, broken
 images, blocks that never appear, overlays left, phone menu or dropdown not opening, links that navigate instead of

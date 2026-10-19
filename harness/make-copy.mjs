@@ -7,6 +7,8 @@
 //   --work     capture workspace (default ./work)
 //   --out      where finished copies are written, one folder per copy (default ./ready)
 //   --publish  after a pass or ship-with-note, deploy <out> to this Cloudflare Pages project
+//   --own-css  (or PRESERVE_OWN_CSS=1) replace Squarespace's stylesheets with our own (own-css.mjs). Off by default;
+//              turning it off again is the rollback.
 // Exit code: 0 copy ready (pass or ship-with-note), 2 ready but the check found problems (needs-review), 1 couldn't copy.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,11 +24,12 @@ if (!url) { console.error('usage: node make-copy.mjs <url> [--id x] [--work dir]
 const id = opt('--id', new URL(url).hostname.replace(/^www\./, '').replace(/\.(squarespace\.com|com|net|org|co|io|nyc|live|studio|design|co\.uk)$/, '').replace(/[^a-z0-9]+/g, '-').slice(0, 40));
 const WORK = path.resolve(opt('--work', 'work'));
 const OUT = path.resolve(opt('--out', 'ready'));
+const OWN_CSS = args.includes('--own-css') || process.env.PRESERVE_OWN_CSS === '1';
 const siteDir = path.join(WORK, id);
 const stage = path.join(WORK, '_stage', id); // export goes here first; moved to OUT only if it passes
 fs.mkdirSync(siteDir, { recursive: true });
 
-const job = { id, url, state: 'working', step: null, steps: [], startedAt: new Date().toISOString() };
+const job = { id, url, state: 'working', step: null, steps: [], startedAt: new Date().toISOString(), ownCss: OWN_CSS };
 const save = () => fs.writeFileSync(path.join(siteDir, 'job.json'), JSON.stringify(job, null, 1));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), id, ...a);
 
@@ -70,6 +73,8 @@ async function pageTask(p) {
   await step('capture-and-build', () => run('node', ['capbuild.mjs', path.basename(p.siteDir), p.url, WORK], 20 * 60e3));
   fs.rmSync(p.stage, { recursive: true, force: true });
   p.exportReport = await step('export', async () => { const o = await run('node', ['export-static.mjs', p.siteDir, path.basename(p.stage), path.dirname(p.stage)], 15 * 60e3); const r = JSON.parse(o.slice(o.indexOf('{'))); fs.writeFileSync(path.join(p.siteDir, 'export-report.json'), JSON.stringify(r, null, 1)); return r; });
+  // Our own stylesheet in place of Squarespace's: what each element displays, no Squarespace code or naming.
+  if (OWN_CSS) p.ownCssReport = await step('own-stylesheet', async () => { const o = await run('node', ['own-css.mjs', p.stage], 20 * 60e3); const r = JSON.parse(o.slice(o.indexOf('{'))); fs.writeFileSync(path.join(p.siteDir, 'own-css-report.json'), JSON.stringify(r, null, 1)); return r; });
 }
 
 // 5-6. Once per copy: links between pages, shrink fonts to the characters any page uses, strip Squarespace leftovers,
@@ -82,7 +87,7 @@ async function finish() {
     fs.writeFileSync(path.join(p.siteDir, 'scrub-output.txt'), p.scrub);
   }
   const verdicts = [];
-  for (const p of pages) verdicts.push(p.verdict = await step('quality-check', () => runGate({ id: path.basename(p.stage), url: p.url, siteDir: p.siteDir, copyDir: p.stage, exportReport: p.exportReport, scrubOutput: p.scrub })));
+  for (const p of pages) verdicts.push(p.verdict = await step('quality-check', () => runGate({ id: path.basename(p.stage), url: p.url, siteDir: p.siteDir, copyDir: p.stage, exportReport: p.exportReport, scrubOutput: p.scrub, ownCssReport: p.ownCssReport })));
   return mergeVerdicts(verdicts);
 }
 const writePagesFile = () => { const f = path.join(WORK, `${id}.pages.json`); fs.writeFileSync(f, JSON.stringify(pages.map((p) => ({ path: p.path, source_url: p.url, dir: p.stage })))); return f; };

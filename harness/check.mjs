@@ -98,7 +98,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   // show the finding as a pin. Keep in step with blk()/idOf() in platform/worker/src/index.js.
   await ctx.addInitScript(() => {
     window.__preserveAnchor = (e, px, py) => {
-      const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
+      const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
       const id = b === document.body ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
       const r = b.getBoundingClientRect(), er = e?.getBoundingClientRect?.() || r;
       const cx = px ?? er.left + er.width / 2, cy = py ?? er.top + er.height / 2;
@@ -133,7 +133,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
     await page.evaluate((y) => scrollTo(0, y), y);
     await sleep(500);
     await page.evaluate(() => {
-      for (const e of document.querySelectorAll('[class*="preFade"],[class*="preScale"],[class*="preSlide"],[class*="preClip"],[data-animation-role],.sqs-block-image,.sqs-block-html,.sqs-block-gallery')) {
+      for (const e of document.querySelectorAll('[class*="preFade"],[class*="preScale"],[class*="preSlide"],[class*="preClip"],[data-animation-role],.sqs-block-image,.sqs-block-html,.sqs-block-gallery,.ps-block-image,.ps-block-html,.ps-block-gallery')) {
         const r = e.getBoundingClientRect();
         if (r.top < innerHeight * 0.8 && r.bottom > innerHeight * 0.2 && r.left < innerWidth && r.right > 0 && r.height > 10 && +getComputedStyle(e).opacity < 0.1) e.setAttribute('data-preserve-was-hidden', '');
       }
@@ -153,7 +153,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   spot('broken-images', await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').slice(0, 3).map((i) => window.__preserveAnchor(i))));
   // Blocks with their page positions, to place picture differences (measured later, after the browser closes).
   out.pageSize = await page.evaluate(() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight }));
-  out.blockRects = await page.evaluate(() => [...document.querySelectorAll('[id^="block-"],.sqs-block,[data-block-id],section[data-section-id],header,footer')].map((b) => { const r = b.getBoundingClientRect(); return { el: b, x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; }).filter((r) => r.w > 10 && r.h > 10).map((r) => { const a = window.__preserveAnchor(r.el.firstElementChild || r.el, r.x - scrollX + 1, r.y - scrollY + 1); return { blockId: a.blockId, label: a.label, x: r.x, y: r.y, w: r.w, h: r.h }; }));
+  out.blockRects = await page.evaluate(() => [...document.querySelectorAll('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id],header,footer')].map((b) => { const r = b.getBoundingClientRect(); return { el: b, x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; }).filter((r) => r.w > 10 && r.h > 10).map((r) => { const a = window.__preserveAnchor(r.el.firstElementChild || r.el, r.x - scrollX + 1, r.y - scrollY + 1); return { blockId: a.blockId, label: a.label, x: r.x, y: r.y, w: r.w, h: r.h }; }));
   out.brokenImages = await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').length);
   out.blankImages = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).length);
   await page.screenshot({ path: `${shotPrefix}-full-${profileName}.png`, fullPage: true }).catch(() => {});
@@ -186,7 +186,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   }
 
   // Galleries / carousels / slideshows: click "next" and see whether the gallery changes.
-  const next = page.locator('.gallery-slideshow-control-btn[data-next], [data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .summary-carousel-pager-next, button[aria-label*="next" i]').filter({ visible: true });
+  const next = page.locator('.gallery-slideshow-control-btn[data-next], [data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .ps-gallery-controls .next, .summary-carousel-pager-next, button[aria-label*="next" i]').filter({ visible: true });
   if (await next.count()) {
     const btn = next.first();
     await btn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {}); await sleep(800);
