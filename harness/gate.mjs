@@ -106,7 +106,10 @@ export function detect(siteDir, exportReport) {
   return found;
 }
 
-export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '' }) {
+// How much of a full-page screenshot may differ after the stylesheet swap (antialiasing, a frame of a slideshow).
+const OWN_CSS_MAX_DIFF = 1;
+
+export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null }) {
   const reasons = [], notes = [], warnings = [], info = {};
   // Each finding keeps where it was seen (spots: block + position, per layout) so the app can show it as a pin.
   let layoutSpots = null, layoutName = null;
@@ -125,6 +128,30 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     for (const m of t.matchAll(/[\w.-]*(squarespace(-cdn)?\.com|sqspcdn\.com|typekit\.net|googleapis\.com|gstatic\.com)/gi)) left.push(`${f}: ${m[0]}`);
   }
   if (left.length) fail('squarespace-addresses-left', [...new Set(left)].slice(0, 5).join('; '));
+  // With our own stylesheet (own-css.mjs): none of Squarespace's stylesheet code or naming is left in the copy, and the
+  // copy looks the same as before the swap, at rest and with the phone menu open.
+  if (ownCssReport) {
+    const names = [];
+    for (const f of fs.readdirSync(copyDir, { recursive: true })) {
+      if (/\.css$/.test(f)) { names.push(`${f}: stylesheet file`); continue; }
+      if (!/\.(html|js|svg)$/.test(f)) continue;
+      const t = fs.readFileSync(path.join(copyDir, f), 'utf8');
+      for (const m of t.matchAll(/(?<![\w-])(sqsp?-[\w-]+|sqsrte-[\w-]+|tweak-[\w-]+|--tweak-[\w-]+|data-definition-name|squarespace-ui-font|preserve-critical)/g)) names.push(`${f}: ${m[1]}`);
+      for (const m of t.matchAll(/<link\b[^>]*rel="?stylesheet[^>]*>/gi)) names.push(`${f}: ${m[0].slice(0, 80)}`);
+    }
+    if (names.length) fail('squarespace-styles-left', [...new Set(names)].slice(0, 6).join('; '));
+    const off = [];
+    for (const [layout, r] of Object.entries(ownCssReport.layouts || {})) {
+      if (r.error) { off.push(`${layout}: ${r.error}`); continue; }
+      if (r.height && r.height[0] !== r.height[1]) off.push(`${layout}: page height ${r.height[0]} -> ${r.height[1]}px`);
+      if (r.diffPct > OWN_CSS_MAX_DIFF) off.push(`${layout}: ${r.diffPct}% of the page looks different`);
+      if (r.menuDiffPct > OWN_CSS_MAX_DIFF) off.push(`${layout}: open menu ${r.menuDiffPct}% different`);
+      for (const [name, st] of Object.entries(r.states || {})) if (st.orphans) off.push(`${layout}: ${st.orphans} ${name} change(s) not reproduced`);
+      if (r.icons?.blank?.length) off.push(`${layout}: icons not redrawn ${r.icons.blank.join(',')}`);
+    }
+    info.ownCss = Object.fromEntries(Object.entries(ownCssReport.layouts || {}).map(([l, r]) => [l, { kb: Math.round((r.cssBytes || 0) / 1024), was: Math.round((r.origCssBytes || 0) / 1024), diffPct: r.diffPct, menuDiffPct: r.menuDiffPct }]));
+    if (off.length) fail('own-stylesheet-mismatch', off.slice(0, 6).join('; '));
+  }
   // Contact details in a shape we can't rewrite (known limitation #17: hold the copy rather than publish them).
   const unhandled = [...scrubOutput.matchAll(/UNHANDLED address \(not rewritten\): (.*)/g)].map((m) => m[1]);
   if (unhandled.length) fail('unhandled-address', unhandled.slice(0, 3).join(' | '), 17);
@@ -182,7 +209,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.ownCss ? { ownCss: info.ownCss } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
