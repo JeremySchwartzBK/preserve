@@ -281,7 +281,10 @@ async function layoutCss(base, stage, layout, report) {
       kfCss += text.replace(/^@(-webkit-)?keyframes\s+\S+/, `@keyframes ${nn}`) + '\n';
       css = css.replace(new RegExp(`(animation(?:-name)?:[^;}]*?)(^|[\\s,:])${name.replace(/[-]/g, '\\-')}(?=[\\s,;}!]|$)`, 'g'), `$1$2${nn}`);
     }
-    css = fontFaces.join('\n') + '\n' + kfCss + css;
+    // Fonts the exported page couldn't load either (a file the capture never got) are left out: same look, no address.
+    const loadable = (f) => [...f.matchAll(/url\(\s*["']?([^"')]+)/g)].some((m) => m[1].startsWith('data:') || (m[1].startsWith(base + '/') && fs.existsSync(path.join(stage, decodeURIComponent(m[1].slice(base.length + 1).split(/[?#]/)[0])))));
+    report.fontFacesDropped = fontFaces.filter((f) => !loadable(f)).length;
+    css = fontFaces.filter(loadable).join('\n') + '\n' + kfCss + css;
     // Addresses: everything the stylesheet points at sits beside the page.
     css = css.split(base + '/').join('');
     css = iconFont(css, stage, report);
@@ -316,7 +319,11 @@ async function layoutCss(base, stage, layout, report) {
     // Comments ("This is Squarespace." and the like) carry nothing the copy needs.
     $('*').contents().add($.root().contents()).filter((_, n) => n.type === 'comment').remove();
     $('head').append(`<style id="pv-css">${css}</style>`);
-    fs.writeFileSync(file, $.html());
+    let out = $.html();
+    // Markup the element walk doesn't reach (template and noscript contents): same renames.
+    out = out.replace(/(\sclass=")([^"]*)"/g, (_, a, c) => `${a}${c.split(/(\s+)/).map((x) => (/\S/.test(x) ? rename(x) : x)).join('')}"`);
+    out = out.replace(/\sdata-sqsp?-/g, (m) => m.replace(/sqsp?-/, 'ps-')).replace(/data-definition-name/g, 'data-component');
+    fs.writeFileSync(file, out);
     return { css };
   } finally {
     await browser.close();
