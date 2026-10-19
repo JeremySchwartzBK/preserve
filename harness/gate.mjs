@@ -128,14 +128,16 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   // Contact details in a shape we can't rewrite (known limitation #17: hold the copy rather than publish them).
   const unhandled = [...scrubOutput.matchAll(/UNHANDLED address \(not rewritten\): (.*)/g)].map((m) => m[1]);
   if (unhandled.length) fail('unhandled-address', unhandled.slice(0, 3).join(' | '), 17);
-  // Squarespace library fonts come from Google Fonts (google-fonts.py); a family Google doesn't have is left out rather
-  // than taken from Squarespace, so its text shows in the next font the site's styles list.
+  // Squarespace library fonts come from Google Fonts (google-fonts.py). A face Google doesn't have gets a lookalike,
+  // which the copy notes; only a face with neither is left out (its text shows in the next font the site's styles list).
   const gfFile = path.join(siteDir, 'fonts-google.json');
   if (fs.existsSync(gfFile)) {
     const gf = JSON.parse(fs.readFileSync(gfFile, 'utf8'));
     const gone = [...new Set((gf.missing || []).map((m) => [m.family || 'unknown font', m.weight, m.style !== 'normal' && m.style, '(' + m.reason + ')'].filter(Boolean).join(' ')))];
     if (gone.length) fail('font-not-on-google-fonts', gone.slice(0, 5).join('; '));
-    const lacking = Object.values(gf.fonts || {}).filter((f) => f.lacks);
+    const swapped = [...new Set(Object.values(gf.fonts || {}).filter((f) => f.lookalike_for).map((f) => f.lookalike_for))];
+    if (swapped.length) notes.push({ limitation: null, text: `We used a lookalike for ${swapped.length === 1 ? 'one font' : `${swapped.length} fonts`} we couldn’t get (${swapped.join(', ')}).`, detail: Object.values(gf.fonts).filter((f) => f.lookalike_for).map((f) => `${f.lookalike_for} -> ${f.family} ${f.weight} ${f.style}`).join('; ') });
+    const lacking = Object.values(gf.fonts || {}).filter((f) => f.lacks && !f.lookalike_for);
     if (lacking.length) warnings.push(`Google Fonts versions lack characters Squarespace's had: ${lacking.map((f) => `${f.family} ${f.weight} ${f.subset} (${f.lacks})`).join(', ')}`);
   }
   if (exportReport?.misses?.length) warnings.push(`export: ${exportReport.misses.length} files the copy server didn't have, e.g. ${exportReport.misses.slice(0, 3).join(', ')}`);
