@@ -129,7 +129,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
   if (left.length) fail('squarespace-addresses-left', [...new Set(left)].slice(0, 5).join('; '));
   // With our own stylesheet (own-css.mjs): none of Squarespace's stylesheet code or naming is left in the copy, and the
-  // copy looks the same as before the swap, at rest and with the phone menu open.
+  // copy looks the same as before the swap, at rest, with the phone menu open and at other widths the layout serves.
   if (ownCssReport) {
     const names = [];
     for (const f of fs.readdirSync(copyDir, { recursive: true })) {
@@ -146,10 +146,11 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (r.height && r.height[0] !== r.height[1]) off.push(`${layout}: page height ${r.height[0]} -> ${r.height[1]}px`);
       if (r.diffPct > OWN_CSS_MAX_DIFF) off.push(`${layout}: ${r.diffPct}% of the page looks different`);
       if (r.menuDiffPct > OWN_CSS_MAX_DIFF) off.push(`${layout}: open menu ${r.menuDiffPct}% different`);
+      for (const [w, d] of Object.entries(r.widthDiffPct || {})) if (d > OWN_CSS_MAX_DIFF) off.push(`${layout} at ${w}px wide: ${d}% different`);
       for (const [name, st] of Object.entries(r.states || {})) if (st.orphans) off.push(`${layout}: ${st.orphans} ${name} change(s) not reproduced`);
       if (r.icons?.blank?.length) off.push(`${layout}: icons not redrawn ${r.icons.blank.join(',')}`);
     }
-    info.ownCss = Object.fromEntries(Object.entries(ownCssReport.layouts || {}).map(([l, r]) => [l, { kb: Math.round((r.cssBytes || 0) / 1024), was: Math.round((r.origCssBytes || 0) / 1024), diffPct: r.diffPct, menuDiffPct: r.menuDiffPct }]));
+    info.ownCss = Object.fromEntries(Object.entries(ownCssReport.layouts || {}).map(([l, r]) => [l, { kb: Math.round((r.cssBytes || 0) / 1024), was: Math.round((r.origCssBytes || 0) / 1024), diffPct: r.diffPct, menuDiffPct: r.menuDiffPct, widthDiffPct: r.widthDiffPct, formulas: r.formulas, motionsKept: r.motions?.kept }]));
     if (off.length) fail('own-stylesheet-mismatch', off.slice(0, 6).join('; '));
   }
   // Contact details in a shape we can't rewrite (known limitation #17: hold the copy rather than publish them).

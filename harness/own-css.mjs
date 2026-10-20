@@ -20,6 +20,7 @@ import * as cheerio from 'cheerio';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import { launch, PROFILES, sleep } from './lib.mjs';
+import { mathForm, ownMotions } from './own-forms.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +37,14 @@ const renameText = (t) => t.replace(/data-sqsp?-/g, 'data-ps-').replace(/(^|[^\w
 // Attribute changes our scripts make that are motion, not state.
 const IGNORE_ATTR = new Set(['style', 'startoffset', 'stroke-dashoffset', 'data-pz', 'data-pzh', 'tabindex', 'data-is-item-animating']);
 
-const ser = (d) => d.map(([k, v, im]) => `${k}:${v}${im ? '!important' : ''}`).join(';');
+// Our own form for formulas and animations (own-forms.mjs), on unless PRESERVE_OWN_FORMS=0. Off: Squarespace's
+// formulas and @keyframes are carried over as written (renamed), as before 2026-10-20.
+const OWN_FORMS = process.env.PRESERVE_OWN_FORMS !== '0';
+const MATH = {};
+const val = (k, v) => (OWN_FORMS ? mathForm(k, v, MATH) : v);
+const ser = (d) => d.map(([k, v, im]) => { const w = val(k, v); return w === null ? null : `${k}:${w}${im ? '!important' : ''}`; }).filter(Boolean).join(';');
+// A style attribute with its formulas in our own form.
+const serStyle = (t) => t.split(';').map((x) => { const i = x.indexOf(':'); if (i < 0) return x; const w = val(x.slice(0, i).trim().toLowerCase(), x.slice(i + 1).trim()); return w === null ? null : `${x.slice(0, i).trim()}:${w}`; }).filter((x) => x !== null && x.trim()).join(';');
 const esc = (s) => s.replace(/([^\w-])/g, '\\$1');
 
 function serve(root) {
@@ -80,6 +88,7 @@ function diffAll(rest, now, only) {
 }
 
 async function layoutCss(base, stage, layout, report) {
+  for (const k in MATH) delete MATH[k];
   const file = path.join(stage, `${layout}.html`);
   const src = fs.readFileSync(file, 'utf8');
   const $m = cheerio.load(src);
@@ -279,9 +288,17 @@ async function layoutCss(base, stage, layout, report) {
     const used = [...new Set([...css.matchAll(/animation(?:-name)?:([^;}]*)/g)].flatMap((m) => m[1].split(/[\s,]+/)).filter((x) => /^[a-zA-Z_][\w-]*$/.test(x)))];
     const kf = await page.evaluate((u) => window.__oc.keyframes(u), used);
     let kfCss = '', kn = 0;
-    for (const [name, text] of Object.entries(kf)) {
-      const nn = 'k' + (kn++).toString(36);
-      kfCss += text.replace(/^@(-webkit-)?keyframes\s+\S+/, `@keyframes ${nn}`) + '\n';
+    const nextName = () => 'k' + (kn++).toString(36);
+    let names;
+    if (OWN_FORMS) {
+      // Written from measurements (own-forms.mjs); one we can't write keeps the original, renamed.
+      const m = await ownMotions(page, kf, nextName);
+      kfCss = m.css; names = m.rename; report.motions = m.report;
+    } else {
+      names = {};
+      for (const [name, text] of Object.entries(kf)) { names[name] = nextName(); kfCss += text.replace(/^@(-webkit-)?keyframes\s+\S+/, `@keyframes ${names[name]}`) + '\n'; }
+    }
+    for (const [name, nn] of Object.entries(names)) {
       css = css.replace(new RegExp(`(animation(?:-name)?:[^;}]*?)(^|[\\s,:])${name.replace(/[-]/g, '\\-')}(?=[\\s,;}!]|$)`, 'g'), `$1$2${nn}`);
     }
     // Fonts the exported page couldn't load either (a file the capture never got) are left out: same look, no address.
@@ -293,6 +310,7 @@ async function layoutCss(base, stage, layout, report) {
     css = iconFont(css, stage, report);
     css = renameText(css);
     report.cssBytes = Buffer.byteLength(css);
+    if (OWN_FORMS) report.formulas = { ...MATH };
     report.classes = sig.size;
     report.seconds = +((Date.now() - t0) / 1000).toFixed(1);
 
@@ -313,6 +331,7 @@ async function layoutCss(base, stage, layout, report) {
       if (unique.has(i)) cls.push('u' + i);
       if (cls.length) e.attr('class', cls.join(' ')); else e.removeAttr('class');
       if (inline[i] !== undefined) e.attr('style', inline[i]);
+      if (OWN_FORMS && /(calc|min|max|clamp)\(/i.test(e.attr('style') || '')) e.attr('style', serStyle(e.attr('style')));
       for (const a of Object.keys(el.attribs)) {
         if (DROP_ATTR.test(a) && !scriptText.includes(a)) e.removeAttr(a);
         else if (/^data-sqsp?-/.test(a)) { const v = el.attribs[a]; e.removeAttr(a); e.attr(renameText(a), v); }
@@ -381,11 +400,22 @@ async function shots(base, layout, name) {
     // A full-page photo can itself make images reload; take it until two in a row agree.
     let shot = await page.screenshot({ fullPage: true });
     for (let k = 0; k < 3; k++) { await ready(); await sleep(500 + 500 * k); const again = await page.screenshot({ fullPage: true }); if (again.equals(shot)) break; shot = again; }
-    const out = { rest: shot, height: await page.evaluate(() => document.documentElement.scrollHeight) };
+    const out = { rest: shot, height: await page.evaluate(() => document.documentElement.scrollHeight), widths: {} };
+    // Other window sizes the layout serves (a resized window, a narrower embed): the copy has to hold up there too.
+    const { width: W0, height: H0 } = PROFILES[layout].context.viewport;
+    for (const w of EXTRA_WIDTHS[layout]) {
+      await page.setViewportSize({ width: w, height: H0 }); await sleep(400);
+      await ready(); await sleep(300);
+      let s = await page.screenshot({ fullPage: true });
+      for (let k = 0; k < 2; k++) { await ready(); await sleep(500); const again = await page.screenshot({ fullPage: true }); if (again.equals(s)) break; s = again; }
+      out.widths[w] = s;
+    }
+    await page.setViewportSize({ width: W0, height: H0 }); await sleep(400);
     if (await page.evaluate(() => { const b = [...document.querySelectorAll('.header-burger-btn')].find((x) => x.getBoundingClientRect().width > 0); if (b) b.click(); return !!b; })) { await sleep(800); out.menu = await page.screenshot(); }
     return out;
   } finally { await browser.close(); }
 }
+const EXTRA_WIDTHS = { desktop: [1024, 1280, 1920], mobile: [360, 430] };
 function pctDiff(a, b) {
   const A = PNG.sync.read(a), B = PNG.sync.read(b);
   const w = Math.min(A.width, B.width), h = Math.min(A.height, B.height);
@@ -407,17 +437,22 @@ export async function ownCss(stage) {
         let before = await shots(base, layout, `.orig-${layout}.html`);
         await layoutCss(base, stage, layout, r);
         let after = await shots(base, layout, `${layout}.html`);
-        r.height = [before.height, after.height];
-        r.diffPct = pctDiff(before.rest, after.rest);
+        // Worst difference of a pair of photo sets: at rest, menu open, and at each extra width.
+        const worst = (b, a) => Math.max(pctDiff(b.rest, a.rest), b.menu && a.menu ? pctDiff(b.menu, a.menu) : 0, ...Object.keys(a.widths).filter((w) => b.widths[w]).map((w) => pctDiff(b.widths[w], a.widths[w])));
+        let bad = worst(before, after);
         // A busy machine sometimes photographs a page before every image is painted: look again before calling it different.
-        for (let k = 0; k < 2 && (r.diffPct > 1 || (before.menu && after.menu && pctDiff(before.menu, after.menu) > 1)); k++) {
+        for (let k = 0; k < 2 && bad > 1; k++) {
           const b2 = await shots(base, layout, `.orig-${layout}.html`), a2 = await shots(base, layout, `${layout}.html`);
-          const d2 = pctDiff(b2.rest, a2.rest);
-          if (d2 <= r.diffPct) { before = b2; after = a2; r.diffPct = d2; r.height = [b2.height, a2.height]; }
+          const d2 = worst(b2, a2);
+          if (d2 <= bad) { before = b2; after = a2; bad = d2; }
           r.looks = (r.looks || 1) + 1;
         }
-        if (process.env.OC_DEBUG) for (const [k, v] of [['before', before], ['after', after]]) { fs.writeFileSync(path.join(process.env.OC_DEBUG, `${layout}-${k}.png`), v.rest); if (v.menu) fs.writeFileSync(path.join(process.env.OC_DEBUG, `${layout}-${k}-menu.png`), v.menu); }
+        r.height = [before.height, after.height];
+        r.diffPct = pctDiff(before.rest, after.rest);
+        if (process.env.OC_DEBUG) for (const [k, v] of [['before', before], ['after', after]]) { fs.writeFileSync(path.join(process.env.OC_DEBUG, `${layout}-${k}.png`), v.rest); if (v.menu) fs.writeFileSync(path.join(process.env.OC_DEBUG, `${layout}-${k}-menu.png`), v.menu); for (const w in v.widths) fs.writeFileSync(path.join(process.env.OC_DEBUG, `${layout}-${w}-${k}.png`), v.widths[w]); }
         if (before.menu && after.menu) r.menuDiffPct = pctDiff(before.menu, after.menu);
+        r.widthDiffPct = {};
+        for (const w in after.widths) if (before.widths[w]) r.widthDiffPct[w] = pctDiff(before.widths[w], after.widths[w]);
       } catch (e) {
         // This layout keeps Squarespace's stylesheets as exported; the quality check reports it.
         fs.copyFileSync(orig, path.join(stage, `${layout}.html`));
