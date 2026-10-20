@@ -173,12 +173,20 @@ either way stay as they are. For each layout it:
   scripts read, and deletes the stylesheet and font files nothing uses any more;
 - swaps Squarespace's UI icon font (carousel arrows, close, share) for `icons.py`'s `pv-icons`: our own drawing of each
   icon, at the same code points, widths and boxes so nothing moves;
+- writes formulas and animations in our own form (`own-forms.mjs`, Jeremy 2026-10-20; `PRESERVE_OWN_FORMS=0` turns
+  just this part off, which is its rollback): every `calc`/`min`/`max`/`clamp` value is worked out and written as a
+  straight line in the units it depends on (`calc(100vw - 2.6em)`, `min(2.16vw + 1rem, …)`), plain values where it comes
+  out constant, and leftovers from unset variables dropped. Each `@keyframes` in use is played on two test boxes,
+  measured at every keyframe and between them, and rewritten from the measurements (move by px or % of the box, turn,
+  scale, fade); ours is played back and must land on the same values all along, otherwise the original stays (renamed)
+  and the report lists it under `motions.kept`;
 - photographs the page before and after (motion off, every picture loaded and decoded, one pixel per CSS pixel; a
-  second look when they differ) and reports how much differs, at rest and with the phone menu open.
+  second look when they differ) and reports how much differs, at rest, with the phone menu open, and at other widths
+  the layout serves (desktop 1024, 1280, 1920; phone 360, 430).
 Typical result: 2.3-2.8 MB of Squarespace CSS becomes 45-110 KB of ours; about 15-70 s per layout. Debug pictures:
 `OC_DEBUG=<dir> node own-css.mjs <stage>`. With the switch on, the quality check also fails `squarespace-styles-left`
-(any of those names, a stylesheet file or link left) and `own-stylesheet-mismatch` (more than 1% of the page or the open
-menu differs, page height changed, a state change not reproduced, or an icon not redrawn). The report is kept as
+(any of those names, a stylesheet file or link left) and `own-stylesheet-mismatch` (more than 1% of the page, the open menu
+or the page at another width differs, page height changed, a state change not reproduced, or an icon not redrawn). The report is kept as
 `<work>/<id>/own-css-report.json`.
 
 `gate.mjs` (quality check): pass / ship-with-note / fail, following the rules at the top of known-limitations.md.

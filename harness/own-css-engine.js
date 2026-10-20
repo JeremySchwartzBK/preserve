@@ -129,7 +129,7 @@
 
   function resolveVars(el, pseudo, v) {
     let cs = null;
-    for (let g = 0; g < 20 && v.includes('var('); g++) {
+    for (let g = 0; g < 500 && v.includes('var('); g++) {
       v = v.replace(/var\(\s*(--[\w-]+)\s*(?:,((?:[^()]|\((?:[^()]|\([^()]*\))*\))*))?\)/, (_, n, fb) => {
         cs = cs || getComputedStyle(el, pseudo || null);
         const x = cs.getPropertyValue(n).trim();
@@ -224,6 +224,6 @@
 
   window.__oc = { collect, capture, keyframes, hoverTargets, captureHover, fontFaces: () => [...new Set(FONTFACES)], inlineVars,
     // Breakpoints (px) any width media condition in the page's stylesheets uses.
-    breakpoints: () => { if (!RULES) collect(); const s = new Set(); const add = (t) => { for (const m of t.matchAll(/(min|max)-width:\s*([\d.]+)px/g)) s.add(m[1] === 'min' ? +m[2] : +m[2] + 1); };
+    breakpoints: () => { if (!RULES) collect(); const s = new Set(); const add = (t) => { for (const m of t.matchAll(/(min|max)-width:\s*([\d.]+)px/g)) s.add(m[1] === 'min' ? Math.ceil(+m[2]) : Math.floor(+m[2]) + 1); };
       for (const r of RULES) for (const [, v] of r.conds) add(v); for (const k of KEYFRAMES) for (const [, v] of k.conds) add(v); return [...s].sort((a, b) => a - b); } };
 })();
