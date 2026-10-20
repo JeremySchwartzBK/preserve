@@ -17,5 +17,8 @@ jobs:
       - name: Links between pages
         working-directory: harness
         run: npm ci --ignore-scripts && node test-link-pages.mjs
+      - name: Formulas in our own form
+        working-directory: harness
+        run: node test-own-forms.mjs
       - name: Scripts parse
         run: for f in platform/*.mjs platform/worker/*.mjs harness/*.mjs app/*.js; do node --check "$f" || exit 1; done

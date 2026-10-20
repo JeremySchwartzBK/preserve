@@ -237,7 +237,8 @@ export function sampleMotions({ names, sizes, steps, prefix }) {
           let s = stops.find((x) => Math.abs(x.o - o) < 1e-9);
           if (!s) { s = { o, easing: null, props: [] }; stops.push(s); }
           for (const p of props) if (!s.props.includes(p)) s.props.push(p);
-          if (easing) s.easing = easing;
+          // The browser takes a keyframe's easing from the last rule for that offset only, set or not.
+          s.easing = easing;
         }
       }
       stops.sort((a, b) => a.o - b.o);

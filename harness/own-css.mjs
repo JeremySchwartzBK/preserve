@@ -118,7 +118,7 @@ async function layoutCss(base, stage, layout, report) {
     const bps = (await page.evaluate(() => window.__oc.breakpoints())).filter((b) => b > lo && b <= hi);
     const ranges = [];
     let start = lo;
-    for (const b of [...bps, hi + 1]) { if (b - start >= 4 || !ranges.length) ranges.push([start, b - 1]); else ranges[ranges.length - 1][1] = b - 1; start = b; }
+    for (const b of [...bps, hi + 1]) { if (b > start) ranges.push([start, b - 1]); start = Math.max(start, b); }
     const widthRules = [];
     for (const [a, z] of ranges) {
       if (W >= a && W <= z) continue;
