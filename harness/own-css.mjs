@@ -57,7 +57,10 @@ function elements($) {
 }
 
 // What changed between two captures of one element: the declarations to write for the new state.
+// will-change is only a hint to the browser (nothing on screen depends on it), so a state that only flips it is no change.
+const NO_LOOK = new Set(['will-change']);
 function diffDecls(a = [], z = []) {
+  a = a.filter((x) => !NO_LOOK.has(x[0])); z = z.filter((x) => !NO_LOOK.has(x[0]));
   const am = new Map(a.map((x) => [x[0], x])), zm = new Map(z.map((x) => [x[0], x]));
   const out = [];
   for (const [k, x] of zm) { const y = am.get(k); if (!y || y[1] !== x[1] || y[2] !== x[2]) out.push([k, x[1], x[2] || !!(y && y[2])]); }
@@ -163,7 +166,7 @@ async function layoutCss(base, stage, layout, report) {
           if (changed[a]) sel = stateSel(a, changed[a]) + (a === +i ? '' : ` .u${i}`), unique.add(a);
           else { const s = t.sib[k].find((x) => changed[x]); if (s !== undefined) { sel = stateSel(s, changed[s]) + ` ~ .u${a}` + (a === +i ? '' : ` .u${i}`); unique.add(s); unique.add(a); } }
         }
-        if (!sel) { orphan++; continue; }
+        if (!sel) { orphan++; (report.orphanSamples ||= []).length < 6 && report.orphanSamples.push(`${name}: ${i} ${d[i][''] ? ser(d[i]['']).slice(0, 120) : Object.keys(d[i]).join(',')}`); continue; }
         unique.add(+i);
         for (const ps in d[i]) { stateRules.push(`${prefix}${sel}${ps}{${ser(d[i][ps])}}`); n++; }
       }
