@@ -16,6 +16,12 @@ function snapshotDom() {
       if (rules.length > (st.textContent || '').length) st.textContent = rules;
     } catch {}
   }
+  // Swiper slideshows: how the site set them up (fade or slide, speed, autoplay, loop), for our slider script.
+  for (const el of document.querySelectorAll('.swiper, .swiper-container')) {
+    const w = el.swiper; if (!w || !w.params) continue;
+    const p = w.params, ap = p.autoplay && w.autoplay && w.autoplay.running ? p.autoplay.delay || 3000 : 0;
+    el.setAttribute('data-pv-swiper', JSON.stringify({ effect: p.effect, speed: p.speed, loop: !!p.loop, autoplay: ap, autoHeight: !!p.autoHeight, spv: typeof p.slidesPerView === 'number' ? p.slidesPerView : null, gap: typeof p.spaceBetween === 'number' ? p.spaceBetween : null }));
+  }
   // Record live form/input state and the current src chosen from srcset.
   for (const img of document.querySelectorAll('img')) {
     if (img.currentSrc) img.setAttribute('data-preserve-current', img.currentSrc);
