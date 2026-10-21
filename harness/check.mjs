@@ -89,6 +89,8 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const ctx = await browser.newContext({ ...prof.context, ignoreHTTPSErrors: true });
   const external = new Set();
   if (isCopy) await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); if (/^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol)) return r.continue(); external.add(u.hostname); return r.abort(); });
+  // Our slideshow script holds still, showing the slide the capture saw, so the copy compares with the live shots.
+  if (isCopy) await ctx.addInitScript(() => { window.__pvStill = true; });
   const page = await ctx.newPage();
   const errors = [], consoleErrors = [];
   page.on('pageerror', (e) => errors.push(e.message.slice(0, 160)));

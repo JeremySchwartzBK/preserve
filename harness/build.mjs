@@ -111,6 +111,75 @@ if(!t.closest('.header-nav-item--folder'))document.querySelectorAll('.header-nav
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&isOpen()){set(false);var x=btns();for(var i=0;i<x.length;i++)if(x[i].offsetParent){x[i].focus();break}}});
 })();</script>`;
 
+// Slideshows built with Swiper (section sliders from plugins such as Will Myers', carousels in code blocks): the
+// capture froze them at the capture width (each slide "1440px" wide, moved by pixel offsets), so a narrower or wider
+// window showed them shifted, and nothing advanced. This script lays them out again for the window's own width on
+// load and on every resize, and plays them the way the site did: fade or slide, its speed, autoplay delay and loop
+// (read at capture into data-pv-swiper; without it, fade from the class name and no autoplay), arrows and dots.
+// The look of the active slide and dot comes from the classes the capture saw on them, swapped as the active one moves.
+const SLIDER_SCRIPT = `<script id="preserve-slider">(function(){
+var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+function own(c){return /^[zu][0-9a-z]+$/.test(c)&&c[0]==='z'}
+function tpl(list,isA){var a=null,b=null;list.forEach(function(e){if(isA(e)&&!a)a=e;else if(!isA(e)&&!b)b=e});
+var z=function(e){return e?[].filter.call(e.classList,own):[]};return{on:z(a),off:z(b)}}
+function setOn(e,on,t,cls){if(t.on.length&&t.off.length){t.on.concat(t.off).forEach(function(c){e.classList.remove(c)});(on?t.on:t.off).forEach(function(c){e.classList.add(c)})}e.classList.toggle(cls,on)}
+document.querySelectorAll('.swiper.swiper-initialized,.swiper-container-initialized').forEach(function(sw){
+var wr=sw.querySelector('.swiper-wrapper');if(!wr||sw.classList.contains('swiper-vertical'))return;
+var sl=[].filter.call(wr.children,function(e){return e.classList.contains('swiper-slide')});var n=sl.length;if(n<2)return;
+var cfg={};try{cfg=JSON.parse(sw.getAttribute('data-pv-swiper')||'{}')}catch(e){}
+var fade=cfg.effect?cfg.effect==='fade':sw.classList.contains('swiper-fade');
+var W0=sw.clientWidth,w0=sl[0].getBoundingClientRect().width;
+var gap=cfg.gap!=null?cfg.gap:(parseFloat(sl[0].style.marginRight)||0);
+var spv=fade?1:typeof cfg.spv==='number'?cfg.spv:Math.max(1,Math.round((W0+gap)/(w0+gap)));
+var speed=cfg.speed!=null?cfg.speed:400,loop=!!cfg.loop,autoH=cfg.autoHeight||sw.classList.contains('swiper-autoheight');
+var cur=0;sl.forEach(function(e,i){if(e.classList.contains('swiper-slide-active'))cur=i});
+var root=sw.parentElement||sw;
+var dots=[].slice.call(sw.querySelectorAll('.swiper-pagination-bullet'));
+var tS=tpl(sl,function(e){return e.classList.contains('swiper-slide-active')}),tD=tpl(dots,function(e){return e.classList.contains('swiper-pagination-bullet-active')});
+function draw(anim){var W=sw.clientWidth,sw1=(W-gap*(spv-1))/spv,d=anim&&!reduce?speed:0;
+sl.forEach(function(e,i){e.style.width=sw1+'px';e.classList.remove('swiper-slide-next','swiper-slide-prev');
+if(fade){e.style.transform='translate3d('+(-i*sw1)+'px,0px,0px)';e.style.opacity=i===cur?'1':'0';e.style.transitionDuration=d+'ms';e.style.pointerEvents=i===cur?'auto':'none'}
+setOn(e,i===cur,tS,'swiper-slide-active')});
+var nx=sl[(cur+1)%n],pv=sl[(cur+n-1)%n];if(nx)nx.classList.add('swiper-slide-next');if(pv)pv.classList.add('swiper-slide-prev');
+if(!fade){wr.style.transitionDuration=d+'ms';wr.style.transform='translate3d('+(-Math.min(cur,n-spv)*(sw1+gap))+'px,0px,0px)'}
+else{wr.style.transform='translate3d(0px,0px,0px)'}
+if(autoH){var h=sl[cur].scrollHeight;sl[cur].style.height='';h=sl[cur].offsetHeight;if(h)wr.style.height=h+'px';wr.style.transitionDuration=d+'ms'}
+dots.forEach(function(b,i){setOn(b,i===cur%dots.length,tD,'swiper-pagination-bullet-active');if(i===cur%dots.length)b.setAttribute('aria-current','true');else b.removeAttribute('aria-current')})}
+function go(i){var last=Math.max(0,n-spv);cur=loop||cfg.autoplay?((i%(last+1))+(last+1))%(last+1):Math.max(0,Math.min(last,i));draw(true)}
+function find(sel){var e=sw.querySelector(sel);if(e)return e;return root.querySelector(sel)}
+var nb=find('.swiper-button-next'),pb=find('.swiper-button-prev');
+if(nb)nb.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();go(cur+1);restart()},true);
+if(pb)pb.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();go(cur-1);restart()},true);
+dots.forEach(function(b,i){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();go(i);restart()},true)});
+var timer=null;function restart(){if(!cfg.autoplay||reduce||window.__pvStill)return;clearInterval(timer);timer=setInterval(function(){if(!document.hidden)go(cur+1)},cfg.autoplay)}
+var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(function(){draw(false)},60)});
+draw(false);restart();
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(function(){draw(false)});
+addEventListener('load',function(){draw(false)});
+});
+})();</script>`;
+
+// Text highlights drawn as shapes (Squarespace's "marker" highlight): one absolutely placed SVG stroke per line of
+// highlighted text, sized by Squarespace's script for the width it was drawn at. At any other width the text wraps
+// differently, so this script places them again from where the highlighted lines now fall, on load and on resize.
+const SHAPES_SCRIPT = `<script id="preserve-shapes">(function(){
+function lines(el,hr){var out=[];[].forEach.call(el.getClientRects(),function(q){if(q.width<1)return;var l=out[out.length-1];
+if(l&&Math.abs(l.top-(q.top-hr.top))<2){l.right=Math.max(l.right,q.right-hr.left);l.left=Math.min(l.left,q.left-hr.left)}
+else out.push({left:q.left-hr.left,right:q.right-hr.left,top:q.top-hr.top,height:q.height})});return out}
+function place(){var hosts=new Set();document.querySelectorAll('.TextShape-node[data-shape="marker"]').forEach(function(n){hosts.add(n.parentElement)});
+hosts.forEach(function(host){var hr=host.getBoundingClientRect();if(!hr.width)return;
+var spans=host.querySelectorAll('[class*="text-highlight"]');var nodes=[].filter.call(host.children,function(n){return n.classList.contains('TextShape-node')&&n.getAttribute('data-shape')==='marker'});
+var groups=[];nodes.forEach(function(n){if(n.getAttribute('data-index')==='0'||!groups.length)groups.push([]);groups[groups.length-1].push(n)});
+groups.forEach(function(grp,g){if(g>=spans.length)grp.forEach(function(n){n.style.display='none'})});
+[].forEach.call(spans,function(sp,g){var grp=groups[g];if(!grp||!grp.length)return;var fs=parseFloat(getComputedStyle(sp).fontSize)||16,k=fs*0.369;
+var ls=lines(sp,hr);while(grp.length<ls.length){var c=grp[grp.length-1].cloneNode(true);c.setAttribute('data-index',String(grp.length));grp[grp.length-1].after(c);grp.push(c)}
+grp.forEach(function(n,i){var l=ls[i];if(!l){n.style.display='none';return}n.style.display='';var w=Math.max(0,l.right-l.left-2*k),h=l.height;
+n.style.fontSize=fs+'px';n.style.left=(l.left+k)+'px';n.style.top=l.top+'px';n.style.width=w+'px';n.style.height=h+'px';
+var p=n.querySelector('path');if(p){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w))}})})})}
+var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(place,60)});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEventListener('load',place);place();
+})();</script>`;
+
 // Rendered copies come in two layouts, captured at phone and desktop width (Squarespace's breakpoint is 768px).
 // index.html picks one by the width it is given: the browser window when opened as a link, or the frame's own width
 // when embedded in a portfolio page. Each page switches if its width later crosses the breakpoint (rotation, resize).
@@ -153,7 +222,7 @@ function isOwnerScript($, el) {
   return true;
 }
 
-export { MENU_SCRIPT };
+export { MENU_SCRIPT, SLIDER_SCRIPT, SHAPES_SCRIPT };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -203,6 +272,8 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('.preFade,.preSlide,.preScale,.preClip,.preFlex').removeClass('fadeIn slideIn scaleIn clipIn flexIn');
       $('body').append(MOTION_SCRIPT);
       $('body').append(MENU_SCRIPT);
+      $('body').append(SLIDER_SCRIPT);
+      $('body').append(SHAPES_SCRIPT);
     }
     $('body').append(REPLICA_SCRIPT);
     if (outName !== 'index.html') $('body').append(widthScript(outName.replace('.html', '')));

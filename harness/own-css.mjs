@@ -101,6 +101,8 @@ async function layoutCss(base, stage, layout, report) {
   const t0 = Date.now();
   try {
     const ctx = await browser.newContext({ ...PROFILES[layout].context });
+    // Our slideshow script holds still (no autoplay) while states are recorded.
+    await ctx.addInitScript(() => { window.__pvStill = true; });
     const page = await ctx.newPage();
     await page.goto(`${base}/.oc-${layout}.html`, { waitUntil: 'load', timeout: 60000 });
     await page.evaluate(() => document.fonts.ready);

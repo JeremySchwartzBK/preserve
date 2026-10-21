@@ -78,6 +78,21 @@ Behind the cloud agent proxy, Chromium is launched with `HTTPS_PROXY` and a loop
 - `export.mjs`: packs the MP4 into single-file copies.
 - Known limitations live in `/mnt/project-files/known-limitations.md`.
 
+## Sliders and highlight marks at every width (2026-10-21)
+
+Copies used to look right only at the capture widths (1440 desktop, 390 phone); resizing exposed two things sized once by
+Squarespace's script:
+
+- Swiper sliders (Ontario Lacrosse's news slider): `capture.mjs` records each slider's settings into `data-pv-swiper`
+  (effect, speed, loop, autoplay delay, auto height). `build.mjs` adds `preserve-slider`, which sizes slides to the
+  container on load and resize and drives fade/slide, arrows, dots and autoplay itself.
+- Hand-drawn marker highlights (`.TextShape-node[data-shape="marker"]`): `preserve-shapes` re-measures each highlighted
+  phrase's lines and redraws the marks on load, font load and resize. Captured pages can hold a second, stale set of
+  marks per heading; extras are hidden.
+
+Autoplay is paused (`window.__pvStill`) while `own-css.mjs` records states and while `check.mjs` compares, so a moving
+slide never counts as a difference.
+
 ## What each file does
 
 - `lib.mjs`: device/network profiles. Mobile: 390x844 @3x, Slow 4G (150ms RTT, 1.6 Mbps down), 4x CPU slowdown.
