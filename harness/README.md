@@ -86,12 +86,46 @@ Squarespace's script:
 - Swiper sliders (Ontario Lacrosse's news slider): `capture.mjs` records each slider's settings into `data-pv-swiper`
   (effect, speed, loop, autoplay delay, auto height). `build.mjs` adds `preserve-slider`, which sizes slides to the
   container on load and resize and drives fade/slide, arrows, dots and autoplay itself.
-- Hand-drawn marker highlights (`.TextShape-node[data-shape="marker"]`): `preserve-shapes` re-measures each highlighted
-  phrase's lines and redraws the marks on load, font load and resize. Captured pages can hold a second, stale set of
-  marks per heading; extras are hidden.
+- Text highlights drawn as shapes (`.TextShape-node`, every `data-shape`): `preserve-shapes` re-measures each
+  highlighted phrase's lines and places the shapes again on load, font load and resize. A marker is redrawn; a wave is
+  repeated and cut to the line's length; other shapes (underline, scribble, ...) are stretched from their drawn size;
+  shapes that ring a phrase (circle, box) cover the whole phrase. Captured pages can hold a second, stale set of
+  marks per heading; extras are hidden. (Waves and underlines were added 2026-10-22, found by the size check below.)
 
 Autoplay is paused (`window.__pvStill`) while `own-css.mjs` records states and while `check.mjs` compares, so a moving
 slide never counts as a difference.
+
+## Speed fixes and new quality checks (2026-10-22)
+
+Speed (plan: "Slow first screen on two preserves"):
+- Below-the-fold video waits: `export-static.mjs` gives every video `preload="none"` and moves its sources to
+  `data-pv-src`; `preserve-media` attaches them when the video comes within half a screen (posters show meanwhile).
+- First-screen byte budget: each first-screen image is re-encoded to AVIF when that saves 10% or more (WebP fallback),
+  and when the first screen is over 600 KB (desktop) or 300 KB (phone) only its three largest images keep high
+  priority. The JSON report lists `firstScreenBytes` per layout.
+- Dead loaders dropped: owner scripts that inject code or pixels from another host (tag managers, referral widgets,
+  ad pixels) are no longer kept (`isOwnerScript`), since a copy blocks what they load.
+- Phone/desktop switching uses the layout width (`clientWidth`), and the page clips anything past the right edge, so
+  an over-wide element can't zoom a phone out and flip the page between layouts forever. `check.mjs` reports a copy
+  that keeps reloading itself.
+
+Checks added to `gate.mjs` (each can be turned off with an environment variable, for tests):
+- Load time (`loadtime.mjs`, `PRESERVE_LOAD_CHECK=0` to skip): the copy is served like the live host (brotli, ranges,
+  `PRESERVE_HOST_WAIT_MS` per request, default 120) and timed with `measure.mjs`, 3 cold loads per layout. "Ready" is
+  when the first screen's images are in, or when the owner's intro animation starts if there is one: the owner's own
+  intro doesn't count against us (Jeremy, 2026-10-22) and is reported separately, with a warning when it hides the page
+  for over a second. Over 2 s gives the note `slow-first-screen`, never a block. Heavy files loading before the first
+  screen is ready are listed as a warning.
+- Size check (`resize.mjs`, `PRESERVE_RESIZE_CHECK=0` to skip): at one extra width per layout (1024, 360) the copy is
+  compared with the live page at that width (`differs-at-other-widths`, allowing for how much the live page differs
+  from itself), and a copy opened at its capture width then resized is compared with one opened at that width
+  (`breaks-on-resize`). A fixed-size detector lists elements with written-in sizes that kept them although their
+  container changed, and now stick out of it or no longer fill it: a new widget of the "sized once" family shows up
+  here before anyone sees it.
+
+Test corpus: `--reuse-capture` builds from the capture already in `--work`, so the 21-site core set can be rebuilt with
+new code and compared. Weekly re-timing: `.github/workflows/retime.yml` runs `retime.mjs` every Monday against the
+published corpus copies in `corpus.json` and opens an issue when one got slower by 0.3 s or went over 2 s.
 
 ## What each file does
 
@@ -121,6 +155,7 @@ slide never counts as a difference.
 - `atf.mjs`: first-screen pass for optimized variants: inline only the CSS rules that match first-screen (or hidden)
   elements, load full stylesheets without blocking, preload up to 4 fonts, give the hero image eager loading,
   `fetchpriority=high` and a preload.
+- `loadtime.mjs`, `resize.mjs`, `retime.mjs`: the load-time check, size check and weekly re-timing (above).
 - `check.mjs`: on the original and each copy: JS errors, overlays still visible, broken images, elements stuck
   invisible after scrolling (scroll animations that never ran), mobile menu opens, desktop dropdown opens, gallery
   "next" changes the gallery (autoplaying ones report `unknown`), replica notice on link click, outside requests,

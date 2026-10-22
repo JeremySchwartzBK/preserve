@@ -108,11 +108,19 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       return { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
     };
   });
+  let navs = 0;
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) navs++; });
   const spot = (code, list) => { if (list?.length) out.spots[code] = [...(out.spots[code] || []), ...list].slice(0, 3); };
   try {
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   } catch (e) { out.loadError = String(e.message).split('\n')[0]; }
   await sleep(4000);
+  // A page that keeps reloading itself (a copy flipping between its phone and computer layouts) can't be checked.
+  if (isCopy && navs > 1) {
+    out.loadError = `the page keeps reloading itself (${navs} times in 4 seconds; last ${new URL(page.url()).pathname})`;
+    out.externalRequests = [...external]; out.pageErrors = errors.length; out.errorSamples = [];
+    await browser.close(); return out;
+  }
   // Marketing overlays still on screen.
   out.overlaysVisible = await page.evaluate((sels) => {
     const vis = (e) => { const s = getComputedStyle(e), r = e.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.05 && r.width > 0 && r.height > 0; };

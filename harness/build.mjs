@@ -159,23 +159,38 @@ addEventListener('load',function(){draw(false)});
 });
 })();</script>`;
 
-// Text highlights drawn as shapes (Squarespace's "marker" highlight): one absolutely placed SVG stroke per line of
-// highlighted text, sized by Squarespace's script for the width it was drawn at. At any other width the text wraps
-// differently, so this script places them again from where the highlighted lines now fall, on load and on resize.
+// Text highlights drawn as shapes (Squarespace's marker, underline, wave, scribble, circle...): absolutely placed SVG
+// strokes, sized by Squarespace's script for the width it was drawn at. At any other width the text wraps differently,
+// so this script places them again from where the highlighted text now falls, on load and on resize. Every shape is
+// handled: a marker's stroke is redrawn; a wave's pattern is repeated and cut to length; any other shape is stretched
+// from its drawn size. Shapes that ring the whole phrase (circle, box) cover the phrase, the rest go one per line.
 const SHAPES_SCRIPT = `<script id="preserve-shapes">(function(){
+var RING=/circle|oval|ellipse|box|rect|bracket|bubble|cloud/i;
 function lines(el,hr){var out=[];[].forEach.call(el.getClientRects(),function(q){if(q.width<1)return;var l=out[out.length-1];
 if(l&&Math.abs(l.top-(q.top-hr.top))<2){l.right=Math.max(l.right,q.right-hr.left);l.left=Math.min(l.left,q.left-hr.left)}
 else out.push({left:q.left-hr.left,right:q.right-hr.left,top:q.top-hr.top,height:q.height})});return out}
-function place(){var hosts=new Set();document.querySelectorAll('.TextShape-node[data-shape="marker"]').forEach(function(n){hosts.add(n.parentElement)});
+function orig(n){var d=n.dataset;if(!d.pvW){d.pvW=parseFloat(n.style.width)||n.offsetWidth;d.pvH=parseFloat(n.style.height)||n.offsetHeight;var p=n.querySelector('path');if(p)d.pvD=p.getAttribute('d')||''}return{w:+d.pvW,h:+d.pvH,d:d.pvD||''}}
+function draw(n,shape,fs,w,h){var p=n.querySelector('path'),svg=n.querySelector('svg');if(!p||!svg)return;
+if(shape==='marker'){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w));return}
+var o=orig(n);svg.style.width=w+'px';svg.style.height=h+'px';svg.style.overflow='hidden';
+if(/wave|zigzag/i.test(shape)){var sc=h/o.h||1,vw=w/sc,m=/^\\s*(M[^cCsSlLqQ]*)([\\s\\S]*)$/.exec(o.d),d=o.d;if(m&&o.w>0)for(var i=1;i*o.w<vw;i++)d+=' '+m[2];p.setAttribute('d',d);svg.setAttribute('viewBox','0 0 '+vw+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
+else{svg.setAttribute('viewBox','0 0 '+o.w+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
+p.removeAttribute('stroke-dasharray');p.removeAttribute('stroke-dashoffset');p.style.strokeDasharray='none';p.style.strokeDashoffset='0'}
+function place(){var hosts=new Set();document.querySelectorAll('.TextShape-node').forEach(function(n){orig(n);hosts.add(n.parentElement)});
 hosts.forEach(function(host){var hr=host.getBoundingClientRect();if(!hr.width)return;
-var spans=host.querySelectorAll('[class*="text-highlight"]');var nodes=[].filter.call(host.children,function(n){return n.classList.contains('TextShape-node')&&n.getAttribute('data-shape')==='marker'});
+var spans=host.querySelectorAll('[class*="text-highlight"]');var nodes=[].filter.call(host.children,function(n){return n.classList.contains('TextShape-node')});
 var groups=[];nodes.forEach(function(n){if(n.getAttribute('data-index')==='0'||!groups.length)groups.push([]);groups[groups.length-1].push(n)});
 groups.forEach(function(grp,g){if(g>=spans.length)grp.forEach(function(n){n.style.display='none'})});
-[].forEach.call(spans,function(sp,g){var grp=groups[g];if(!grp||!grp.length)return;var fs=parseFloat(getComputedStyle(sp).fontSize)||16,k=fs*0.369;
-var ls=lines(sp,hr);while(grp.length<ls.length){var c=grp[grp.length-1].cloneNode(true);c.setAttribute('data-index',String(grp.length));grp[grp.length-1].after(c);grp.push(c)}
-grp.forEach(function(n,i){var l=ls[i];if(!l){n.style.display='none';return}n.style.display='';var w=Math.max(0,l.right-l.left-2*k),h=l.height;
-n.style.fontSize=fs+'px';n.style.left=(l.left+k)+'px';n.style.top=l.top+'px';n.style.width=w+'px';n.style.height=h+'px';
-var p=n.querySelector('path');if(p){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w))}})})})}
+[].forEach.call(spans,function(sp,g){var grp=groups[g];if(!grp||!grp.length)return;var shape=grp[0].getAttribute('data-shape')||'',fs=parseFloat(getComputedStyle(sp).fontSize)||16;
+var ls=lines(sp,hr);if(!ls.length)return;
+if(RING.test(shape)){var o=orig(grp[0]),L=Math.min.apply(null,ls.map(function(l){return l.left})),R=Math.max.apply(null,ls.map(function(l){return l.right})),T=ls[0].top,B=ls[ls.length-1].top+ls[ls.length-1].height;
+var px=Math.max(0,(o.w-(R-L))/2),py=Math.max(0,(o.h-(B-T))/2);if(ls.length>1||o.w<R-L){px=fs*0.3;py=fs*0.2}
+ls=[{left:L-px,right:R+px,top:T-py,height:B-T+2*py,ring:1}]}
+while(grp.length<ls.length){var c=grp[grp.length-1].cloneNode(true);c.setAttribute('data-index',String(grp.length));grp[grp.length-1].after(c);grp.push(c)}
+var k=shape==='marker'?fs*0.369:-fs*0.08;
+grp.forEach(function(n,i){var l=ls[i];if(!l){n.style.display='none';return}n.style.display='';var o=orig(n);
+var w=l.ring?l.right-l.left:Math.max(0,l.right-l.left-2*k),h=l.height,top=l.top;
+n.style.fontSize=fs+'px';n.style.left=(l.ring?l.left:l.left+k)+'px';n.style.top=top+'px';n.style.width=w+'px';n.style.height=h+'px';draw(n,shape,fs,w,h)})})})}
 var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(place,60)});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEventListener('load',place);place();
 })();</script>`;
@@ -183,12 +198,22 @@ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEven
 // Rendered copies come in two layouts, captured at phone and desktop width (Squarespace's breakpoint is 768px).
 // index.html picks one by the width it is given: the browser window when opened as a link, or the frame's own width
 // when embedded in a portfolio page. Each page switches if its width later crosses the breakpoint (rotation, resize).
+// The width is the layout viewport's (clientWidth), not innerWidth: on a phone, anything wider than the screen makes
+// the browser zoom out and innerWidth grow past the breakpoint, which flipped a phone page to desktop and back
+// forever (Dreamsake, Borrachito, 2026-10-22). A switch back within a few seconds of the last one is also refused.
 const BREAKPOINT = 768;
 const LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<script>location.replace((innerWidth<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
+<script>location.replace(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
 <body><noscript><a href="desktop.html">Open the preview</a></noscript></body></html>`;
 const widthScript = (layout) => `<script id="preserve-width">(function(){var m=${layout === 'mobile' ? 'true' : 'false'},t;
-addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((innerWidth<${BREAKPOINT})!==m)location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
+function w(){return document.documentElement.clientWidth||innerWidth}
+addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((w()<${BREAKPOINT})===m)return;
+var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){}
+if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
+
+// Nothing on a page reaches past the screen's right edge: the live site clips it (with its own script or styles),
+// and on a phone a copy that didn't would let the page zoom out to show it.
+const CLIP_CSS = '<style id="preserve-clip">html,body{overflow-x:clip}</style>';
 
 const OVERLAY_CSS = `<style id="preserve-overlays">${OVERLAY_SELECTORS.join(',')}{display:none!important}</style>`;
 
@@ -218,11 +243,16 @@ function isOwnerScript($, el) {
   const t = $(el).html() || '';
   if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return false;
   if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return false;
+  // Loaders for outside code (tag managers, referral widgets, ad pixels): they inject a script or image from another
+  // host, which a copy blocks, leaving a failed request on every load. Owner code that only moves things has none.
+  // Tag-manager-injected tags carry an empty id and a charset attribute.
+  if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return false;
+  if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return false;
   if (/(^|[^\w.$])(Y|Static|Squarespace|jQuery|SQS)\s*\.|(^|[^\w.])\$\s*\(|window\.Static|fbq|gtag/.test(t)) return false;
   return true;
 }
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, SHAPES_SCRIPT };
+export { MENU_SCRIPT, SLIDER_SCRIPT, SHAPES_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -236,6 +266,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     // Marketing overlays.
     $(OVERLAY_SELECTORS.join(',')).remove();
     $('head').prepend(OVERLAY_CSS);
+    if (outName !== 'index.html') $('head').append(CLIP_CSS);
     // Spam-protection and tracking frames (reCAPTCHA on forms etc.) do nothing on a copy and throw errors offline.
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();

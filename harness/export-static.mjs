@@ -116,6 +116,52 @@ async function embedStills(layout, pageUrl) {
 }
 const stills = [];
 let videoCount = 0;
+const firstScreenBytes = {};
+
+// A byte budget for the first screen. Each first-screen image is also written as AVIF (about 30% smaller than WebP);
+// the WebP stays as the fallback for the few browsers that can't show AVIF. When the first screen is still over budget,
+// the largest images get top priority and the rest wait their turn, so the screen looks complete sooner.
+const FIRST_SCREEN_BUDGET = { desktop: 600e3, mobile: 300e3 };
+async function firstScreenBudget($, layout) {
+  const imgs = $('img[data-pv-fs]').toArray();
+  let total = 0, avif = 0;
+  const sized = [];
+  for (const el of imgs) {
+    const src = $(el).attr('src') || '';
+    const area = +$(el).attr('data-pv-fs') || 0;
+    $(el).removeAttr('data-pv-fs');
+    if (!/^a\/[\w.-]+\.webp$/.test(src)) continue;
+    const webp = fs.readFileSync(path.join(outRoot, site, src));
+    let size = webp.length;
+    try {
+      const out = await sharp(webp, { animated: true }).avif({ quality: 60, effort: 3 }).toBuffer();
+      if (out.length < webp.length * 0.9) {
+        const name = crypto.createHash('sha1').update(out).digest('hex').slice(0, 12) + '.avif';
+        if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), out); bytes += out.length; }
+        $(el).attr('src', `a/${name}`).attr('onerror', `this.onerror=null;this.src='${src}'`);
+        $(`link[rel=preload][as=image][href="${src}"]`).attr('href', `a/${name}`).attr('type', 'image/avif');
+        size = out.length; avif++;
+      }
+    } catch {}
+    total += size;
+    sized.push({ el, area });
+  }
+  const over = total > FIRST_SCREEN_BUDGET[layout];
+  if (over && sized.length > 3) {
+    sized.sort((a, b) => b.area - a.area);
+    sized.forEach((x, i) => $(x.el).attr('fetchpriority', i < 3 ? 'high' : 'low'));
+  }
+  return { images: sized.length, avif, kb: Math.round(total / 1024), budgetKb: FIRST_SCREEN_BUDGET[layout] / 1e3, over };
+}
+// Videos start once the page has loaded: those on the first screen right away (after their poster), the rest when the
+// visitor scrolls near them. A video the browser can't autoplay stays on its poster, as it would on the live site.
+const MEDIA_SCRIPT = `<script id="preserve-media">(function(){
+var vs=[].slice.call(document.querySelectorAll('video[data-pv-defer]'));
+function go(v){if(v.__pv)return;v.__pv=1;[].forEach.call(v.querySelectorAll('source[data-pv-src]'),function(s){s.src=s.getAttribute('data-pv-src');s.removeAttribute('data-pv-src')});v.preload='auto';v.load();if(v.hasAttribute('autoplay')){var p=v.play();if(p&&p.catch)p.catch(function(){})}}
+function start(){var io='IntersectionObserver' in window?new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){io.unobserve(e.target);go(e.target)}})},{rootMargin:'50% 0px'}):null;vs.forEach(function(v){io?io.observe(v):go(v)})}
+function later(){setTimeout(start,0)}
+if(document.readyState==='complete')later();else addEventListener('load',later);
+})();</script>`;
 
 // Fonts the copy took from Google Fonts (google-fonts.py) ship with their licenses: the OFL asks that its text and each
 // font's copyright line go along with the fonts. One text file beside the assets, linked from each page's head.
@@ -143,7 +189,7 @@ for (const layout of ['desktop', 'mobile']) {
   const hero = fs0.slice().sort((a, b) => b.area - a.area)[0];
   for (const f of fs0) {
     const el = $(imgs[f.i]);
-    el.attr('src', `${base}${f.current}`).removeAttr('srcset').removeAttr('sizes').attr('loading', 'eager').removeAttr('decoding');
+    el.attr('src', `${base}${f.current}`).removeAttr('srcset').removeAttr('sizes').attr('loading', 'eager').removeAttr('decoding').attr('data-pv-fs', String(Math.round(f.area)));
     if (f === hero) el.attr('fetchpriority', 'high');
   }
   if (hero) $('head').prepend(`<link rel="preload" as="image" fetchpriority="high" href="${base}${hero.current}">`);
@@ -179,7 +225,10 @@ for (const layout of ['desktop', 'mobile']) {
     if (loop) v.attr('loop', ''); else v.removeAttr('loop');
     v.attr('muted', '');   // saved without sound for now (known limitation #3)
     if (!background && set.controls && set.controls !== 'none') v.attr('controls', '');
-    v.append(`<source src="${file('webm')}" type="video/webm"><source src="${file('mp4')}" type="video/mp4">`);
+    // First screen goes first: the files are attached only after the page has loaded (preserve-media below), so a
+    // video never competes with first-screen images. The poster (first frame) shows until then.
+    v.attr('preload', 'none').attr('data-pv-defer', '');
+    v.append(`<source data-pv-src="${file('webm')}" type="video/webm"><source data-pv-src="${file('mp4')}" type="video/mp4">`);
     $(el).find('.video-player__error').attr('style', 'display:none');
     $(el).find('.plyr').removeClass('plyr--error');
     videosWired++;
@@ -202,12 +251,13 @@ for (const layout of ['desktop', 'mobile']) {
     for (const [a, v] of Object.entries(el.attribs || {})) {
       if (a === 'srcset' || a === 'imagesrcset') $(el).attr(a, await srcset(v, pageUrl));
       else if (a === 'style' && v.includes('url(')) $(el).attr(a, await localizeCss(v, pageUrl));
-      else if (a === 'src' || a === 'poster' || ((a === 'href' || a === 'xlink:href') && (el.tagName === 'link' || el.tagName === 'use' || el.tagName === 'image'))) $(el).attr(a, await ref(v, pageUrl));
+      else if (a === 'src' || a === 'poster' || a === 'data-pv-src' || ((a === 'href' || a === 'xlink:href') && (el.tagName === 'link' || el.tagName === 'use' || el.tagName === 'image'))) $(el).attr(a, await ref(v, pageUrl));
       // Leftover pointers for Squarespace's loaders (data-src, data-image...) do nothing without its scripts.
       else if (/^data-/.test(a) && v.includes(`/${VARIANT}/x/`)) $(el).attr(a, '');
     }
   }
   for (const el of $('style').toArray()) $(el).text(await localizeCss($(el).text(), pageUrl));
+  firstScreenBytes[layout] = await firstScreenBudget($, layout);
   for (const el of $('noscript').toArray()) {
     let t = $(el).html() || '';
     for (const m of t.matchAll(/href="([^"]+)"/g)) t = t.replace(m[1], await ref(m[1].replace(/&amp;/g, '&'), pageUrl));
@@ -217,6 +267,7 @@ for (const layout of ['desktop', 'mobile']) {
   $('#preserve-width').text(`(function(){var m=${layout === 'mobile'},t;function c(){if((innerWidth<${BREAKPOINT})!==m)location.replace((m?'desktop':'mobile')+location.search+location.hash)}c();addEventListener('resize',function(){clearTimeout(t);t=setTimeout(c,250)})})();`);
   // Squarespace 7.1 fixed headers turn solid ("shrink") once the page scrolls; its script did that on the live site.
   $('body').append(`<script id="preserve-header">(function(){if(!document.body.classList.contains('tweak-fixed-header'))return;var h=document.querySelector('header.header,#header');if(!h)return;function f(){h.classList.toggle('shrink',scrollY>0)}addEventListener('scroll',f,{passive:true});f()})();</script>`);
+  if (videosWired) $('body').append(MEDIA_SCRIPT);
   videoCount += videosWired;
   if (licenseFile) $('head').append(`<link rel="license" href="a/${licenseFile}">`);
   fs.writeFileSync(path.join(outRoot, site, `${layout}.html`), $.html());
@@ -224,5 +275,5 @@ for (const layout of ['desktop', 'mobile']) {
 
 const left = [...new Set([...fs.readFileSync(path.join(outRoot, site, 'desktop.html'), 'utf8').matchAll(new RegExp(`/${VARIANT}/x/[^"'\\s)<>]{0,120}`, 'g'))].map((m) => m[0]))];
 srv.server.close();
-console.log(JSON.stringify({ site, videosWired: videoCount, fontLicense: licenseFile, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
+console.log(JSON.stringify({ site, videosWired: videoCount, firstScreenBytes, fontLicense: licenseFile, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
 process.exit(0);

@@ -7,6 +7,7 @@
 //   --work     capture workspace (default ./work)
 //   --out      where finished copies are written, one folder per copy (default ./ready)
 //   --publish  after a pass or ship-with-note, deploy <out> to this Cloudflare Pages project
+//   --reuse-capture  build from the capture already in --work (same input, new code; for the test corpus)
 //   --no-own-css  (or PRESERVE_OWN_CSS=0) keep Squarespace's stylesheets instead of our own (own-css.mjs). Our own is
 //              the default for new copies since Jeremy's go-ahead 2026-10-19; turning it off is the rollback.
 // Exit code: 0 copy ready (pass or ship-with-note), 2 ready but the check found problems (needs-review), 1 couldn't copy.
@@ -25,6 +26,8 @@ const id = opt('--id', new URL(url).hostname.replace(/^www\./, '').replace(/\.(s
 const WORK = path.resolve(opt('--work', 'work'));
 const OUT = path.resolve(opt('--out', 'ready'));
 const OWN_CSS = !args.includes('--no-own-css') && process.env.PRESERVE_OWN_CSS !== '0';
+// --reuse-capture: build from the capture already in the work folder instead of loading the live page again (test corpus).
+if (args.includes('--reuse-capture')) process.env.PRESERVE_REUSE_CAPTURE = '1';
 const siteDir = path.join(WORK, id);
 const stage = path.join(WORK, '_stage', id); // export goes here first; moved to OUT only if it passes
 fs.mkdirSync(siteDir, { recursive: true });
