@@ -69,9 +69,9 @@ export const OVERLAY_SELECTORS = [
   '[data-preserve-promo]',
 ];
 
-// Run in the page before saving it: marks marketing promotions pinned to the window that aren't part of the design,
-// e.g. a "GET 25% OFF" tab on the left edge. A promo here is a fixed element, small (under a fifth of the screen),
-// outside the header, with a close button and offer wording. Marked elements are removed from the copy and hidden in
+// Run in the page before saving it: marks marketing promotions pinned to the window that aren't part of the design.
+// Two kinds: a layer over the whole window that dims the page (a modal popup or age check), and a small fixed element
+// (under a fifth of the screen) outside the header with a close button and offer wording, e.g. a "GET 25% OFF" tab. Marked elements are removed from the copy and hidden in
 // the live reference screenshots, so the comparison ignores them too.
 export function markPromos() {
   const OFFER = /\d+\s*%\s*off|\$\s*\d+\s*off|discount|free shipping|refer a friend|give \$|get \$\d+|save \d+%|promo code|coupon/i;
@@ -81,7 +81,14 @@ export function markPromos() {
     const s = getComputedStyle(e);
     if (s.position !== 'fixed' || s.display === 'none' || e.closest('header,#header,[data-preserve-promo]')) continue;
     const r = e.getBoundingClientRect();
-    if (!r.width || !r.height || r.width * r.height > innerWidth * innerHeight * 0.2) continue;
+    if (!r.width || !r.height) continue;
+    // A layer over the whole window that dims the page behind it is a modal someone has to dismiss: a signup or
+    // rewards popup (Borrachito's, whose content is a frame from another host) or an age check (Dreamsake). It is
+    // the site's way in, not its design.
+    const bg = s.backgroundColor.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?/);
+    const alpha = bg ? (bg[4] === undefined ? 1 : +bg[4]) * +s.opacity : 0;
+    if (r.width * r.height >= innerWidth * innerHeight * 0.8 && alpha >= 0.3 && alpha <= 0.95) { e.setAttribute('data-preserve-promo', ''); n++; continue; }
+    if (r.width * r.height > innerWidth * innerHeight * 0.2) continue;
     const text = (e.innerText || '').trim();
     if (!text || text.length > 200 || !OFFER.test(text)) continue;
     const closeBtn = [...e.querySelectorAll('*')].some((c) => CLOSE.test(c.textContent || '') || /close|dismiss/i.test(c.getAttribute('aria-label') || '') || /close|dismiss/i.test(c.className?.toString?.() || ''));

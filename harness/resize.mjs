@@ -25,7 +25,7 @@ async function scrollThrough(page) {
 // the document so the same element can be found at another width.
 const sizedElements = () => [...document.querySelectorAll('body *')].map((el, i) => {
   const st = el.getAttribute('style') || '';
-  if (!/(^|;)\s*(width|height|left|top|transform)\s*:[^;]*\d(\.\d+)?px/.test(st)) return null;
+  if (!/(^|;)\s*(width|height|left|top|transform|font-size)\s*:[^;]*\d(\.\d+)?px/.test(st)) return null;
   const p = el.parentElement; if (!p) return null;
   const r = el.getBoundingClientRect(), pr = p.getBoundingClientRect();
   if (r.width < 40 || pr.width < 40) return null;
@@ -53,6 +53,9 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
     if (startW) { await page.setViewportSize({ width: w, height: c.viewport.height }); await sleep(1500); }
     await scrollThrough(page);
     if (!copy) { await page.evaluate(markPromos).catch(() => 0); await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300); }
+    // Anything pinned to the window other than the header (chat bubbles, cookie and promo bars that came late) is left
+    // out of both pictures: the width comparison is about the page.
+    await page.evaluate(() => document.querySelectorAll('body *').forEach((e) => { if (getComputedStyle(e).position === 'fixed' && !e.closest('header,#header,.header')) e.style.setProperty('visibility', 'hidden', 'important'); })).catch(() => 0);
     return { ctx, page };
   };
   try {

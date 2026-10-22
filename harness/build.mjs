@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { rewriteUrls } from './server.mjs';
-import { OVERLAY_SELECTORS } from './lib.mjs';
+import { OVERLAY_SELECTORS, PROFILES } from './lib.mjs';
 
 export const VARIANTS = {
   frozen: { source: 'rendered', scripts: 'none', optimize: false },
@@ -195,6 +195,17 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(place,60
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEventListener('load',place);place();
 })();</script>`;
 
+// Text Squarespace scales to fill its box (".rte-scaled-text", a heading set to fit the width): its script writes a
+// pixel font size for the width it saw. At the capture width that size is kept as is; at any other width the text is
+// scaled so it fills its box again (Myrtle Village Green's title, 2026-10-22, found by the size check).
+const fitScript = (captureWidth) => `<script id="preserve-fit">(function(){
+function fit(){var cw=document.documentElement.clientWidth;document.querySelectorAll('.rte-scaled-text').forEach(function(s){var box=s.parentElement;if(!box)return;
+var f0=+s.dataset.pvF0||parseFloat(s.style.fontSize)||parseFloat(getComputedStyle(s).fontSize);s.dataset.pvF0=f0;s.style.fontSize=f0+'px';
+if(Math.abs(cw-${captureWidth})<2||!s.offsetWidth||!box.clientWidth)return;s.style.fontSize=(f0*box.clientWidth/s.offsetWidth)+'px'})}
+var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);addEventListener('load',fit);fit();
+})();</script>`;
+
 // Rendered copies come in two layouts, captured at phone and desktop width (Squarespace's breakpoint is 768px).
 // index.html picks one by the width it is given: the browser window when opened as a link, or the frame's own width
 // when embedded in a portfolio page. Each page switches if its width later crosses the breakpoint (rotation, resize).
@@ -211,8 +222,9 @@ addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if(
 var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){}
 if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
 
-// Nothing on a page reaches past the screen's right edge: the live site clips it (with its own script or styles),
-// and on a phone a copy that didn't would let the page zoom out to show it.
+// Nothing on a phone page reaches past the screen's right edge: the live site clips it (with its own script or
+// styles), and a copy that didn't would let the phone zoom out to show it. Phone layout only: on desktop nothing
+// zooms out, and clipping there changed how Design Forward's own stylesheet laid out its columns.
 const CLIP_CSS = '<style id="preserve-clip">html,body{overflow-x:clip}</style>';
 
 const OVERLAY_CSS = `<style id="preserve-overlays">${OVERLAY_SELECTORS.join(',')}{display:none!important}</style>`;
@@ -266,7 +278,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     // Marketing overlays.
     $(OVERLAY_SELECTORS.join(',')).remove();
     $('head').prepend(OVERLAY_CSS);
-    if (outName !== 'index.html') $('head').append(CLIP_CSS);
+    if (outName === 'mobile.html') $('head').append(CLIP_CSS);
     // Spam-protection and tracking frames (reCAPTCHA on forms etc.) do nothing on a copy and throw errors offline.
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
@@ -305,6 +317,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('body').append(MENU_SCRIPT);
       $('body').append(SLIDER_SCRIPT);
       $('body').append(SHAPES_SCRIPT);
+      if (outName !== 'index.html' && $('.rte-scaled-text').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
     }
     $('body').append(REPLICA_SCRIPT);
     if (outName !== 'index.html') $('body').append(widthScript(outName.replace('.html', '')));
