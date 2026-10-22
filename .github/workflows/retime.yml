@@ -41,4 +41,5 @@ jobs:
           retention-days: 90
       - name: Open an issue when something got slower
         if: steps.time.outcome == 'failure'
-        run: gh issue create -R "$GITHUB_REPOSITORY" --title "Weekly re-timing: a test-corpus copy got slower ($(date -u +%F))" --body-file retime-report.md
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "Weekly re-timing: a test-corpus copy got slower ($(date -u +%F))" --body-file retime-report.md

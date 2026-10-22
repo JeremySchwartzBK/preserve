@@ -195,11 +195,11 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(place,60
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEventListener('load',place);place();
 })();</script>`;
 
-// Text Squarespace scales to fill its box (".rte-scaled-text", a heading set to fit the width): its script writes a
+// Text Squarespace scales to fill its box ("sqsrte-scaled-text", renamed later by scrub; a heading set to fit the width): its script writes a
 // pixel font size for the width it saw. At the capture width that size is kept as is; at any other width the text is
 // scaled so it fills its box again (Myrtle Village Green's title, 2026-10-22, found by the size check).
 const fitScript = (captureWidth) => `<script id="preserve-fit">(function(){
-function fit(){var cw=document.documentElement.clientWidth;document.querySelectorAll('.rte-scaled-text').forEach(function(s){var box=s.parentElement;if(!box)return;
+function fit(){var cw=document.documentElement.clientWidth;document.querySelectorAll('[class*="rte-scaled-text"]').forEach(function(s){if(/scaled-text-container/.test(s.className))return;var box=s.parentElement;if(!box)return;
 var f0=+s.dataset.pvF0||parseFloat(s.style.fontSize)||parseFloat(getComputedStyle(s).fontSize);s.dataset.pvF0=f0;s.style.fontSize=f0+'px';
 if(Math.abs(cw-${captureWidth})<2||!s.offsetWidth||!box.clientWidth)return;s.style.fontSize=(f0*box.clientWidth/s.offsetWidth)+'px'})}
 var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});
@@ -317,7 +317,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('body').append(MENU_SCRIPT);
       $('body').append(SLIDER_SCRIPT);
       $('body').append(SHAPES_SCRIPT);
-      if (outName !== 'index.html' && $('.rte-scaled-text').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
+      if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
     }
     $('body').append(REPLICA_SCRIPT);
     if (outName !== 'index.html') $('body').append(widthScript(outName.replace('.html', '')));

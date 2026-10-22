@@ -38,7 +38,13 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
   fs.mkdirSync(outDir, { recursive: true });
   const browser = await launch();
   const out = {};
-  const shot = async (page, name) => { const f = path.join(outDir, name); await page.screenshot({ path: f + '.png' }); await page.screenshot({ path: f + '-full.png', fullPage: true }); return f; };
+  // The full page at the window's width: a few pixels sticking out sideways would otherwise widen the picture and
+  // shift every row of the comparison.
+  const shot = async (page, name) => {
+    const f = path.join(outDir, name); await page.screenshot({ path: f + '.png' });
+    const { w, h } = await page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.scrollHeight }));
+    await page.screenshot({ path: f + '-full.png', fullPage: true, clip: { x: 0, y: 0, width: w, height: h } }); return f;
+  };
   const open = async (prof, w, target, { copy = false, startW } = {}) => {
     const c = PROFILES[prof].context;
     const ctx = await browser.newContext({ ...c, viewport: { width: startW || w, height: c.viewport.height }, ignoreHTTPSErrors: true });
