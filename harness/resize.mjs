@@ -62,6 +62,9 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
     // Anything pinned to the window other than the header (chat bubbles, cookie and promo bars that came late) is left
     // out of both pictures: the width comparison is about the page.
     await page.evaluate(() => document.querySelectorAll('body *').forEach((e) => { if (getComputedStyle(e).position === 'fixed' && !e.closest('header,#header,.header')) e.style.setProperty('visibility', 'hidden', 'important'); })).catch(() => 0);
+    // Video is left out of both pictures too, keeping its space: the live site's player can't play in our browser
+    // ("Video is not available"), while the copy plays its own file, and a playing video differs from itself anyway.
+    await page.evaluate(() => document.querySelectorAll('video, .video-player, .sqs-video-background, .sqs-video-background-native, .ps-video-background, .ps-video-background-native, [data-config-video], [data-config-native-video], [data-config-video-background]').forEach((e) => e.style.setProperty('visibility', 'hidden', 'important'))).catch(() => 0);
     return { ctx, page };
   };
   try {

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import sharp from 'sharp';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 export const MAX_SECONDS = 60; // longer clips are cut; background loops are normally 10-30 s
@@ -24,6 +25,22 @@ export function findVideos(html) {
 export const videoUrl = (base, size, ext) => `${base}preserve-${size}.${ext}`;
 
 const ff = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 600000 });
+
+// The poster shows until the video has streamed in, which on a phone can take seconds. Many clips open on a black
+// or blank frame (a fade in), so the first frame that has a picture in it is used: the first screen then looks
+// complete straight away. A clip that is plain all the way through keeps its first frame.
+const POSTER_AT = [0, 0.5, 1, 2, 3, 4, 6, 8];
+export async function poster(src, scale, jpg) {
+  for (const t of POSTER_AT) {
+    try { ff(['-ss', String(t), '-i', src, '-vf', scale, '-frames:v', '1', '-q:v', '4', jpg]); } catch { continue; }
+    if (!fs.existsSync(jpg)) continue;
+    const st = await sharp(fs.readFileSync(jpg)).greyscale().stats(); // a buffer: sharp caches by file name
+    if (st.channels[0].stdev >= 10) return t;
+    if (t === 0) fs.copyFileSync(jpg, jpg + '.first');
+  }
+  if (fs.existsSync(jpg + '.first')) fs.renameSync(jpg + '.first', jpg);
+  return 0;
+}
 
 export async function captureVideos(outDir, manifest, request) {
   const htmls = ['rendered-desktop.html', 'rendered-mobile.html', 'server.html'].map((f) => path.join(outDir, f)).filter(fs.existsSync).map((p) => fs.readFileSync(p, 'utf8'));
@@ -53,7 +70,7 @@ export async function captureVideos(outDir, manifest, request) {
         // phone): a background loop is texture, and the files stream in after the first screen anyway.
         ff(['-i', src, '-an', '-vf', scale, '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '28', '-maxrate', w > 700 ? '1000k' : '500k', '-bufsize', w > 700 ? '2000k' : '1000k', '-preset', 'medium', '-movflags', '+faststart', mp4]);
         ff(['-i', src, '-an', '-vf', scale, '-c:v', 'libvpx-vp9', '-b:v', w > 700 ? '800k' : '400k', '-crf', '40', '-row-mt', '1', '-deadline', 'good', '-cpu-used', '5', webm]);
-        ff(['-i', src, '-vf', scale, '-frames:v', '1', '-q:v', '4', jpg]);
+        await poster(src, scale, jpg);
         files.push([videoUrl(base, w, 'mp4'), mp4, 'video/mp4'], [videoUrl(base, w, 'webm'), webm, 'video/webm'], [videoUrl(base, w, 'jpg'), jpg, 'image/jpeg']);
       }
       for (const [u, p, ct] of files) {
