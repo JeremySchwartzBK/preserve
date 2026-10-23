@@ -41,7 +41,10 @@ export function hostLike(root, wait = HOST_WAIT_MS) {
 
 // One layout's timing: medians over `runs` cold loads, plus what slowed it.
 export function summarize(m) {
-  const runs = m.runs.filter((r) => !r.error && r.vc95 != null);
+  // An intro is an entrance animation that starts as the page arrives; a fade that starts later is a slideshow
+  // changing slides or a scroll effect, not an intro.
+  const runs = m.runs.filter((r) => !r.error && r.vc95 != null)
+    .map((r) => (r.intro && r.intro.start > Math.max(r.firstScreenDone || 0, r.vc95) + 500 ? { ...r, intro: null } : r));
   const med = (xs) => { const v = xs.filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor((v.length - 1) / 2)] : null; };
   const intro = runs.find((r) => r.intro)?.intro || null;
   // With an intro, ready = first-screen files loaded and the intro started; without, the visual-progress time.

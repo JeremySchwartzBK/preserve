@@ -121,11 +121,11 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
     out.externalRequests = [...external]; out.pageErrors = errors.length; out.errorSamples = [];
     await browser.close(); return out;
   }
-  // Marketing overlays still on screen.
+  // Marketing overlays still on screen. (Squarespace 7.0 parallax backgrounds are fixed layers too, but design.)
   out.overlaysVisible = await page.evaluate((sels) => {
     const vis = (e) => { const s = getComputedStyle(e), r = e.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.05 && r.width > 0 && r.height > 0; };
     const named = [...document.querySelectorAll(sels.join(','))].filter(vis).map((e) => e.className.toString().slice(0, 40));
-    const big = [...document.querySelectorAll('body *')].filter((e) => { const s = getComputedStyle(e); if (s.position !== 'fixed' || !vis(e)) return false; const r = e.getBoundingClientRect(); return r.width * r.height > innerWidth * innerHeight * 0.3 && !e.closest('header,#header,.header'); }).map((e) => 'fixed:' + e.className.toString().slice(0, 40));
+    const big = [...document.querySelectorAll('body *')].filter((e) => { const s = getComputedStyle(e); if (s.position !== 'fixed' || !vis(e)) return false; const r = e.getBoundingClientRect(); return r.width * r.height > innerWidth * innerHeight * 0.3 && !e.closest('header,#header,.header') && !/parallax/i.test(e.className.toString()); }).map((e) => 'fixed:' + e.className.toString().slice(0, 40));
     return [...named, ...big].slice(0, 5);
   }, OVERLAY_SELECTORS);
   if (out.overlaysVisible.length) spot('overlay-left', await page.evaluate((sels) => [...document.querySelectorAll(sels.join(','))].filter((e) => e.getBoundingClientRect().width > 0).slice(0, 3).map((e) => window.__preserveAnchor(e)), OVERLAY_SELECTORS));
