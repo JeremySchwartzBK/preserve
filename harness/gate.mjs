@@ -8,6 +8,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct } from './check.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
+import { timeCopy, TARGET_MS } from './loadtime.mjs';
+import { resizeCheck } from './resize.mjs';
 
 // Thresholds, calibrated on the five hand-checked copies (see gate-calibration in the write-up).
 export const LIMITS = {
@@ -108,6 +110,8 @@ export function detect(siteDir, exportReport) {
 
 // How much of a full-page screenshot may differ after the stylesheet swap (antialiasing, a frame of a slideshow).
 const OWN_CSS_MAX_DIFF = 1;
+// A copy resized to a width should look as it does opened at that width (the scripts re-measure on resize).
+const RESIZE_MAX_DIFF = 2;
 
 export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null }) {
   const reasons = [], notes = [], warnings = [], info = {};
@@ -202,6 +206,43 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     }
   } finally { srv.close(); layoutSpots = null; }
 
+  // Load time on desktop and phone 4G (loadtime.mjs). Over the 2-second target ships with a note, never a block: some
+  // pages can't reach it faithfully. An owner's intro animation doesn't count; one that hides the page over a second,
+  // and heavy files loading before the first screen is ready, are noted for us.
+  if (process.env.PRESERVE_LOAD_CHECK !== '0') {
+    try {
+      info.loadTime = await timeCopy(path.dirname(copyDir), id, { runs: 3 });
+      const slow = Object.entries(info.loadTime).filter(([, t]) => t.readyMs > TARGET_MS);
+      if (slow.length) notes.push({ limitation: null, code: 'slow-first-screen', text: `This copy's first screen takes about ${(Math.max(...slow.map(([, t]) => t.readyMs)) / 1000).toFixed(1)} seconds to appear${slow.length === 1 ? (slow[0][0] === 'mobile' ? ' on phones' : ' on computers') : ''}, a little over our 2-second goal.`, detail: slow.map(([l, t]) => `${l} ${t.readyMs} ms (${t.kb} KB)`).join('; ') });
+      for (const [l, t] of Object.entries(info.loadTime)) {
+        if (t.introMs) warnings.push(`${l}: owner intro animation ${t.introMs} ms (not counted in the ${t.readyMs} ms)`);
+        if (t.hiddenMs > 1000) warnings.push(`${l}: owner intro keeps the first screen hidden for ${t.hiddenMs} ms`);
+        if (t.heavyEarly.length) warnings.push(`${l}: heavy files load before the first screen is ready: ${t.heavyEarly.map((h) => `${h.url} (${h.kb} KB)`).join(', ')}`);
+      }
+    } catch (e) { warnings.push(`load-time check failed: ${String(e.message).slice(0, 200)}`); }
+  }
+
+  // Sizes worked out once for one width (resize.mjs): the copy at another width against the live page at that width,
+  // and the copy resized against itself opened at that width. Fixed-size elements are listed for us.
+  if (process.env.PRESERVE_RESIZE_CHECK !== '0') {
+    const srv2 = await serve(path.dirname(copyDir));
+    try {
+      info.resize = await resizeCheck(url, `http://127.0.0.1:${srv2.address().port}/${id}`, path.join(siteDir, 'resize'));
+      const off = [], resized = [];
+      for (const [prof, rs] of Object.entries(info.resize)) for (const r of rs) {
+        if (r.error) { warnings.push(`size check ${prof} ${r.width}px: ${r.error}`); continue; }
+        const n1 = r.liveNoise?.firstScreen?.pct || 0, n2 = r.liveNoise?.fullPage?.pct || 0;
+        if (r.firstScreen && r.firstScreen.pct > LIMITS.firstScreenDiffPct + n1) off.push(`${prof} at ${r.width}px: ${r.firstScreen.pct}% of the first screen differs from the live page (allowed ${+(LIMITS.firstScreenDiffPct + n1).toFixed(1)}%)`);
+        if (r.fullPage && r.fullPage.pct > LIMITS.fullPageDiffPct + n2) off.push(`${prof} at ${r.width}px: ${r.fullPage.pct}% of the page differs from the live page (allowed ${+(LIMITS.fullPageDiffPct + n2).toFixed(1)}%)`);
+        if (r.resized && r.resized.pct > RESIZE_MAX_DIFF) resized.push(`${prof}: resized to ${r.width}px, ${r.resized.pct}% differs from opening at ${r.width}px`);
+        if (r.fixedSize?.length) warnings.push(`${prof} at ${r.width}px: fixed sizes kept from the capture width: ${r.fixedSize.map((f) => `${f.what} ${f.widthPx}px in ${f.containerPx}px`).join(', ')}`);
+      }
+      if (off.length) fail('differs-at-other-widths', off.slice(0, 4).join('; '));
+      if (resized.length) fail('breaks-on-resize', resized.slice(0, 4).join('; '));
+    } catch (e) { warnings.push(`size check failed: ${String(e.message).slice(0, 200)}`); }
+    finally { srv2.close(); }
+  }
+
   // Known limitations present on the original page.
   info.detected = detect(siteDir, exportReport);
   for (const [n, what] of Object.entries(info.detected)) {
@@ -210,7 +251,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.ownCss ? { ownCss: info.ownCss } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }

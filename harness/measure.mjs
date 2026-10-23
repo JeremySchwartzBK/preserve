@@ -72,11 +72,38 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
     new PerformanceObserver((l) => {
       for (const e of l.getEntries()) if (e.name === 'first-contentful-paint') window.__m.fcp = e.startTime;
     }).observe({ type: 'paint', buffered: true });
+    // How visible the middle of the first screen is (the element there, times its ancestors' opacity), sampled each
+    // frame for 6 s: an owner's intro fade keeps the page hidden although everything has loaded.
+    // Owner intros are caught while they run: any opacity animation or transition on something covering a quarter of
+    // the first screen or more.
+    window.__vis = []; window.__intros = new Map();
+    const t0 = performance.now();
+    const opacityAt = (x, y) => { const el = document.elementFromPoint(x, y); if (!el) return null; let o = 1; for (let e = el; e && e.nodeType === 1; e = e.parentElement) o *= +getComputedStyle(e).opacity; return o; };
+    const tick = () => {
+      if (document.body) {
+        const os = [[0.5, 0.25], [0.5, 0.5], [0.5, 0.75]].map(([fx, fy]) => opacityAt(innerWidth * fx, innerHeight * fy)).filter((o) => o != null);
+        if (os.length) window.__vis.push([Math.round(performance.now()), +Math.max(...os).toFixed(2)]);
+        const vpA = innerWidth * innerHeight;
+        for (const a of document.getAnimations()) {
+          if (window.__intros.has(a)) continue;
+          const el = a.effect && a.effect.target; if (!el || !el.getBoundingClientRect) continue;
+          const r = el.getBoundingClientRect();
+          const area = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+          const kf = a.effect.getKeyframes ? a.effect.getKeyframes() : [];
+          const t = a.effect.getComputedTiming();
+          if (area < vpA * 0.25 || !kf.length || kf[0].opacity === undefined || +kf[0].opacity >= 0.5 || !isFinite(t.endTime)) continue;
+          window.__intros.set(a, { start: (a.startTime ?? performance.now()) + (t.delay || 0), end: (a.startTime ?? performance.now()) + t.endTime });
+        }
+      }
+      if (performance.now() - t0 < 6000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   });
   const cdp = await applyThrottle(page, profile);
   let bytes = 0, requests = 0, inflight = 0, lastNet = Date.now();
-  cdp.on('Network.requestWillBeSent', () => { requests++; inflight++; lastNet = Date.now(); });
-  cdp.on('Network.loadingFinished', (e) => { bytes += e.encodedDataLength; inflight = Math.max(0, inflight - 1); lastNet = Date.now(); });
+  const reqs = new Map();
+  cdp.on('Network.requestWillBeSent', (e) => { requests++; inflight++; lastNet = Date.now(); reqs.set(e.requestId, { url: e.request.url, type: e.type, start: e.wallTime * 1000 }); });
+  cdp.on('Network.loadingFinished', (e) => { bytes += e.encodedDataLength; inflight = Math.max(0, inflight - 1); lastNet = Date.now(); const q = reqs.get(e.requestId); if (q) { q.bytes = e.encodedDataLength; q.done = Date.now(); } });
   cdp.on('Network.loadingFailed', () => { inflight = Math.max(0, inflight - 1); lastNet = Date.now(); });
 
   const frames = [];
@@ -105,7 +132,12 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
   await cdp.send('Page.stopScreencast').catch(() => {});
   const timing = await page.evaluate(() => {
     const nav = performance.getEntriesByType('navigation')[0];
-    return { origin: performance.timeOrigin, ttfb: nav?.responseStart, dcl: nav?.domContentLoadedEventEnd, load: nav?.loadEventEnd, ...window.__m };
+    // First-screen images, and when the last of them finished loading.
+    const fsImgs = [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.width > 1 && r.height > 1 && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0; }).map((i) => i.currentSrc).filter(Boolean);
+    const res = performance.getEntriesByType('resource');
+    const fsDone = Math.max(0, ...res.filter((e) => fsImgs.includes(e.name)).map((e) => e.responseEnd));
+    const intros = [...(window.__intros || new Map()).values()];
+    return { origin: performance.timeOrigin, ttfb: nav?.responseStart, dcl: nav?.domContentLoadedEventEnd, load: nav?.loadEventEnd, fsDone, fsImgs, intros, vis: window.__vis || [], ...window.__m };
   }).catch(() => ({}));
   if (screenshotPath) await page.screenshot({ path: screenshotPath }).catch(() => {});
 
@@ -137,10 +169,19 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
   }
   await browser.close();
   const r = (x) => (x == null ? null : Math.round(x));
+  // Intro: from the first fade's start to the last one's end. Hidden: how long after first paint the middle of the
+  // first screen stayed nearly invisible (opacity under 0.1).
+  const intro = timing.intros?.length ? { start: Math.min(...timing.intros.map((i) => i.start)), end: Math.max(...timing.intros.map((i) => i.end)) } : null;
+  const shown = (timing.vis || []).find(([t, o]) => t >= (timing.fcp || 0) && o >= 0.1);
+  const hiddenMs = timing.fcp && shown ? Math.max(0, shown[0] - timing.fcp) : 0;
+  // Heavy files (over 150 KB) that finished before the first screen was ready but aren't first-screen images.
+  const readyAt = (timing.origin || 0) + (vc95 || timing.load || 0);
+  const heavyEarly = [...reqs.values()].filter((q) => q.bytes > 150e3 && q.done && q.done <= readyAt && q.type !== 'Document' && !(timing.fsImgs || []).includes(q.url)).map((q) => ({ url: q.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 100), type: q.type, kb: Math.round(q.bytes / 1024) }));
   return {
     url, profile: profileName, error,
     ttfb: r(timing.ttfb), fcp: r(timing.fcp), lcp: r(timing.lcp), lcpEl: timing.lcpEl, vc95: r(vc95), vc99: r(vc99),
     load: r(timing.load), requests, volatilePct: Math.round(volatile * 100), kb: Math.round(bytes / 1024), frames: fr.length,
+    firstScreenDone: r(timing.fsDone), intro: intro && { start: r(intro.start), end: r(intro.end), ms: r(intro.end - intro.start) }, hiddenMs: r(hiddenMs), heavyEarly,
     externalBlocked: [...external],
   };
 }

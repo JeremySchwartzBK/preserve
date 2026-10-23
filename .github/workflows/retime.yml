@@ -1,0 +1,45 @@
+name: weekly re-timing
+# Times the published test-corpus copies every week (harness/retime.mjs) and opens an issue when one got slower.
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  actions: read
+jobs:
+  retime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Get last week's baseline
+        continue-on-error: true
+        run: |
+          id=$(gh run list -R "$GITHUB_REPOSITORY" -w retime.yml -s completed -L 10 --json databaseId -q '.[].databaseId' | head -1)
+          [ -n "$id" ] && gh run download "$id" -R "$GITHUB_REPOSITORY" -n retime-baseline -D .
+      - name: Time the test corpus
+        id: time
+        continue-on-error: true
+        run: node retime.mjs corpus.json baseline.json
+      - name: Report
+        run: cat retime-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retime-baseline
+          path: harness/baseline.json
+          retention-days: 90
+      - name: Open an issue when something got slower
+        if: steps.time.outcome == 'failure'
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" --title "Weekly re-timing: a test-corpus copy got slower ($(date -u +%F))" --body-file retime-report.md

@@ -1,0 +1,90 @@
+{
+ "host": "https://preserve-view.pages.dev",
+ "note": "Test-corpus preserves (core 21, studio 'corpus'), timed weekly by retime.mjs. Built 2026-10-23 from PR #14's code.",
+ "copies": [
+  {
+   "site": "ontario-lacrosse",
+   "copyId": "ryh69396"
+  },
+  {
+   "site": "kosa",
+   "copyId": "7abbr4ve"
+  },
+  {
+   "site": "design-forward",
+   "copyId": "3pcea66d"
+  },
+  {
+   "site": "xanadu",
+   "copyId": "7r84wfa6"
+  },
+  {
+   "site": "dreamsake",
+   "copyId": "myqx9ybx"
+  },
+  {
+   "site": "studio-cote",
+   "copyId": "7uqgcwzq"
+  },
+  {
+   "site": "la-playa-studio",
+   "copyId": "n5n5dm4t"
+  },
+  {
+   "site": "hotel-weekend",
+   "copyId": "f4j2d99s"
+  },
+  {
+   "site": "not-crispy-enough",
+   "copyId": "xdtytzxn"
+  },
+  {
+   "site": "ela-house-studio",
+   "copyId": "7wd9ht8p"
+  },
+  {
+   "site": "gucha-gucha",
+   "copyId": "zhdxjuhm"
+  },
+  {
+   "site": "backbipoc",
+   "copyId": "wyztdq4f"
+  },
+  {
+   "site": "one-magazine",
+   "copyId": "whjep6jb"
+  },
+  {
+   "site": "frankly-good-coffee",
+   "copyId": "mzs942vn"
+  },
+  {
+   "site": "little-ripper",
+   "copyId": "y9yt5m2w"
+  },
+  {
+   "site": "myrtle-green",
+   "copyId": "nsmwumas"
+  },
+  {
+   "site": "yarza-twins",
+   "copyId": "wcxxwkbj"
+  },
+  {
+   "site": "borrachito",
+   "copyId": "wgu5p2hk"
+  },
+  {
+   "site": "thedial-world",
+   "copyId": "c526eb67"
+  },
+  {
+   "site": "archive-07",
+   "copyId": "gfa5w8xb"
+  },
+  {
+   "site": "radhia-rahman",
+   "copyId": "ap2g6uc6"
+  }
+ ]
+}
