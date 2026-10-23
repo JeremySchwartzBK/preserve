@@ -381,6 +381,10 @@ async function shots(base, layout, name) {
   const browser = await launch();
   try {
     const ctx = await browser.newContext({ ...PROFILES[layout].context, deviceScaleFactor: 1, reducedMotion: 'reduce' });
+    // Both stylesheets are photographed with the header padding as captured (preserve-header-pad off): otherwise a header
+    // a few pixels taller under one of them moves the whole page down and reads as a big difference. The size check
+    // compares the copy, padding script on, with the live site at other widths.
+    await ctx.addInitScript(() => { window.__pvNoHeaderPad = true; });
     const page = await ctx.newPage();
     await page.goto(`${base}/${name}`, { waitUntil: 'load', timeout: 60000 });
     // Every image loaded before the photo, so lazy loading can't make the two differ.

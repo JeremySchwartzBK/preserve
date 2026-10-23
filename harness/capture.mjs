@@ -114,6 +114,13 @@ export async function capture(url, outDir) {
     await scrollThrough(page);
     await shadowStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
+    // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it
+    // saw. The copy redoes that sum at other widths (build.mjs HEADER_PAD_SCRIPT), so it needs the header's height that
+    // the padding was worked out from: measured here as Squarespace saw it, announcement bar included.
+    await page.evaluate(() => {
+      const h = document.querySelector('header#header') || document.querySelector('header');
+      if (h) h.setAttribute('data-pv-h0', String(Math.round(h.getBoundingClientRect().height * 100) / 100));
+    }).catch(() => {});
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });

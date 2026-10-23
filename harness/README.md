@@ -127,6 +127,31 @@ Test corpus: `--reuse-capture` builds from the capture already in `--work`, so t
 new code and compared. Weekly re-timing: `.github/workflows/retime.yml` runs `retime.mjs` every Monday against the
 published corpus copies in `corpus.json` and opens an issue when one got slower by 0.3 s or went over 2 s.
 
+## Slow-site and other-width fixes (2026-10-23)
+
+From the 58-site run:
+- Timing a first screen that changes on its own: `measure.mjs` compared every frame with the last one, so a slideshow
+  that advanced after the page was in counted as still loading (State of Sage, 7.5 s for a screen complete by 2 s).
+  A change after the load event with no file arriving in the 0.6 s before it is now treated as motion, and progress is
+  measured against the frame just before it.
+- Video posters: the poster was the clip's first frame, which is often black (a fade in), so a phone saw a black first
+  screen until the video streamed in (Ken Rosenberg, 9.5 s). `video.mjs` now uses the first frame within 8 s that has a
+  picture in it.
+- Header padding: Squarespace pads the first section and the menu overlay by the header's height in pixels for the
+  width it saw. At other widths the header's height changes, so content sat too low or slid under the header (Fireside,
+  Luigi's, Frankly). `capture.mjs` records the header's height (`data-pv-h0`) and `preserve-header-pad` redoes the sum at any width
+  other than the capture width, leaving out the announcement bar the copy drops, as the live site does.
+- Image boxes in the grid layout: Squarespace writes each image box's height in pixels for the width it saw
+  (`--image-component-container-height`, baked into our stylesheet as a height). `preserve-image-boxes` works it out
+  again at other widths from the grid cell's own height (Luigi's logo, Fireside's title; 27 of the 58 sites have one).
+- Own-stylesheet check: both stylesheets are photographed with the header padding as captured, so a header a few
+  pixels taller under one of them doesn't move the whole page and read as a big difference (Myrtle Green).
+- Scrolling text bars: their spacing, path and height were written for the text size at capture. `preserve-motion`
+  now scales them by how much the text itself changed size, and wraps on the full set of phrases, not the first one
+  (Borrachito, known limitation #21).
+- Size check: video is hidden in both pictures (keeping its space), since the live player can't play in our browser
+  and showed "Video is not available" where the copy shows the video.
+
 ## What each file does
 
 - `lib.mjs`: device/network profiles. Mobile: 390x844 @3x, Slow 4G (150ms RTT, 1.6 Mbps down), 4x CPU slowdown.

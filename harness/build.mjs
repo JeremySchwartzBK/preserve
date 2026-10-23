@@ -55,10 +55,24 @@ var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isInter
 els.forEach(function(el){io.observe(el)})}
 if(reduce)return;
 document.querySelectorAll('.Marquee').forEach(function(m){
-var tp=m.querySelector('textPath.Marquee-svg-text'),path=m.querySelector('path.Marquee-path');if(!tp)return;
-var ts=tp.querySelectorAll('tspan');var w=ts.length>1?parseFloat(ts[1].getAttribute('x'))-parseFloat(ts[0].getAttribute('x')):0;if(!(w>0))return;
+var tp=m.querySelector('textPath.Marquee-svg-text'),path=m.querySelector('path.Marquee-path'),svg=m.querySelector('svg.Marquee-svg');if(!tp)return;
+var ts=[].slice.call(tp.querySelectorAll('tspan')),n=m.querySelectorAll('textPath.Marquee-svg-group tspan').length||1;
+var X0=ts.map(function(t){return parseFloat(t.getAttribute('x'))||0});if(ts.length<=n)return;
+var w0=X0[n]-X0[0];if(!(w0>0))return;
+// The spacing, the path and the bar's height were written for the text size at capture. The text size follows the
+// width, so all of it is scaled by how much the text itself grew or shrank (item lengths are in the path's dashes).
+var D0=path&&path.getAttribute('d'),A0=path&&(path.getAttribute('stroke-dasharray')||'').trim().split(/[\\s,]+/).map(parseFloat);
+var L0=0;if(A0)for(var k=0;k<2*n&&k<A0.length;k+=2)L0+=A0[k]||0;
+var H0=svg&&parseFloat(svg.style.height),T0=svg&&/translateY\\(([-\\d.]+)px\\)/.exec(svg.style.transform||'');
+var sc=1,w=w0;
+function fit(){var L=0;for(var k=0;k<n;k++)try{L+=ts[k].getComputedTextLength()}catch(e){}
+var s=L0>0&&L>0?L/L0:1;if(!(s>0.2&&s<5)||Math.abs(s-sc)<0.01&&sc!==1)return;
+p=p*s/sc;sc=s;w=w0*s;ts.forEach(function(t,i){t.setAttribute('x',String(X0[i]*s))});
+if(path&&D0){path.setAttribute('d',D0.replace(/(-?[\\d.]+),(-?[\\d.]+)/g,function(_,x,y){return x+','+(parseFloat(y)*s)}));if(A0)path.setAttribute('stroke-dasharray',A0.map(function(a){return a*s}).join(' '))}
+if(H0>0)svg.style.height=(H0*s)+'px';if(T0)svg.style.transform='translateY('+(parseFloat(T0[1])*s)+'px)'}
 var sp=parseFloat(m.getAttribute('data-animation-speed')||'1')||1;var dir=m.getAttribute('data-animation-direction')==='right'?-1:1;
 var p=-parseFloat(tp.getAttribute('startOffset')||'0')||0;var last=0;
+var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(fit,80)});if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);fit();
 function tick(t){var dt=last?Math.min(50,t-last):16.7;last=t;p+=dir*sp*dt/16.7;var i=((p%w)+w)%w;tp.setAttribute('startOffset',String(-i));if(path)path.setAttribute('stroke-dashoffset',String(i));requestAnimationFrame(tick)}
 requestAnimationFrame(tick)});
 })();
@@ -206,6 +220,47 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)}
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);addEventListener('load',fit);fit();
 })();</script>`;
 
+// Squarespace pads the first section and the menu overlay by the header's height, written in pixels for the width it
+// saw (the header sits over the page). At another width the header is a different height (the menu wraps, the logo
+// scales), so the frozen padding left a gap or hid content under the header (Fireside, Luigi's, Frankly, 2026-10-23,
+// found by the size check). At the capture width the padding is kept as is; at any other width it is the header's
+// height now, plus whatever the padding had beyond the header's height at capture (data-pv-h0, see capture.mjs). The
+// header's height now leaves out the announcement bar the copy drops, as the live site does once the bar is gone.
+const HEADER_PAD_SCRIPT = (captureWidth) => `<script id="preserve-header-pad">(function(){
+if(window.__pvNoHeaderPad)return;var h=document.querySelector('[data-pv-h0]')||document.querySelector('header');if(!h)return;
+var els=[].slice.call(document.querySelectorAll('[data-pv-hpad]'));if(!els.length)return;
+var h0=parseFloat(h.getAttribute('data-pv-h0'));
+els.forEach(function(e){e.dataset.pvP0=parseFloat(e.style.paddingTop)||0});
+function fit(){var cw=document.documentElement.clientWidth,hh=h.getBoundingClientRect().height;els.forEach(function(e){var p0=+e.dataset.pvP0;
+if(Math.abs(cw-${captureWidth})<2||!(p0>0)){e.style.paddingTop=p0+'px';return}
+e.style.paddingTop=(hh+(h0>0?Math.max(0,p0-h0):0))+'px'})}
+var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});
+if(window.ResizeObserver)new ResizeObserver(function(){fit()}).observe(h);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);addEventListener('load',fit);fit();
+})();</script>`;
+
+// Squarespace's image blocks in its grid layout carry their box height as a pixel number in a style variable
+// (--image-component-container-height), worked out from the grid cell at the width it saw. At another width the
+// cell is a different height, so the image stayed its capture-width size and pushed the rest of the section down
+// (Luigi's logo, Fireside's title, 2026-10-23, found by the size check; 27 of the 58 showcase sites have one).
+// At any width other than the capture width the number is worked out again the same way: the height the cell takes
+// with the image box out of the way. A cell that has no height of its own (sized by its content) keeps the capture
+// height scaled by the page width.
+const FLUID_IMAGE_SCRIPT = (captureWidth) => `<script id="preserve-image-boxes">(function(){
+var V='--image-component-container-height';
+var els=[].filter.call(document.querySelectorAll('[style*="'+V+'"]'),function(e){return /px/.test(e.style.getPropertyValue(V))&&e.closest('.fe-block')});if(!els.length)return;
+// The box itself (our stylesheet writes the number in as its height), or the element holding the number.
+var box=els.map(function(e){return e.querySelector('.fluid-image-container')||e});
+els.forEach(function(e){e.dataset.pvIh0=parseFloat(e.style.getPropertyValue(V))});
+function set(i,h){els[i].style.setProperty(V,h+'px');box[i].style.height=h+'px'}
+function fit(){var cw=document.documentElement.clientWidth;
+if(Math.abs(cw-${captureWidth})<2){els.forEach(function(e,i){e.style.setProperty(V,e.dataset.pvIh0+'px');box[i].style.height=''});return}
+els.forEach(function(e,i){set(i,0)});
+var hs=els.map(function(e){return e.closest('.fe-block').getBoundingClientRect().height});
+els.forEach(function(e,i){var h=hs[i];if(!(h>=2))h=e.dataset.pvIh0*cw/${captureWidth};set(i,h)})}
+var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});addEventListener('load',fit);fit();
+})();</script>`;
+
 // Rendered copies come in two layouts, captured at phone and desktop width (Squarespace's breakpoint is 768px).
 // index.html picks one by the width it is given: the browser window when opened as a link, or the frame's own width
 // when embedded in a portfolio page. Each page switches if its width later crosses the breakpoint (rotation, resize).
@@ -317,6 +372,10 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('body').append(MENU_SCRIPT);
       $('body').append(SLIDER_SCRIPT);
       $('body').append(SHAPES_SCRIPT);
+      const pxPad = (_, el) => /padding-top:\s*[\d.]+px/.test($(el).attr('style') || '');
+      const padded = [$('.header-menu').filter(pxPad).first(), $('section.page-section').first().filter(pxPad)].filter((x) => x.length);
+      if (outName !== 'index.html' && padded.length) { padded.forEach((x) => x.attr('data-pv-hpad', '')); $('body').append(HEADER_PAD_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width)); }
+      if (outName !== 'index.html' && $('[style*="--image-component-container-height"]').length) $('body').append(FLUID_IMAGE_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
     }
     $('body').append(REPLICA_SCRIPT);

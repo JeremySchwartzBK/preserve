@@ -104,7 +104,7 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
   const reqs = new Map();
   cdp.on('Network.requestWillBeSent', (e) => { requests++; inflight++; lastNet = Date.now(); reqs.set(e.requestId, { url: e.request.url, type: e.type, start: e.wallTime * 1000 }); });
   cdp.on('Network.loadingFinished', (e) => { bytes += e.encodedDataLength; inflight = Math.max(0, inflight - 1); lastNet = Date.now(); const q = reqs.get(e.requestId); if (q) { q.bytes = e.encodedDataLength; q.done = Date.now(); } });
-  cdp.on('Network.loadingFailed', () => { inflight = Math.max(0, inflight - 1); lastNet = Date.now(); });
+  cdp.on('Network.loadingFailed', (e) => { inflight = Math.max(0, inflight - 1); lastNet = Date.now(); const q = reqs.get(e.requestId); if (q) q.done = Date.now(); });
 
   const frames = [];
   cdp.on('Page.screencastFrame', (f) => {
@@ -137,7 +137,7 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
     const res = performance.getEntriesByType('resource');
     const fsDone = Math.max(0, ...res.filter((e) => fsImgs.includes(e.name)).map((e) => e.responseEnd));
     const intros = [...(window.__intros || new Map()).values()];
-    return { origin: performance.timeOrigin, ttfb: nav?.responseStart, dcl: nav?.domContentLoadedEventEnd, load: nav?.loadEventEnd, fsDone, fsImgs, intros, vis: window.__vis || [], ...window.__m };
+    return { origin: performance.timeOrigin, ttfb: nav?.responseStart, dcl: nav?.domContentLoadedEventEnd, load: nav?.loadEventEnd, fsDone, fsImgs, allImgs: [...document.images].map((i) => i.currentSrc).filter(Boolean), intros, vis: window.__vis || [], ...window.__m };
   }).catch(() => ({}));
   if (screenshotPath) await page.screenshot({ path: screenshotPath }).catch(() => {});
 
@@ -148,6 +148,22 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
   if (fr.length) {
     const raws = [];
     for (const f of fr) raws.push(await toRaw(f.data));
+    // A first screen that changes on its own after the page has loaded (a slideshow that advances, a video that starts
+    // playing) would otherwise count as still loading until its last change. A change after the load event while no file
+    // that can change the first screen is loading or just arrived is motion: progress is measured against the frame before it.
+    const loadEnd = (timing.origin || 0) + (timing.load || 0);
+    // Files that can change the first screen: anything but video and the page itself, leaving out pictures that are
+    // only shown further down (a gallery's lazy images arriving late is not the first screen loading).
+    const below = new Set((timing.allImgs || []).filter((u) => !(timing.fsImgs || []).includes(u)));
+    // A picture paints bit by bit while it downloads, so a file still on its way counts as well as one just in.
+    const loading = [...reqs.values()].filter((q) => q.type !== 'Media' && q.type !== 'Document' && !below.has(q.url));
+    const busy = (t) => loading.some((q) => q.start <= t && (!q.done || q.done > t - 600));
+    let motionAt = raws.length;
+    if (timing.load) for (let i = 1; i < raws.length; i++) {
+      if (fr[i].ts < loadEnd + 300 || similarity(raws[i - 1], raws[i]) > 0.97) continue;
+      if (!busy(fr[i].ts)) { motionAt = i; break; }
+    }
+    const settled = raws[motionAt - 1];
     const final = raws[raws.length - 1];
     // Frames on screen after the page settled: the one showing at settle time plus any later ones.
     let firstTail = fr.findIndex((f) => f.ts >= settleAt);
@@ -157,11 +173,12 @@ export async function measureOnce(url, profileName, { blockExternal = false, scr
     if (process.env.VC_DUMP) { fs.mkdirSync(process.env.VC_DUMP, { recursive: true }); fr.forEach((f, i) => { if (i >= firstTail) fs.writeFileSync(`${process.env.VC_DUMP}/${Math.round(f.ts - timing.origin)}.jpg`, f.data); }); }
     volatile = vm.share;
     const mask = vm.share < 0.9 ? vm.mask : null;
-    const base = similarity(raws[0], final, mask);
-    const prog = raws.map((r, i) => ({ t: fr[i].ts - timing.origin, p: base >= 0.999 ? 1 : Math.max(0, (similarity(r, final, mask) - base) / (1 - base)) }));
+    const ref = motionAt < raws.length ? settled : final;
+    const base = similarity(raws[0], ref, mask);
+    const prog = raws.slice(0, motionAt).map((r, i) => ({ t: fr[i].ts - timing.origin, p: base >= 0.999 ? 1 : Math.max(0, (similarity(r, ref, mask) - base) / (1 - base)) }));
     // Earliest time after which progress stays at or above the threshold.
     const firstStable = (th) => { let t = null; for (const x of prog) { if (x.p >= th) { if (t === null) t = x.t; } else t = null; } return t; };
-    if (process.env.VC_DEBUG) console.error(prog.filter((_, i) => i % 3 === 0).map((x) => `${Math.round(x.t)}:${x.p.toFixed(2)}`).join(" "));
+    if (process.env.VC_DEBUG) console.error(`motion at frame ${motionAt}/${fr.length}:`, prog.map((x) => `${Math.round(x.t)}:${x.p.toFixed(2)}`).join(" "));
     vc95 = firstStable(0.95);
     vc99 = firstStable(0.99);
     // A first frame identical to the final one means the page painted before our first frame.
