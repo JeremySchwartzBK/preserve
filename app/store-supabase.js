@@ -8,12 +8,12 @@ import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building the fast copy', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
 const STEP_KEYS = Object.keys(STEP_NAMES);
-const ERRORS = { 'plan-limit': null, 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Point out at least one new problem first.', 'refine-cap': 'This copy has had all 20 refinement rounds.' };
+const ERRORS = { 'plan-limit': null, 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
 
 let me = null, studio = null, copies = [], notes = [], ready = false, timer = null;
 const listeners = new Set();
 const emit = () => listeners.forEach((f) => f());
-const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `Your ${planOf().name} plan includes ${planOf().copies} live ${planOf().copies === 1 ? 'copy' : 'copies'}. Upgrade or archive one to make another.` : m); };
+const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `All ${planOf().copies} live ${planOf().copies === 1 ? 'Preserve' : 'Preserves'} on your ${planOf().name} plan are in use. Upgrade or archive one first.` : m); };
 // The plan's name and price come from the plan list; the copy allowance is whatever the database says (it can be raised per studio).
 const planOf = () => { const p = PLANS.find((x) => x.id === studio?.plan) || (studio?.plan === 'unlimited' ? { id: 'unlimited', name: 'Unlimited', price: 0, blurb: 'Set by the Preserve team.' } : PLANS[0]); return { ...p, copies: studio?.copy_limit ?? p.copies }; };
 
@@ -78,13 +78,13 @@ export const store = {
   setPlan() { alert('Plan changes go through Stripe checkout, which isn’t connected yet.'); },
   copies: () => copies,
   copy: (id) => copies.find((c) => c.id === id),
-  liveCount: () => copies.filter((c) => !['archived', 'failed'].includes(c.status)).length,
+  liveCount: () => copies.filter((c) => ['ready', 'paused'].includes(c.status)).length,
   link: (c) => `${VIEW}/${studio.slug}/${c.name}/`,
   embed(c) {
     return `<div style="position:relative;width:100%;aspect-ratio:16/10;max-height:90vh">\n<iframe title="Interactive preview of ${c.title}" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px" loading="eager" referrerpolicy="no-referrer"></iframe>\n<script>(function(f){f.src='${VIEW}/c/${c.id}/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>\n</div>`;
   },
   rename(id, name) { return rpc('rename_copy', { cid: id, new_name: name }).then(() => null, say); },
-  setStatus: (id, status) => act('set_copy_status', { cid: id, new_status: status }),
+  setStatus: (id, status) => rpc('set_copy_status', { cid: id, new_status: status }).then(() => null, say),
   remove: (id) => act('delete_copy', { cid: id }),
   notifications: () => notes,
   async markRead() { await sb.from('notification').update({ read_at: new Date().toISOString() }).is('read_at', null); refresh(); },
@@ -93,7 +93,11 @@ export const store = {
     const { error } = await sb.from('copy_pin').insert({ copy_id: id, kind: p.kind, body: p.body, block_id: p.blockId ?? null, x: p.x ?? null, y: p.y ?? null, layout: p.kind === 'issue' ? p.layout : null, version: c?.versions.at(-1)?.v, meta: { ...(p.meta || {}), label: p.label }, created_by: (await sb.auth.getUser()).data.user?.id });
     if (error) alert(say(error)); await refresh();
   },
-  async updatePin(id, pid, f) { const { error } = await sb.from('copy_pin').update({ body: f.body, meta: f.meta }).eq('id', pid); if (error) alert(say(error)); await refresh(); },
+  // f.blockId/x/y move a pin (a tour stop moved to a new spot).
+  async updatePin(id, pid, f) {
+    const row = { body: f.body, meta: f.meta, ...(f.blockId ? { block_id: f.blockId, x: f.x, y: f.y } : {}) };
+    const { error } = await sb.from('copy_pin').update(row).eq('id', pid); if (error) alert(say(error)); await refresh();
+  },
   async removePin(id, pid) { await sb.from('copy_pin').delete().eq('id', pid); await refresh(); },
   approve: (id) => act('approve_copy', { cid: id, ver: copies.find((c) => c.id === id).versions.at(-1).v }),
   async create(url) {

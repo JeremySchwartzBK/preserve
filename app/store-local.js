@@ -22,9 +22,9 @@ const SEED_FINDINGS = { '9x2arj4e': [
   f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'mobile', 'el:body', 0.467, 0.047),
 ] };
 export const PLANS = [
-  { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One live copy to try it out.' },
-  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten live copies, Tour and Credits on every one.' },
-  { id: 'agency', name: 'Agency', price: 39, copies: 50, blurb: 'Fifty live copies for a whole portfolio.' },
+  { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One live Preserve to try it out.' },
+  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten live Preserves, Tour and Credits on every one.' },
+  { id: 'agency', name: 'Agency', price: 39, copies: 50, blurb: 'Fifty live Preserves for a whole portfolio.' },
 ];
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
@@ -50,7 +50,10 @@ export const store = {
   setPlan(id) { db.studio.plan = id; const lim = this.plan().copies; db.copies.filter((c) => ['ready', 'paused'].includes(c.status)).slice(lim).forEach((c) => (c.status = 'archived')); emit(); },
   copies() { return db.copies.filter((c) => c.status !== 'deleted'); },
   copy(id) { return db.copies.find((c) => c.id === id); },
-  liveCount() { return db.copies.filter((c) => !['archived', 'deleted', 'failed'].includes(c.status)).length; },
+  // Live Preserves are what a plan limits. Starting a new one also needs room among the ones in use (live, pending or
+  // in review), as request_copy does.
+  liveCount() { return db.copies.filter((c) => ['ready', 'paused'].includes(c.status)).length; },
+  inUse() { return db.copies.filter((c) => !['archived', 'deleted', 'failed'].includes(c.status)).length; },
   link(c) { return `${VIEW}/${db.studio.slug}/${c.name}/`; },
   embed(c) {
     return `<div style="position:relative;width:100%;aspect-ratio:16/10;max-height:90vh">\n<iframe title="Interactive preview of ${c.title}" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px" loading="eager" referrerpolicy="no-referrer"></iframe>\n<script>(function(f){f.src='${VIEW}/c/${c.id}/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>\n</div>`;
@@ -61,18 +64,23 @@ export const store = {
     if (db.copies.some((c) => c.id !== id && (c.name === name || (c.oldNames || []).includes(name)))) return 'That name is taken in your studio.';
     const c = this.copy(id); if (c.name !== name) { c.oldNames = [...(c.oldNames || []), c.name]; c.name = name; } emit(); return null;
   },
-  setStatus(id, status) { this.copy(id).status = status; emit(); },
+  setStatus(id, status) {
+    const c = this.copy(id);
+    if (status === 'ready' && c.status === 'archived' && this.liveCount() >= this.plan().copies) return `All ${this.plan().copies} live Preserves on your plan are in use. Archive another one or upgrade first.`;
+    c.status = status; emit(); return null;
+  },
   remove(id) { this.copy(id).status = 'deleted'; emit(); },
   notifications() { return db.notifications; },
   markRead() { db.notifications.forEach((n) => (n.read = true)); emit(); },
   addPin(id, pin) { const c = this.copy(id); c.pins.push({ meta: {}, ...pin, at: now(), id: Math.random().toString(36).slice(2, 10), at: now() }); emit(); },
-  updatePin(id, pid, fields) { const p = this.copy(id).pins.find((x) => x.id === pid); if (p) Object.assign(p, fields); emit(); },
+  updatePin(id, pid, fields) { const p = this.copy(id).pins.find((x) => String(x.id) === String(pid)); if (p) Object.assign(p, fields); emit(); },
   removePin(id, pid) { const c = this.copy(id); c.pins = c.pins.filter((x) => x.id !== pid); emit(); },
-  approve(id) { const c = this.copy(id); c.status = 'ready'; c.live = c.versions.at(-1).v; c.findings = []; c.pins = c.pins.filter((p) => (p.kind !== 'issue' || p.meta?.report) && p.kind !== 'finding'); emit(); },
+  // Accepting goes live if the plan has room, and otherwise starts archived (approve_copy in schema-review-flow.sql).
+  approve(id) { const c = this.copy(id); c.status = this.liveCount() < this.plan().copies ? 'ready' : 'archived'; c.live = c.versions.at(-1).v; c.findings = []; c.pins = c.pins.filter((p) => (p.kind !== 'issue' || p.meta?.report) && p.kind !== 'finding'); emit(); },
   // Simulated copy job. The steps and timing mirror the real one (harness/make-copy.mjs, 2-4 minutes), sped up.
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
-    if (this.liveCount() >= this.plan().copies) return { error: `Your ${this.plan().name} plan includes ${this.plan().copies} live ${this.plan().copies === 1 ? 'copy' : 'copies'}. Upgrade or archive one to make another.` };
+    if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan includes ${this.plan().copies} live ${this.plan().copies === 1 ? 'Preserve' : 'Preserves'}. Upgrade or archive one to make another.` };
     const known = SEED_COPIES.find((s) => new URL(s.url).hostname === u.hostname);
     const id = known ? known.id : Math.random().toString(36).slice(2, 10);
     let name = (known?.name || u.hostname.replace(/^www\./, '').split('.')[0]).replace(/[^a-z0-9]+/g, '-');
@@ -84,9 +92,9 @@ export const store = {
       if (c.status !== 'processing') return;
       c.step++;
       if (c.step < steps.length) { emit(); setTimeout(tick, 1600); return; }
-      if (!known) { c.status = 'failed'; c.message = 'This demo can only make copies of the five test sites. Real copies run on the copy server, which isn’t connected yet.'; }
+      if (!known) { c.status = 'failed'; c.message = 'This demo can only preserve the five test sites. Real Preserves are made on our server, which the demo doesn’t use.'; }
       else { c.status = 'review'; c.versions.push({ v: 1, at: now() }); c.findings = known.findings || []; c.notes = known.notes; }
-      db.notifications.unshift({ at: now(), copy: c.id, text: c.status === 'review' ? `Your copy of ${c.title} is ready to review.` : `We couldn’t copy ${c.title}.`, read: false });
+      db.notifications.unshift({ at: now(), copy: c.id, text: c.status === 'review' ? `Your Preserve of ${c.title} is ready to review.` : `We couldn’t preserve ${c.title}.`, read: false });
       emit();
     };
     c.stepNames = steps;
