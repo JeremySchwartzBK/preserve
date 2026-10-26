@@ -24,11 +24,17 @@ export function rewriteUrls(text, variant, hosts, siteHost) {
 }
 
 // Fonts from Squarespace's font library are served from the Google Fonts originals google-fonts.py fetched, never from
-// Squarespace's files; a face Google doesn't have is not served at all (the quality check flags it).
-const LIBRARY_FONT = /\/fonts\/libraries\/sqsp\//;
+// Squarespace's files; a face Google doesn't have is not served at all (the quality check flags it). Adobe fonts from
+// Squarespace's font menu are licensed to Squarespace, so they are never served either: google-fonts.py picks the same
+// open family or a lookalike from Google Fonts in their place. The script also records every other font (owner uploads
+// and the rest) for the review, so it runs for any page that loaded a font.
+const LIBRARY_FONT = /\/fonts\/libraries\/sqsp\/|^https?:\/\/use\.typekit\.net\/af\//;
+const ANY_FONT = (u, e) => /\.(woff2?|ttf|otf|eot)(\?|$)/i.test(u) || /font/.test(e?.ct || '') || LIBRARY_FONT.test(u);
 function libraryFonts(siteDir, manifest) {
   const f = path.join(siteDir, 'fonts-google.json');
-  if (!fs.existsSync(f) && Object.keys(manifest).some((u) => LIBRARY_FONT.test(u))) {
+  // A capture sorted before the record existed (no "record") is sorted again, so rebuilds pick up the Adobe swap.
+  const stale = fs.existsSync(f) && !('record' in JSON.parse(fs.readFileSync(f, 'utf8')));
+  if ((!fs.existsSync(f) || stale) && Object.entries(manifest).some(([u, e]) => u.startsWith('http') && ANY_FONT(u, e))) {
     execFileSync('python3', [new URL('./google-fonts.py', import.meta.url).pathname, siteDir], { stdio: ['ignore', 'ignore', 'inherit'], timeout: 5 * 60e3 });
   }
   const fonts = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')).fonts : {};

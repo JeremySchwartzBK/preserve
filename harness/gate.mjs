@@ -163,12 +163,14 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   // Squarespace library fonts come from Google Fonts (google-fonts.py). A face Google doesn't have gets a lookalike,
   // which the copy notes; only a face with neither is left out (its text shows in the next font the site's styles list).
   const gfFile = path.join(siteDir, 'fonts-google.json');
+  let fontRecord = [];
   if (fs.existsSync(gfFile)) {
     const gf = JSON.parse(fs.readFileSync(gfFile, 'utf8'));
     const gone = [...new Set((gf.missing || []).map((m) => [m.family || 'unknown font', m.weight, m.style !== 'normal' && m.style, '(' + m.reason + ')'].filter(Boolean).join(' ')))];
     if (gone.length) fail('font-not-on-google-fonts', gone.slice(0, 5).join('; '));
-    const swapped = [...new Set(Object.values(gf.fonts || {}).filter((f) => f.lookalike_for).map((f) => f.lookalike_for))];
-    if (swapped.length) notes.push({ limitation: null, text: `We used a lookalike for ${swapped.length === 1 ? 'one font' : `${swapped.length} fonts`} we couldn’t get (${swapped.join(', ')}).`, detail: Object.values(gf.fonts).filter((f) => f.lookalike_for).map((f) => `${f.lookalike_for} -> ${f.family} ${f.weight} ${f.style}`).join('; ') });
+    const swapped = [...new Set(Object.values(gf.fonts || {}).filter((f) => f.lookalike_for && !f.adobe).map((f) => f.lookalike_for))];
+    if (swapped.length) notes.push({ limitation: null, text: `We used a lookalike for ${swapped.length === 1 ? 'one font' : `${swapped.length} fonts`} we couldn’t get (${swapped.join(', ')}).`, detail: Object.values(gf.fonts).filter((f) => f.lookalike_for && !f.adobe).map((f) => `${f.lookalike_for} -> ${f.family} ${f.weight} ${f.style}`).join('; ') });
+    fontRecord = gf.record || [];
     const lacking = Object.values(gf.fonts || {}).filter((f) => f.lacks && !f.lookalike_for);
     if (lacking.length) warnings.push(`Google Fonts versions lack characters Squarespace's had: ${lacking.map((f) => `${f.family} ${f.weight} ${f.subset} (${f.lacks})`).join(', ')}`);
   }
@@ -243,6 +245,18 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     finally { srv2.close(); }
   }
 
+  // Fonts by who holds the license (google-fonts.py), each marked with the layouts that show it, for the review's Fonts
+  // tab and the confirmation at Publish. Adobe fonts swapped for lookalikes get a note when a visitor would see them.
+  if (fontRecord.length) {
+    const w = (x) => String(x).replace('normal', '400').replace('bold', '700').split(' ')[0];
+    const same = (r, u) => u.family.toLowerCase() === String(r.family).toLowerCase() && w(u.weight) === w(r.weight) && (u.style === 'normal') === (r.style === 'normal');
+    info.fonts = fontRecord.map((r) => ({ ...r, shown: Object.entries(info.layouts).filter(([, c]) => (c.fontsUsed || []).some((u) => same(r, u))).map(([l]) => l) }));
+    const name = (f) => f.split(/[-_ ]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' ');
+    const adobe = new Map();
+    for (const r of info.fonts) if (r.holder === 'platform' && r.action === 'lookalike' && r.shown.length) adobe.set(name(r.family), r.served_as);
+    if (adobe.size) notes.push({ limitation: null, text: `${adobe.size === 1 ? 'One font' : `${adobe.size} fonts`} on the live site ${adobe.size === 1 ? 'is an Adobe font' : 'are Adobe fonts'} that Squarespace licenses for its own sites only, so this preserve uses ${adobe.size === 1 ? 'a lookalike' : 'lookalikes'}: ${[...adobe].map(([a, b]) => `${a} (now ${b})`).join(', ')}. You can upload your own licensed copy when you review.`, detail: 'adobe-fonts' });
+  }
+
   // Known limitations present on the original page.
   info.detected = detect(siteDir, exportReport);
   for (const [n, what] of Object.entries(info.detected)) {
@@ -251,7 +265,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
