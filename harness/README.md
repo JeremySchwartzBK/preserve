@@ -232,6 +232,28 @@ carries a note saying so. Only a face with neither (Google unreachable) is left 
 each family's license (OFL text with its copyright line) as `a/fonts-license-<hash>.txt`, linked from each page's
 `<link rel="license">`. The raw capture is left as captured.
 
+Every other font is sorted by who holds its license (Jeremy 2026-10-19; built 2026-10-26), in the same
+`google-fonts.py` pass, which `server.mjs` now runs for any page that loaded a font:
+- **Platform:** Adobe fonts from Squarespace's font menu (`use.typekit.net/af/...`, on Squarespace's Adobe account). The
+  license is Squarespace's, so Adobe's files are never served. An open family Adobe also serves (Bebas Neue) comes from
+  Google Fonts under its own name, if it is in Google's open catalog (github.com/google/fonts; Google also answers for
+  some fonts outside it, e.g. Proxima Nova, which are not ours to use). Anything else gets a lookalike: a short curated
+  list for the ones seen most (Proxima Nova -> Montserrat, Freight Sans -> Lato, Acumin -> Inter, Omnes -> Nunito, ...;
+  a starting point until the side-by-side lookalike review is done), else the lookalike of its kind. The @font-face
+  family name stays, so the page's styles are untouched; only the file changes. The quality check adds a note naming
+  the swaps a visitor would see.
+- **Designer:** fonts the site owner uploaded (`static1.squarespace.com/static/...` and the CDN's `content/`), trials
+  included. Kept as captured, on the designer's word.
+- **Anyone:** Squarespace's library (above) and Google Fonts the page linked itself.
+- **Other:** fonts from any other host (widget services). Kept.
+
+`fonts-google.json` keeps the result as `record`: one row per face with holder, source, what was done (`from-google`,
+`open-equivalent`, `lookalike`, `kept`, `left-out`), the font served in its place, and for kept fonts the font's own
+copyright and license lines plus a `trial_hint`. The quality check marks each row with the layouts that actually draw
+with it (`check.mjs` `fontsUsed`: faces the browser loaded after scrolling through) and returns it as `info.fonts`, which
+the runner stores with the job's verdict. That is the data for the review's Fonts tab and the confirmation at Publish
+(plan: "Sign-up and first preserve"). A capture sorted before the record existed is sorted again on the next build.
+
 Our own stylesheet (Jeremy 2026-10-19, "a copy is a more robust screenshot"): the job runs
 `own-css.mjs <stage>` after export. On by default for new copies since Jeremy's go-ahead (2026-10-19); `--no-own-css`
 or `PRESERVE_OWN_CSS=0` (the runner passes its environment through) turns it off, which is the rollback. Copies made

@@ -158,6 +158,9 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   }).map((e) => (e.className.toString() || e.tagName).slice(0, 60)));
   const stuck = stuckList.length;
   out.stuckInvisible = stuck; out.stuckSamples = stuckList.slice(0, 4);
+  // Faces the page actually drew with, once scrolled through (a browser loads a face only when text needs it), so the
+  // review lists only fonts a visitor sees.
+  out.fontsUsed = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => ({ family: f.family.replace(/^["']|["']$/g, ''), weight: f.weight, style: f.style })));
   // Positions are taken at the top of the page; block-relative positions don't depend on the scroll.
   if (stuck) spot('blocks-stay-invisible', await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => { let o = 1; for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; o *= +s.opacity; } return o < 0.1; }).slice(0, 3).map((e) => window.__preserveAnchor(e))));
   spot('broken-images', await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').slice(0, 3).map((i) => window.__preserveAnchor(i))));
