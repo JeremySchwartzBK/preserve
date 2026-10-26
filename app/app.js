@@ -401,7 +401,7 @@ async function accept(id) {
   if (!c || c.status === 'review') return;   // the database said no (the reason was shown)
   view.tab = 'share';
   view.flash = c.status === 'archived'
-    ? `Accepted. All ${store.plan().copies} live Preserves on your plan are in use, so this one starts in Archived. Archive another one or upgrade to make it live.`
+    ? `Accepted. Your plan’s ${plural(store.plan().copies, 'live Preserve')} ${store.plan().copies === 1 ? 'is' : 'are'} already in use, so this one starts in Archived. Archive another one or upgrade to make it live.`
     : 'Accepted and live. Your link and embed code are below. You can change the tour and credits any time.';
   copyPage(id);
 }

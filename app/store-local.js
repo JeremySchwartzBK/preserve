@@ -66,7 +66,7 @@ export const store = {
   },
   setStatus(id, status) {
     const c = this.copy(id);
-    if (status === 'ready' && c.status === 'archived' && this.liveCount() >= this.plan().copies) return `All ${this.plan().copies} live Preserves on your plan are in use. Archive another one or upgrade first.`;
+    if (status === 'ready' && c.status === 'archived' && this.liveCount() >= this.plan().copies) return `Your plan’s ${this.plan().copies} live ${this.plan().copies === 1 ? 'Preserve is' : 'Preserves are'} already in use. Archive another one or upgrade first.`;
     c.status = status; emit(); return null;
   },
   remove(id) { this.copy(id).status = 'deleted'; emit(); },

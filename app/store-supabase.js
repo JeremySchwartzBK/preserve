@@ -13,7 +13,7 @@ const ERRORS = { 'plan-limit': null, 'bad-url': 'That doesn’t look like a web 
 let me = null, studio = null, copies = [], notes = [], ready = false, timer = null;
 const listeners = new Set();
 const emit = () => listeners.forEach((f) => f());
-const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `All ${planOf().copies} live ${planOf().copies === 1 ? 'Preserve' : 'Preserves'} on your ${planOf().name} plan are in use. Upgrade or archive one first.` : m); };
+const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `Your ${planOf().name} plan’s ${planOf().copies} live ${planOf().copies === 1 ? 'Preserve is' : 'Preserves are'} already in use. Upgrade or archive one first.` : m); };
 // The plan's name and price come from the plan list; the copy allowance is whatever the database says (it can be raised per studio).
 const planOf = () => { const p = PLANS.find((x) => x.id === studio?.plan) || (studio?.plan === 'unlimited' ? { id: 'unlimited', name: 'Unlimited', price: 0, blurb: 'Set by the Preserve team.' } : PLANS[0]); return { ...p, copies: studio?.copy_limit ?? p.copies }; };
 
