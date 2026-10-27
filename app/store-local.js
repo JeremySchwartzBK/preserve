@@ -22,9 +22,9 @@ const SEED_FINDINGS = { '9x2arj4e': [
   f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'mobile', 'el:body', 0.467, 0.047),
 ] };
 export const PLANS = [
-  { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One live Preserve to try it out.' },
-  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten live Preserves, Tour and Credits on every one.' },
-  { id: 'agency', name: 'Agency', price: 39, copies: 50, blurb: 'Fifty live Preserves for a whole portfolio.' },
+  { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One Live Preserve to try it out.' },
+  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten Live Preserves, Tour and Credits on every one.' },
+  { id: 'agency', name: 'Agency', price: 39, copies: 50, blurb: 'Fifty Live Preserves for a whole portfolio.' },
 ];
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
@@ -66,7 +66,7 @@ export const store = {
   },
   setStatus(id, status) {
     const c = this.copy(id);
-    if (status === 'ready' && c.status === 'archived' && this.liveCount() >= this.plan().copies) return `Your plan’s ${this.plan().copies} live ${this.plan().copies === 1 ? 'Preserve is' : 'Preserves are'} already in use. Archive another one or upgrade first.`;
+    if (status === 'ready' && c.status === 'archived' && this.liveCount() >= this.plan().copies) return 'Your plan’s Live Preserves are all in use. Archive a Live Preserve or upgrade your plan first.';
     c.status = status; emit(); return null;
   },
   remove(id) { this.copy(id).status = 'deleted'; emit(); },
@@ -80,7 +80,7 @@ export const store = {
   // Simulated copy job. The steps and timing mirror the real one (harness/make-copy.mjs, 2-4 minutes), sped up.
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
-    if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan includes ${this.plan().copies} live ${this.plan().copies === 1 ? 'Preserve' : 'Preserves'}. Upgrade or archive one to make another.` };
+    if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan’s Preserves are all in use. Archive one or upgrade your plan to make another.` };
     const known = SEED_COPIES.find((s) => new URL(s.url).hostname === u.hostname);
     const id = known ? known.id : Math.random().toString(36).slice(2, 10);
     let name = (known?.name || u.hostname.replace(/^www\./, '').split('.')[0]).replace(/[^a-z0-9]+/g, '-');

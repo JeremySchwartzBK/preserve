@@ -13,6 +13,13 @@ const when = (iso) => { const d = (Date.now() - Date.parse(iso)) / 1000; return 
 const day = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const STATUS = { processing: ['Pending', 'busy'], review: ['Ready to review', 'attn'], ready: ['Live', 'ok'], paused: ['Paused', 'muted'], archived: ['Archived', 'muted'], failed: ['Couldn’t preserve', 'bad'] };
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+// House style (Jeremy, 2026-10-27): in sentences, numbers under 10 are spelled out; labels and counters keep digits.
+// Status names (Live, Archived, Pending…) are capitalized wherever they appear in a sentence.
+const NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const num = (n) => (n >= 0 && n < 10 ? NUM[n] : String(n));
+const count = (n, one, many = one + 's') => `${num(n)} ${n === 1 ? one : many}`;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const planFull = () => { const n = store.plan().copies; return n === 1 ? 'Your plan provides for one Live Preserve, which is currently in use.' : `Your plan provides for ${count(n, 'Live Preserve')}, which are all currently in use.`; };
 const thumb = (c) => ['minaab', 'breathpod', 'kosa', 'designforward', 'xanadu'].find((s) => c.url.includes(s.replace('kosa', 'kosa.squarespace'))) || null;
 
 function shell(body, { back } = {}) {
@@ -42,7 +49,7 @@ function confirmCard({ title, body, ok, cancel = 'Cancel', danger }) {
     dlg.showModal();
   });
 }
-const confirmDelete = () => confirmCard({ title: 'Delete this Preserve?', body: 'Deleting is permanent and can’t be undone. Its link and embed code will stop working.', ok: 'Delete', danger: true });
+const confirmDelete = () => confirmCard({ title: 'Confirm Deletion', body: 'Once a Preserve is deleted it can’t be recovered and its links and embed codes will stop working.', ok: 'Delete', danger: true });
 
 // 1. Sign in ---------------------------------------------------------------------------------------------------
 function signIn() {
@@ -86,7 +93,7 @@ function dashboard() {
 
 function drawList() {
   const plan = store.plan();
-  $('#cap').textContent = plan.copies >= 100000 ? `${plural(store.liveCount(), 'live Preserve')} · ${plan.name} plan` : `${store.liveCount()} of ${plan.copies} live on your ${plan.name} plan`;
+  $('#cap').textContent = plan.copies >= 100000 ? `${plural(store.liveCount(), 'Live Preserve')} · ${plan.name} plan` : `${store.liveCount()} of ${plan.copies} Live on your ${plan.name} plan`;
   const q = dash.q.trim().toLowerCase();
   const all = store.copies().filter((c) => c.status !== 'deleted').sort((a, b) => b.created.localeCompare(a.created));
   const shown = all.filter((c) => inFilter(c, dash.filter) && (!q || c.title.toLowerCase().includes(q) || c.url.toLowerCase().includes(q)));
@@ -165,7 +172,7 @@ function copyPage(id) {
   }
   const review = c.status === 'review';
   const tabs = review ? [['check', '1. Look and Feel'], ['tour', '2. Tour'], ['credits', '3. Credits']]
-    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits'], ['report', 'Report'], ['manage', 'Manage']];
+    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits'], ['report', 'Report an issue']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
   if (view.frameKey !== key || !$('#fr')) {
@@ -320,7 +327,7 @@ function panel(c, review) {
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
         <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
           <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button></span></li>`).join('')}</ol>` : ''}
-      ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${plural(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
+      ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
       ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
       <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
@@ -328,9 +335,9 @@ function panel(c, review) {
       <button class="link" id="del">Delete this Preserve</button></div>`;
   } else if (view.tab === 'tour') {
     const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
-    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Point out design decisions. Visitors see numbered dots they can open, under a “Tour” button.</p>
-      ${fix ? `<p class="note">${plural(fix, 'issue')} ${fix === 1 ? 'is' : 'are'} waiting for a refinement. Tour stops carry over when the Preserve is refined.</p>` : ''}
-      ${lost ? `<p class="note">${plural(lost, 'stop')} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
+    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
+      ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
+      ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', '+ Add a stop')}</p>
       ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
       ${review ? '<div class="stack"><button class="btn wide" data-t2="credits">Next: Create Credits</button></div>' : ''}`;
@@ -348,12 +355,9 @@ function panel(c, review) {
       <p class="fine">Old links keep working after a name change. Embed codes never change.</p>
 `;
   } else if (view.tab === 'report') {
-    P.innerHTML = `<h2>Report a problem</h2><p class="sub">To report an issue, click <b>Flag an issue</b>, drop a pin, and tell us what’s wrong.</p>
+    P.innerHTML = `<h2>Report an issue</h2><p class="sub">Something not working on this Preserve? Click <b>Flag an issue</b>, drop a pin, and tell us what’s wrong. We’ll look into it.</p>
       <p>${pinButton('report', '+ Flag an issue')}</p>
       <h3 class="semi">Reported</h3>${pinList(c, 'report', { empty: 'Nothing reported yet.', remove: false })}`;
-  } else {
-    P.innerHTML = `<h2>Manage</h2><div class="row wrap"><button class="btn small secondary" id="arch">${c.status === 'archived' ? 'Make live' : 'Archive'}</button><button class="btn small danger" id="del">Delete</button></div>
-      <p class="fine">Archived Preserves stop showing to visitors and don’t count toward your plan. Deleting is permanent.</p>`;
   }
   const on = (sel, f) => { const el = P.querySelector(sel); if (el) el.onclick = f; };
   P.querySelectorAll('[data-pin]').forEach((b) => (b.onclick = () => startPin(b.dataset.pin)));
@@ -376,7 +380,6 @@ function panel(c, review) {
   on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => copyText(store.embed(c), 'Embed code'));
-  on('#arch', async () => { const err = await store.setStatus(id, c.status === 'archived' ? 'ready' : 'archived'); if (err) toast(err); });
   on('#addcr', () => { const row = document.createElement('div'); row.innerHTML = credRow(null); $('#crl').appendChild(row.firstElementChild); wireCred(id); row.remove(); $('#crl').lastElementChild.querySelector('input').focus(); });
   wireCred(id);
   const nm = $('#nm');
@@ -393,7 +396,7 @@ function panel(c, review) {
 async function accept(id) {
   const fix = toFix(store.copy(id));
   const yes = await confirmCard({ title: 'Accept this Preserve?',
-    body: `Once a Preserve has been accepted, it cannot be refined.${fix ? ` You still have ${plural(fix, 'issue')} marked to fix that ${fix === 1 ? 'hasn’t' : 'haven’t'} been refined.` : ''}`,
+    body: `Once a Preserve has been accepted, it cannot be refined.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
     ok: 'Accept Preserve', cancel: 'Review Preserve' });
   if (!yes) { view.tab = 'check'; copyPage(id); return; }
   await store.approve(id);
@@ -401,8 +404,8 @@ async function accept(id) {
   if (!c || c.status === 'review') return;   // the database said no (the reason was shown)
   view.tab = 'share';
   view.flash = c.status === 'archived'
-    ? `Accepted. Your plan’s ${plural(store.plan().copies, 'live Preserve')} ${store.plan().copies === 1 ? 'is' : 'are'} already in use, so this one starts in Archived. Archive another one or upgrade to make it live.`
-    : 'Accepted and live. Your link and embed code are below. You can change the tour and credits any time.';
+    ? `Accepted. ${planFull()} This Preserve is currently Archived but can be made Live by Archiving a Live Preserve or by upgrading your plan.`
+    : 'Accepted and Live. Your link and embed code are below. You can change the tour and credits any time.';
   copyPage(id);
 }
 
@@ -426,7 +429,7 @@ function wireCred(id) {
 // 5. Plan ------------------------------------------------------------------------------------------------------
 function planPage() {
   const cur = store.plan();
-  shell(`<div class="head"><div><h1>Your plan</h1><p class="sub">You have ${plural(store.liveCount(), 'live Preserve')}.</p></div></div>
+  shell(`<div class="head"><div><h1>Your plan</h1><p class="sub">You have ${count(store.liveCount(), 'Live Preserve')}.</p></div></div>
     <section class="plans">${PLANS.map((p) => `<div class="plan ${p.id === cur.id ? 'cur' : ''}"><h2>${p.name}</h2><div class="price">${p.price ? `$${p.price}<small>/month</small>` : 'Free'}</div><p>${p.blurb}</p>
       ${p.id === cur.id ? '<span class="pill ok">Current plan</span>' : `<button class="btn ${p.price > cur.price ? '' : 'secondary'}" data-p="${p.id}">${p.price > cur.price ? 'Upgrade' : 'Downgrade'}</button>`}</div>`).join('')}</section>
     <p class="fine">Payment, receipts and card changes are handled by Stripe. <button class="link" id="portal">Manage billing</button> · Prices are placeholders.</p>`, { back: '#/' });
@@ -434,7 +437,7 @@ function planPage() {
     const p = PLANS.find((x) => x.id === b.dataset.p);
     const over = store.liveCount() - p.copies;
     const msg = p.price > cur.price ? `Upgrade to ${p.name} for $${p.price}/month? (In the real app this opens Stripe checkout.)`
-      : `Switch to ${p.name}? It takes effect at the end of this billing period.` + (over > 0 ? `\n\n${p.name} includes ${plural(p.copies, 'live Preserve')}, so ${over} of yours will be archived then: their links will show “preview paused”. Nothing is deleted, and you can choose which Preserves stay live or restore them by upgrading again.` : '');
+      : `Switch to ${p.name}? It takes effect at the end of this billing period.` + (over > 0 ? `\n\n${p.name} provides for ${count(p.copies, 'Live Preserve')}, so ${num(over)} of yours will be Archived then: their links will show “preview paused”. Nothing is deleted, and you can choose which Preserves stay Live or make them Live again by upgrading.` : '');
     if (confirm(msg)) { store.setPlan(p.id); toast(`You’re on ${p.name}.`); }
   }));
   $('#portal').onclick = () => alert('In the real app this opens Stripe’s billing page for your card, invoices and cancelling.');

@@ -155,3 +155,5 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
    preview controls wrap instead of being cut off. */
 @media (max-width:860px){.split{grid-template-columns:1fr}.copyhead .toolbar{flex-wrap:wrap;justify-content:flex-start;width:100%}.copyhead .hint{flex-basis:100%}}
 .side p.sub+p.sub{margin-top:.6rem}
+/* Status pills sit at the same height on every card, measured from the screenshot, even when a title wraps. */
+.copy .meta{align-items:flex-start}.copy .meta .pill{margin-top:2px;flex-shrink:0}

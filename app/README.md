@@ -80,3 +80,6 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
   to review / Pending / Archived. Cards show the capture date and Copy link, Copy embed code, a Live/Archived switch,
   Review and Delete. Deleting asks first and says it's permanent.
 - User-testing questions are collected in /mnt/project-files/product/user-testing-questions.md.
+- Round 2 (2026-10-27): house style is numbers under 10 spelled out in sentences (digits in labels and counters) and
+  status names capitalized in sentences (Live, Archived, Archiving). Live Preserves lose the Manage tab (card actions
+  cover it); "Report an issue" is the tab for telling us something is broken.
