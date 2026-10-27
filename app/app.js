@@ -155,7 +155,8 @@ const KIND_FOR = { check: 'issue', report: 'issue', tour: 'tour' };
 // a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
 const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
 const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload');
-const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt).length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
+// Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
+const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
 function copyPage(id) {
   const c = store.copy(id);
@@ -305,10 +306,16 @@ const pinList = (c, tab, opts = {}) => {
   const list = pinsFor(c, tab);
   if (!list.length) return `<p class="sub">${opts.empty}</p>`;
   return `<ol class="pins ${tab === 'tour' ? 'tour' : ''}">${list.map((p) => `<li>${p.meta?.title ? `<b>${esc(p.meta.title)}</b>` : ''}<span class="pbody">${esc(p.body)}</span>
-    <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
+    <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
+    ${tab === 'check' && p.meta?.round_result ? roundResult(p) : ''}
     ${tab === 'tour' && view.missing.includes(p.blockId) ? '<small class="warn">This stop no longer lands on the page. Move it to the right spot.</small>' : ''}
     <span class="row"><button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
 };
+
+// How a pin came out in the last refinement (the check compares the pinned spot with the live site).
+const roundResult = (p) => p.meta.round_result === 'looks-fixed' ? '<small class="ok">Looks fixed in the latest refinement. Remove the pin if you agree.</small>'
+  : p.meta.round_result === 'still-different' ? '<small class="warn">Still different from your site after the latest refinement. It will be included in the next one.</small>'
+  : '<small class="warn">We couldn’t find this spot after the latest refinement. Check it, and pin it again if it’s still wrong.</small>';
 
 function panel(c, review) {
   const id = c.id, P = $('#panel');

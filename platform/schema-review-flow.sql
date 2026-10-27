@@ -47,3 +47,30 @@ begin
 end $$;
 
 grant execute on function live_copy_count(uuid) to authenticated;
+
+-- Refinements (Jeremy, 2026-10-27): no one should have to pin the same issue twice. Every open pin goes into each
+-- round, and the runner records how each one came out (copy_pin meta.round_result: looks-fixed, still-different or
+-- not-found). A pin still different after a round is enough to ask for another one, without pinning it again.
+create or replace function refine_copy(cid text) returns int language plpgsql security definer set search_path = public as $$
+declare c copy; pins jsonb; last_round timestamptz; rounds int;
+begin
+  select * into c from copy where id = cid and is_member(studio_id);
+  if c.id is null then raise exception 'not-found'; end if;
+  if c.status <> 'review' then raise exception 'not-in-review'; end if;
+  select count(*) - 1, max(queued_at) into rounds, last_round from copy_job where copy_id = cid;
+  if rounds >= 20 then raise exception 'refine-cap'; end if;
+  if not exists (select 1 from copy_pin where copy_id = cid and resolved_at is null and (
+        (kind = 'issue' and coalesce(meta->>'report', '') = '' and (created_at > last_round or meta->>'round_result' in ('still-different', 'not-found')))
+     or (kind = 'finding' and meta->>'verdict' = 'fix'))) then raise exception 'no-new-notes'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object('block_id', block_id, 'x', x, 'y', y, 'layout', layout,
+           'body', case when kind = 'finding' then body || coalesce(' — ' || nullif(meta->>'note', ''), '') else body end,
+           'from', case when kind = 'finding' then 'quality-check:' || coalesce(meta->>'code', '') else 'person' end,
+           'version', version, 'at', created_at) order by created_at), '[]')
+    into pins from copy_pin where copy_id = cid and resolved_at is null and (
+        (kind = 'issue' and coalesce(meta->>'report', '') = '') or (kind = 'finding' and meta->>'verdict' = 'fix'));
+  insert into copy_job (copy_id, attempt, url, user_context) values (cid, rounds + 2, c.source_url, pins);
+  if rounds + 1 >= 20 then update copy set flagged_at = now() where id = cid; end if;
+  update copy set status = 'processing', updated_at = now() where id = cid;
+  return rounds + 1;
+end $$;
+grant execute on function refine_copy(text) to authenticated;

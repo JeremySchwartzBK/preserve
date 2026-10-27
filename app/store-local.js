@@ -140,7 +140,9 @@ export const store = {
   MAX_ROUNDS: 20,
   refine(id) {
     const c = this.copy(id); c.status = 'processing'; c.step = 0; c.rounds = (c.rounds || 0) + 1; c.lastRoundAt = now(); emit();
-    const finish = () => { c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); db.notifications.unshift({ at: now(), copy: c.id, text: `Refinement ${c.rounds} of ${c.title} is ready to review.`, read: false }); emit(); };
+    // The demo can't compare with the live site: the oldest open pin stays "still different", the rest "look fixed".
+    const judge = () => c.pins.filter((p) => p.kind === 'issue' && !p.meta?.report).forEach((p, i) => { p.meta = { ...p.meta, round_result: i === 0 ? 'still-different' : 'looks-fixed', round_version: c.versions.length + 1 }; });
+    const finish = () => { judge(); c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); db.notifications.unshift({ at: now(), copy: c.id, text: `Refinement ${c.rounds} of ${c.title} is ready to review.`, read: false }); emit(); };
     const tick = () => { if (c.status !== 'processing') return; c.step++; if (c.step < c.stepNames.length) { emit(); setTimeout(tick, 1400); } else finish(); };
     c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building the fast copy', 'Removing trackers and contact details', 'Comparing it with the live site'];
     setTimeout(tick, 1200);
