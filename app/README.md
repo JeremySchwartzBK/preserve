@@ -83,3 +83,14 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 - Round 2 (2026-10-27): house style is numbers under 10 spelled out in sentences (digits in labels and counters) and
   status names capitalized in sentences (Live, Archived, Archiving). Live Preserves lose the Manage tab (card actions
   cover it); "Report an issue" is the tab for telling us something is broken.
+
+## Fonts step (review, 2026-10-27)
+
+When a Preserve has fonts to check (`copy.fonts`), review starts with **Fonts**: one row per font with the original's
+name, a picture of it in the page's own words (taken at capture, since Adobe files can't be shipped), the font the
+Preserve uses, and Show on page. Choices follow who holds the license: Squarespace's Adobe fonts get a lookalike unless
+the person uploads their own file; fonts the owner uploaded are kept unless they say they don't have the rights; a font
+covered by a file saved in Your fonts needs no look. An upload is checked (same family, matching widths) and rebuilds
+only the fonts. Above Accept Preserve, the person confirms rights to the fonts kept as on the site; that, and every
+choice, is recorded with who and when. Demo only so far: the database side (copy fonts, studio fonts, the record) and
+the capture-time samples are still to build, and Show on page outlining needs the Preserve viewer redeployed.

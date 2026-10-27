@@ -157,3 +157,15 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 .side p.sub+p.sub{margin-top:.6rem}
 /* Status pills sit at the same height on every card, measured from the screenshot, even when a title wraps. */
 .copy .meta{align-items:flex-start}.copy .meta .pill{margin-top:2px;flex-shrink:0}
+/* Fonts step (review) */
+.tabs .count{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--attn);color:#fff;font-size:.7rem;font-weight:700;line-height:18px;text-align:center;margin-left:2px}
+.font{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}.font.todo{border-left:3px solid var(--attn)}
+.font .row.spread{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.font .fine{margin:4px 0 8px}.fine.bad{color:var(--bad)}
+.fsamples{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin:6px 0 10px}
+.fsamples .fl{font-size:.72rem;color:var(--sub);white-space:nowrap}
+.fsamples img{height:22px;width:auto;max-width:100%;object-fit:contain;object-position:left;background:#fff}
+.fsample{font-size:17px;line-height:22px;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.certify{display:flex;gap:8px;align-items:flex-start;font-size:.85rem;font-weight:400;margin:0 0 10px;color:var(--ink)}.certify input{margin:3px 0 0;width:auto;flex:none}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.font .spin{display:inline-block;width:12px;height:12px;border-width:2px;border-color:var(--line);border-top-color:var(--accent);vertical-align:-1px;margin-right:4px}

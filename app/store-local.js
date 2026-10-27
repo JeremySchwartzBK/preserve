@@ -1,7 +1,7 @@
 // Demo data store: keeps everything in this browser (localStorage) so the screens can be clicked through before the
 // real database is connected. Same shape as platform/schema.sql; store-supabase.js will replace it with no screen changes.
 // New copies are simulated here: the real copy job runs on a server, which this demo doesn't have.
-const KEY = 'preserve-demo-v4';
+const KEY = 'preserve-demo-v5';
 const VIEW = 'https://preserve-view.pages.dev';
 const now = () => new Date().toISOString();
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
@@ -21,6 +21,22 @@ const SEED_FINDINGS = { '9x2arj4e': [
   f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'desktop', 'el:body', 0.506, 0.067),
   f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'mobile', 'el:body', 0.467, 0.047),
 ] };
+// Fonts on the kosa copy that need the person's look (font licensing, Jeremy 2026-10-19/26): who holds each license
+// decides what the Preserve uses. The three uploaded to kosa's site are real (trial builds); Omnes Pro (an Adobe font
+// from Squarespace's menu) and the saved GT Standard upload are staged so the demo shows every kind of row.
+// sample: a picture of the font in the page's own words, taken at capture (Adobe files can't be shipped, pictures can).
+// block: where it shows on the page. look: the open-license lookalike from Google Fonts.
+const SEED_FONTS = { '9x2arj4e': [
+  { id: 'omnes', name: 'Omnes Pro', holder: 'platform', sample: 'demo/font-omnes.png', text: 'KOSA RESIDENCE', look: 'Nunito', block: 'block-yui_3_17_2_1_1784647111340_5833', staged: true },
+  { id: 'malamocco', name: 'Malamocco', holder: 'user', sample: 'demo/font-malamocco.png', text: '[ LIVE ]  [ EXPLORE ]  [ CREATE ]', look: 'Work Sans', block: 'block-yui_3_17_2_1_1784651790444_8028' },
+  { id: 'pixel', name: 'That That New Pixel', holder: 'user', sample: 'demo/font-pixel.png', text: 'Kosa', look: 'Pixelify Sans', block: 'block-e21d97e9c46d6622a3aa' },
+  { id: 'gt', name: 'GT Standard', holder: 'user', sample: 'demo/font-gt-standard.png', text: 'HOME  RESIDENCY  STORIES', look: 'Inter', block: 'el:header', covered: 'gt-standard' },
+] };
+// The studio's saved font files ("Your fonts"): a later Preserve using the same font is covered by the upload.
+const SEED_STUDIO_FONTS = [{ id: 'gt-standard', name: 'GT Standard', file: 'GTStandard-M-Regular.woff2', at: ago(15) }];
+const FONT_FILE = /\.(woff2|woff|otf|ttf)$/i;
+const squash = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
 export const PLANS = [
   { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One Live Preserve to try it out.' },
   { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten Live Preserves, Tour and Credits on every one.' },
@@ -39,8 +55,8 @@ export const store = {
   reset() { localStorage.removeItem(KEY); db = null; emit(); },
   me() { return db?.person || null; },
   signIn(email, name) {
-    db = { person: { email, name: name || email.split('@')[0] }, studio: { slug: 'demo', name: (name || 'My') + ' Studio', plan: 'studio' },
-      copies: SEED_COPIES.map((c) => ({ ...c, pins: (SEED_FINDINGS[c.id] || []).map((p, i) => ({ ...p, id: 'f' + i, at: c.created })), versions: [{ v: 1, at: c.created }], live: c.status === 'ready' ? 1 : null })), notifications: [] };
+    db = { person: { email, name: name || email.split('@')[0] }, studio: { slug: 'demo', name: (name || 'My') + ' Studio', plan: 'studio', fonts: SEED_STUDIO_FONTS },
+      copies: SEED_COPIES.map((c) => ({ ...c, fonts: SEED_FONTS[c.id] ? SEED_FONTS[c.id].map((x) => ({ ...x })) : null, pins: (SEED_FINDINGS[c.id] || []).map((p, i) => ({ ...p, id: 'f' + i, at: c.created })), versions: [{ v: 1, at: c.created }], live: c.status === 'ready' ? 1 : null })), notifications: [] };
     emit();
   },
   signOut() { db = null; emit(); },
@@ -75,8 +91,27 @@ export const store = {
   addPin(id, pin) { const c = this.copy(id); c.pins.push({ meta: {}, ...pin, at: now(), id: Math.random().toString(36).slice(2, 10), at: now() }); emit(); },
   updatePin(id, pid, fields) { const p = this.copy(id).pins.find((x) => String(x.id) === String(pid)); if (p) Object.assign(p, fields); emit(); },
   removePin(id, pid) { const c = this.copy(id); c.pins = c.pins.filter((x) => x.id !== pid); emit(); },
+  // Font choices during review. decision: keep | lookalike | upload (null until the person has looked). Each change is
+  // recorded with who and when; changing a font rebuilds only the fonts (seconds), not a refinement.
+  studioFonts() { return db.studio.fonts || []; },
+  setFont(id, fid, decision) {
+    const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
+    f.decision = decision; if (decision === 'lookalike') f.covered = null;
+    (c.fontLog ||= []).push({ font: f.name, decision, by: db.person.email, at: now() }); emit();
+  },
+  // The real check reads the file's name table and compares letter widths with the original; the demo goes by the file
+  // name, so a file named after a different font is turned down the same way.
+  uploadFont(id, fid, file) {
+    const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
+    if (!FONT_FILE.test(file.name)) return 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.';
+    if (!squash(file.name).includes(squash(f.name.split(' ').sort((a, b) => b.length - a.length)[0]))) return `That file looks like a different font, so we kept what’s there. Upload a file of ${f.name}.`;
+    const saved = { id: squash(f.name), name: f.name, file: file.name, at: now() };
+    db.studio.fonts = [...this.studioFonts().filter((x) => x.id !== saved.id), saved];
+    Object.assign(f, { decision: 'upload', file: file.name, uploadedAt: saved.at, covered: null });
+    (c.fontLog ||= []).push({ font: f.name, decision: 'upload', file: file.name, by: db.person.email, at: now() }); emit(); return null;
+  },
   // Accepting goes live if the plan has room, and otherwise starts archived (approve_copy in schema-review-flow.sql).
-  approve(id) { const c = this.copy(id); c.status = this.liveCount() < this.plan().copies ? 'ready' : 'archived'; c.live = c.versions.at(-1).v; c.findings = []; c.pins = c.pins.filter((p) => (p.kind !== 'issue' || p.meta?.report) && p.kind !== 'finding'); emit(); },
+  approve(id, fontCert) { const c = this.copy(id); if (fontCert) (c.fontLog ||= []).push({ ...fontCert, by: db.person.email, at: now() }); c.status = this.liveCount() < this.plan().copies ? 'ready' : 'archived'; c.live = c.versions.at(-1).v; c.findings = []; c.pins = c.pins.filter((p) => (p.kind !== 'issue' || p.meta?.report) && p.kind !== 'finding'); emit(); },
   // Simulated copy job. The steps and timing mirror the real one (harness/make-copy.mjs, 2-4 minutes), sped up.
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }

@@ -151,6 +151,10 @@ const DESKTOP_W = 1440, PHONE_W = 390;
 let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
 const KIND_FOR = { check: 'issue', report: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
+// Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
+// a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
+const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
+const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload');
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt).length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
 function copyPage(id) {
@@ -171,7 +175,8 @@ function copyPage(id) {
     return;
   }
   const review = c.status === 'review';
-  const tabs = review ? [['check', '1. Look and Feel'], ['tour', '2. Tour'], ['credits', '3. Credits']]
+  const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['credits', 'Credits']] : [];
+  const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
     : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits'], ['report', 'Report an issue']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
@@ -198,7 +203,8 @@ function copyPage(id) {
   }
   $('#ttl').innerHTML = `${esc(c.title)} <span class="pill ${STATUS[c.status][1]}">${STATUS[c.status][0]}</span>`;
   $('#expand').textContent = `${view.wide ? 'Show' : 'Hide'} ${review ? 'review panel' : 'panel'}`;
-  $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}</button>`).join('');
+  const nf = fontsToCheck(c).length;
+  $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}${k === 'fonts' && nf ? ` <span class="count">${nf}</span>` : ''}</button>`).join('');
   app.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t; view.pinFor = null; sendMode(); copyPage(id); }));
   panel(c, review);
   $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' || view.pinFor === 'report' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
@@ -327,6 +333,7 @@ function panel(c, review) {
       <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
       <p class="sub">To report an issue, click <b>+ Issue</b>, drop a pin, and describe the issue.</p>
       <p>${pinButton('check', '+ Issue')}</p>
+      ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
@@ -338,6 +345,13 @@ function panel(c, review) {
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
       ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>` : ''}
       <button class="link" id="del">Delete this Preserve</button></div>`;
+  } else if (view.tab === 'fonts') {
+    loadLookalikes(c);
+    P.innerHTML = `<h2>Fonts</h2>
+      <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Check each one below. Changing a font takes seconds and doesn’t use a refinement.</p>
+      ${c.fonts.map((f) => fontRow(c, f)).join('')}
+      <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>
+      <input type="file" id="fontfile" accept=".woff2,.woff,.otf,.ttf" style="display:none">`;
   } else if (view.tab === 'tour') {
     const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
     P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
@@ -351,7 +365,7 @@ function panel(c, review) {
     P.innerHTML = `${flash}<h2>Credits <span class="opt">optional</span></h2><p class="sub">The people behind the site. Visitors see them under “Credits”.</p>
       <div id="crl">${cr.map((p) => credRow(p)).join('')}</div>
       <p><button class="btn small secondary" id="addcr">+ Add a credit</button></p>
-      ${review ? '<div class="stack"><button class="btn wide" id="acc">Accept Preserve</button></div>' : ''}`;
+      ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
     P.innerHTML = `${flash}<h2>Share</h2><label>Link <span class="fine">(click the name to change it)</span>
@@ -381,6 +395,25 @@ function panel(c, review) {
   P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, (v) => store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } })); }));
   P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; view.pinFor = null; sendMode(); copyPage(id); }));
   on('#acc', () => accept(id));
+  const cert = P.querySelector('#cert'); if (cert) cert.onchange = () => { P.querySelector('#acc').disabled = !cert.checked; };
+  P.querySelectorAll('[data-font]').forEach((b) => (b.onclick = () => store.setFont(id, b.dataset.fid, b.dataset.font)));
+  P.querySelectorAll('[data-showfont]').forEach((b) => (b.onclick = () => {
+    const f = c.fonts.find((x) => x.id === b.dataset.showfont);
+    frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: f.block }, '*');
+    frameWin()?.postMessage({ type: 'preserve-show-font', name: f.name }, '*');
+  }));
+  P.querySelectorAll('[data-upload]').forEach((b) => (b.onclick = () => { const inp = $('#fontfile'); inp.value = ''; inp.dataset.fid = b.dataset.upload; inp.click(); }));
+  const ff = $('#fontfile');
+  if (ff) ff.onchange = async () => {
+    const fid = ff.dataset.fid, file = ff.files[0]; if (!file) return;
+    view.fontBusy = fid; view.fontErr = null; panel(store.copy(id), review);
+    await new Promise((r) => setTimeout(r, 1200));   // the real rebuild of the fonts takes a few seconds
+    view.fontBusy = null;
+    const err = await store.uploadFont(id, fid, file);
+    view.fontErr = err ? { fid, text: err } : null;
+    if (!err) toast('Font updated. Your Preserve now uses your file.');
+    copyPage(id);
+  };
   on('#refine', () => store.refine(id));
   on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
@@ -396,6 +429,45 @@ function panel(c, review) {
   }
 }
 
+// One row per font (font licensing decisions, 2026-10-26): the original's name, a before/after sample, where it shows,
+// and the choices that fit who holds the license.
+const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function fontRow(c, f) {
+  const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
+  const look = f.decision === 'lookalike' || (f.holder === 'platform' && f.decision !== 'upload');
+  const state = f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
+    : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
+    : f.holder === 'platform' ? `From Squarespace’s font menu. Squarespace licenses it from Adobe for Squarespace sites only, so your Preserve uses a lookalike, ${esc(f.look)}, unless you upload your own licensed file.`
+    : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${esc(f.look)}.`
+    : 'You uploaded this font to your site, so we kept it. Keep it only if your license covers this Preserve.';
+  const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
+  const actions = view.fontBusy === f.id ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
+    : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
+    : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
+    : `${chip('keep', 'I have the rights')}${chip('lookalike', 'I don’t have rights to this one')}<button class="link" data-upload="${f.id}">Replace the file</button>`;
+  const after = look ? `<span class="fsample" style="font-family:'${esc(f.look)}',sans-serif">${esc(f.text)}</span>` : `<img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">`;
+  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">Show on page</button></div>
+    <p class="fine">${state}</p>
+    <div class="fsamples"><span class="fl">On your site</span><img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">
+      <span class="fl">In your Preserve</span>${after}</div>
+    <div class="row wrap">${actions}</div>
+    ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : ''}</div>`;
+}
+// Above Accept: the fonts the Preserve ships as on the site, which the person confirms they may use (F1).
+function certify(c) {
+  const kept = keptFonts(c);
+  if (!kept.length) return '';
+  return `<label class="certify"><input type="checkbox" id="cert"> <span>These fonts stay as on your site: ${esc(kept.map((f) => f.name).join(', '))}. By accepting this Preserve, you confirm you have the right to use them here, on embeds and in exports.</span></label>`;
+}
+let lookLoaded = '';
+function loadLookalikes(c) {
+  const fams = [...new Set(c.fonts.map((f) => f.look))].sort();
+  const href = `https://fonts.googleapis.com/css2?${fams.map((f) => 'family=' + f.replace(/ /g, '+')).join('&')}&display=swap`;
+  if (lookLoaded === href) return;
+  lookLoaded = href;
+  document.head.insertAdjacentHTML('beforeend', `<link rel="stylesheet" href="${href}">`);
+}
+
 // Accept: the last step of review. Accepted Preserves can't be refined. It goes live if the plan has room for another
 // live Preserve, and otherwise starts in Archived (the database decides, so two tabs can't both take the last spot).
 async function accept(id) {
@@ -404,7 +476,8 @@ async function accept(id) {
     body: `Once a Preserve has been accepted, it cannot be refined.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
     ok: 'Accept Preserve', cancel: 'Review Preserve' });
   if (!yes) { view.tab = 'check'; copyPage(id); return; }
-  await store.approve(id);
+  const kept = keptFonts(store.copy(id));
+  await store.approve(id, kept.length ? { certified: kept.map((f) => f.name), wording: $('#cert')?.parentElement?.textContent.trim() } : null);
   const c = store.copy(id);
   if (!c || c.status === 'review') return;   // the database said no (the reason was shown)
   view.tab = 'share';
