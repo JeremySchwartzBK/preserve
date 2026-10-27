@@ -40,14 +40,16 @@ function snapshotDom() {
 // Squarespace loads images itself (ImageLoader, from data-src) when they come near the screen. Ones it hadn't reached by
 // the time of the snapshot (slides off to the side, a gallery strip) were saved with no src and hidden, so the copy
 // showed empty frames. Load them all before saving, the way its loader does, and wait for them.
-async function loadPlaceholders(page) {
+export async function loadPlaceholders(page) {
   return page.evaluate(async () => {
     const todo = [...document.images].filter((i) => !i.getAttribute('src') && !i.getAttribute('srcset') && (i.dataset.src || i.dataset.image));
     for (const i of todo) {
-      try { window.ImageLoader?.load(i, { load: true }); } catch {}
+      // Its loader picks a size from the image's box; a box 0 wide (sized by its own pixels) would get the 100 px one.
+      if (i.getBoundingClientRect().width > 0) try { window.ImageLoader?.load(i, { load: true }); } catch {}
       if (i.getAttribute('src')) continue;
-      const u = i.dataset.src || i.dataset.image;
-      i.src = /squarespace-cdn\.com/.test(u) && !/[?&]format=/.test(u) ? u + (u.includes('?') ? '&' : '?') + 'format=1500w' : u;
+      const u = i.dataset.src || i.dataset.image, w = +(/^(\d+)x/.exec(i.dataset.imageDimensions || '') || [])[1] || 1500;
+      const fmt = [500, 750, 1000, 1500].find((f) => f >= w) || 1500;
+      i.src = /squarespace-cdn\.com/.test(u) && !/[?&]format=/.test(u) ? u + (u.includes('?') ? '&' : '?') + `format=${fmt}w` : u;
     }
     await Promise.race([
       Promise.all(todo.map((i) => (i.complete ? 0 : new Promise((r) => { i.addEventListener('load', r, { once: true }); i.addEventListener('error', r, { once: true }); })))),
