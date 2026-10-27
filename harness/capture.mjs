@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { captureVideos } from './video.mjs';
+import { loadPins, focusPins } from './pins.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -143,6 +144,9 @@ export async function capture(url, outDir) {
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
     await page.screenshot({ path: path.join(outDir, `orig-asis-${prof}.png`) });
     await scrollThrough(page);
+    // A refinement: give the blocks the person pinned time to load and play, and load what they brought in.
+    const pins = loadPins();
+    if (pins.length) (info.pinsFocused ||= {})[prof] = await focusPins(page, prof, pins);
     (info.placeholders ||= {})[prof] = await loadPlaceholders(page);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await shadowStills(page, outDir, prof, info);

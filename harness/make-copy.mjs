@@ -7,6 +7,7 @@
 //   --work     capture workspace (default ./work)
 //   --out      where finished copies are written, one folder per copy (default ./ready)
 //   --publish  after a pass or ship-with-note, deploy <out> to this Cloudflare Pages project
+//   --notes    a refinement's open pins (JSON from the runner): the capture takes care there, the check compares them
 //   --reuse-capture  build from the capture already in --work (same input, new code; for the test corpus)
 //   --no-own-css  (or PRESERVE_OWN_CSS=0) keep Squarespace's stylesheets instead of our own (own-css.mjs). Our own is
 //              the default for new copies since Jeremy's go-ahead 2026-10-19; turning it off is the rollback.
@@ -28,6 +29,8 @@ const OUT = path.resolve(opt('--out', 'ready'));
 const OWN_CSS = !args.includes('--no-own-css') && process.env.PRESERVE_OWN_CSS !== '0';
 // --reuse-capture: build from the capture already in the work folder instead of loading the live page again (test corpus).
 if (args.includes('--reuse-capture')) process.env.PRESERVE_REUSE_CAPTURE = '1';
+// --notes <file>: a refinement's open pins (written by the runner); capture and quality check use them (pins.mjs).
+if (opt('--notes')) process.env.PRESERVE_PINS = path.resolve(opt('--notes'));
 const siteDir = path.join(WORK, id);
 const stage = path.join(WORK, '_stage', id); // export goes here first; moved to OUT only if it passes
 fs.mkdirSync(siteDir, { recursive: true });
