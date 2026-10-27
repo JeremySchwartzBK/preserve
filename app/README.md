@@ -70,7 +70,7 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 
 ## Review flow feedback (Jeremy, 2026-10-26, pins on the flow markup page)
 - Say "Preserve", never "copy", in anything people read ("copy" reads as page text). Code names stay `copy`.
-- Review steps: 1. Look and Feel, 2. Tour, 3. Credits, then Accept Preserve. "Flag an issue" drops a pin. Suspected
+- Review steps: 1. Look and Feel, 2. Tour, 3. Credits, then Accept Preserve. "+ Issue" drops a pin. Suspected
   issues from our check are answered Ignore issue / Fix issue / Not an issue. Refine Preserve appears once anything
   is marked to fix (a pin of their own, or Fix issue). Accept asks for confirmation ("cannot be refined"; Review
   Preserve goes back to step 1), then goes live if the plan has a free live spot, otherwise starts Archived.

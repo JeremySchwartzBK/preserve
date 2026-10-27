@@ -34,7 +34,7 @@ function shell(body, { back } = {}) {
     ${store.real ? '' : '<div class="demo-bar">Demo: everything here is stored only in this browser, and new Preserves are simulated. <button class="link" id="reset">Reset demo</button></div>'}`;
   $('#out').onclick = async () => { await store.signOut(); location.hash = '#/'; };
   if ($('#reset')) $('#reset').onclick = () => { store.reset(); location.hash = '#/'; };
-  $('#bell').onclick = () => { const p = $('#notes'); p.hidden = !p.hidden; if (!p.hidden) setTimeout(() => store.markRead(), 1500); };
+  $('#bell').onclick = (e) => { e.stopPropagation(); const p = $('#notes'); p.hidden = !p.hidden; if (!p.hidden) setTimeout(() => store.markRead(), 1500); };
 }
 
 // A confirmation card (instead of the browser's confirm box). Resolves true when the main button is pressed.
@@ -273,6 +273,10 @@ function onFrameMessage(m, id) {
     copyPage(id);
   }
 }
+// The notifications list closes on a click anywhere outside it, or Esc.
+addEventListener('click', (e) => { const p = $('#notes'); if (p && !p.hidden && !e.target.closest('#notes')) p.hidden = true; });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#notes') && !$('#notes').hidden) $('#notes').hidden = true; });
+addEventListener('blur', () => { const p = $('#notes'); if (p) p.hidden = true; });   // a click inside the preview frame
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { view.pinFor = null; sendMode(); if (view.id) copyPage(view.id); } });
 
 // A small form in a dialog (instead of the browser's prompt box). kind: issue | report | tour.
@@ -289,7 +293,8 @@ function noteDialog(kind, current, save) {
 }
 
 function startPin(forWhat) { view.pinFor = view.pinFor === forWhat ? null : forWhat; sendMode(); copyPage(view.id); }
-const pinButton = (forWhat, label) => `<button class="btn small ${view.pinFor === forWhat ? '' : 'secondary'}" data-pin="${forWhat}">${view.pinFor === forWhat ? 'Drop a pin on the page…' : label}</button>`;
+// While a pin is being placed its button turns green; the label stays the same (the hint above the preview says what to do).
+const pinButton = (forWhat, label) => `<button class="btn small ${view.pinFor === forWhat ? '' : 'secondary'}" data-pin="${forWhat}" aria-pressed="${view.pinFor === forWhat}">${label}</button>`;
 const pinList = (c, tab, opts = {}) => {
   const list = pinsFor(c, tab);
   if (!list.length) return `<p class="sub">${opts.empty}</p>`;
@@ -320,8 +325,8 @@ function panel(c, review) {
     const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
     P.innerHTML = `<h2>Look and Feel</h2>
       <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
-      <p class="sub">To report an issue, click <b>Flag an issue</b>, drop a pin, and describe the issue.</p>
-      <p>${pinButton('check', '+ Flag an issue')}</p>
+      <p class="sub">To report an issue, click <b>+ Issue</b>, drop a pin, and describe the issue.</p>
+      <p>${pinButton('check', '+ Issue')}</p>
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
@@ -336,7 +341,7 @@ function panel(c, review) {
   } else if (view.tab === 'tour') {
     const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
     P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
-      ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
+      ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but tour stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
       ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', '+ Add a stop')}</p>
       ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
@@ -355,8 +360,8 @@ function panel(c, review) {
       <p class="fine">Old links keep working after a name change. Embed codes never change.</p>
 `;
   } else if (view.tab === 'report') {
-    P.innerHTML = `<h2>Report an issue</h2><p class="sub">Something not working on this Preserve? Click <b>Flag an issue</b>, drop a pin, and tell us what’s wrong. We’ll look into it.</p>
-      <p>${pinButton('report', '+ Flag an issue')}</p>
+    P.innerHTML = `<h2>Report an issue</h2><p class="sub">Something not working on this Preserve? Click <b>+ Issue</b>, drop a pin, and tell us what’s wrong. We’ll look into it.</p>
+      <p>${pinButton('report', '+ Issue')}</p>
       <h3 class="semi">Reported</h3>${pinList(c, 'report', { empty: 'Nothing reported yet.', remove: false })}`;
   }
   const on = (sel, f) => { const el = P.querySelector(sel); if (el) el.onclick = f; };
