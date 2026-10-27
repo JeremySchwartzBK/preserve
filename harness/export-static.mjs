@@ -115,7 +115,7 @@ async function embedStills(layout, pageUrl) {
   return out;
 }
 const stills = [];
-let videoCount = 0;
+let videoCount = 0, placeholdersShown = 0;
 const firstScreenBytes = {};
 
 // A byte budget for the first screen. Each first-screen image is also written as AVIF (about 30% smaller than WebP);
@@ -246,6 +246,17 @@ for (const layout of ['desktop', 'mobile']) {
     $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" class="preserve-embed-still" style="display:block;width:100%;max-width:${w}px;height:auto;aspect-ratio:${w}/${h};cursor:pointer;margin:0 auto" data-preserve-replica="1">`);
     stills.push({ layout, src: 'web component', replaced: true });
   }
+  // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):
+  // show the captured picture the data-src points at, and drop the hidden look the loader gives unloaded images.
+  for (const el of $('img:not([src]):not([srcset])').toArray()) {
+    for (const a of ['data-src', 'data-image']) {
+      const v = $(el).attr(a); if (!v) continue;
+      const r = await ref(v, pageUrl); if (r === v) continue;
+      const st = ($(el).attr('style') || '').replace(/(^|;)\s*(opacity\s*:\s*0(\.0+)?|visibility\s*:\s*hidden)\s*(!important)?\s*(?=;|$)/gi, '$1');
+      $(el).attr('src', r).attr('data-load', 'true').attr('style', st);
+      placeholdersShown++; break;
+    }
+  }
   $('meta[property^="og:"], meta[name^="twitter:"], meta[itemprop]').remove();
   for (const el of $('*').toArray()) {
     for (const [a, v] of Object.entries(el.attribs || {})) {
@@ -277,5 +288,5 @@ for (const layout of ['desktop', 'mobile']) {
 
 const left = [...new Set([...fs.readFileSync(path.join(outRoot, site, 'desktop.html'), 'utf8').matchAll(new RegExp(`/${VARIANT}/x/[^"'\\s)<>]{0,120}`, 'g'))].map((m) => m[0]))];
 srv.server.close();
-console.log(JSON.stringify({ site, videosWired: videoCount, firstScreenBytes, fontLicense: licenseFile, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
+console.log(JSON.stringify({ site, videosWired: videoCount, placeholdersShown, firstScreenBytes, fontLicense: licenseFile, files: fs.readdirSync(assetDir).length, MB: +(bytes / 1e6).toFixed(1), stills, misses: [...new Set(misses)].slice(0, 30), leftoverLocalRefs: left.slice(0, 10) }, null, 1));
 process.exit(0);

@@ -25,9 +25,40 @@ function snapshotDom() {
   // Record live form/input state and the current src chosen from srcset.
   for (const img of document.querySelectorAll('img')) {
     if (img.currentSrc) img.setAttribute('data-preserve-current', img.currentSrc);
+    // An image's size can come from its own pixels (a gallery strip: width auto, height 100%). In the copy it's lazy,
+    // so until it loads it is 0 wide, never on screen, and never loads. Width and height attributes give it its shape
+    // up front: the size the page used here, else the one Squarespace recorded (emmagrinteriors, 2026-10-27).
+    if (img.hasAttribute('width') || img.hasAttribute('height')) continue;
+    const d = /^(\d+)x(\d+)$/.exec(img.getAttribute('data-image-dimensions') || '');
+    const [w, h] = img.naturalWidth ? [img.naturalWidth, img.naturalHeight] : d ? [+d[1], +d[2]] : [];
+    if (w && h) { img.setAttribute('width', w); img.setAttribute('height', h); img.setAttribute('data-pv-dims', ''); }
   }
   const dt = document.doctype ? `<!DOCTYPE ${document.doctype.name}>` : '<!DOCTYPE html>';
   return dt + '\n' + document.documentElement.outerHTML;
+}
+
+// Squarespace loads images itself (ImageLoader, from data-src) when they come near the screen. Ones it hadn't reached by
+// the time of the snapshot (slides off to the side, a gallery strip) were saved with no src and hidden, so the copy
+// showed empty frames. Load them all before saving, the way its loader does, and wait for them.
+export async function loadPlaceholders(page) {
+  return page.evaluate(async () => {
+    const todo = [...document.images].filter((i) => !i.getAttribute('src') && !i.getAttribute('srcset') && (i.dataset.src || i.dataset.image));
+    for (const i of todo) {
+      // Its loader picks a size from the image's box; a box 0 wide (sized by its own pixels) would get the 100 px one.
+      if (i.getBoundingClientRect().width > 0) try { window.ImageLoader?.load(i, { load: true }); } catch {}
+      if (i.getAttribute('src')) continue;
+      const u = i.dataset.src || i.dataset.image, w = +(/^(\d+)x/.exec(i.dataset.imageDimensions || '') || [])[1] || 1500;
+      const fmt = [500, 750, 1000, 1500].find((f) => f >= w) || 1500;
+      i.src = /squarespace-cdn\.com/.test(u) && !/[?&]format=/.test(u) ? u + (u.includes('?') ? '&' : '?') + `format=${fmt}w` : u;
+    }
+    await Promise.race([
+      Promise.all(todo.map((i) => (i.complete ? 0 : new Promise((r) => { i.addEventListener('load', r, { once: true }); i.addEventListener('error', r, { once: true }); })))),
+      new Promise((r) => setTimeout(r, 10000)),
+    ]);
+    // Loaded by hand, the image keeps the hidden look the loader gives unloaded ones: mark it loaded the same way.
+    for (const i of todo) if (i.naturalWidth) { i.setAttribute('data-load', 'true'); if (document.querySelector('img.loaded')) i.classList.add('loaded'); }
+    return { tried: todo.length, loaded: todo.filter((i) => i.naturalWidth).length };
+  }).catch(() => ({ tried: 0, loaded: 0 }));
 }
 
 async function scrollThrough(page) {
@@ -112,6 +143,8 @@ export async function capture(url, outDir) {
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
     await page.screenshot({ path: path.join(outDir, `orig-asis-${prof}.png`) });
     await scrollThrough(page);
+    (info.placeholders ||= {})[prof] = await loadPlaceholders(page);
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await shadowStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it

@@ -60,6 +60,7 @@ async function main() {
 
   // What the review screen says for each thing the quality check can find.
   const PLAIN = {
+    'blank-images': 'Some images stay blank (for example, a gallery or slideshow with empty frames).',
     'blocks-stay-invisible': 'Some parts of the page stay hidden that show on the live site.',
     'broken-images': 'Some images didn’t load.',
     'dropdown-broken': 'A dropdown menu doesn’t open.',

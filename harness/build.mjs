@@ -363,7 +363,9 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $('base').remove();
     if (v.optimize) {
       // Below-the-fold images can wait; the first-screen pass (atf.mjs) sets priority on the hero.
-      $('img').each((_, el) => { if (!$(el).attr('loading')) $(el).attr('loading', 'lazy'); $(el).attr('decoding', 'async'); });
+      // An image with no width and height attributes may only get a size from its own pixels; lazy, it would never load
+      // (capture.mjs adds the attributes wherever it can, so this is the rare leftover).
+      $('img').each((_, el) => { if (!$(el).attr('loading') && ($(el).attr('width') || $(el).attr('height'))) $(el).attr('loading', 'lazy'); $(el).attr('decoding', 'async'); });
     }
     if (v.scripts === 'none') {
       // Put entrance animations back to their start state; MOTION_SCRIPT plays them.

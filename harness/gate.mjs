@@ -20,6 +20,7 @@ export const LIMITS = {
   heightRatio: [0.85, 1.15],// copy page height / live page height: content missing or blown up
   stuckInvisible: 0,        // blocks still invisible after scrolling past them (animations that never ran)
   brokenImages: 0,
+  blankImages: 0,           // images with no file, or lazy ones too small to ever load (check.mjs blankImages)
 };
 
 // How much the live page differs from itself between two visits (random sticker layouts, autoplaying slideshows,
@@ -194,6 +195,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (c.loadError) fail('copy-did-not-load', L(c.loadError));
       if (c.externalRequests.length) fail('outside-requests', L(c.externalRequests.join(', ')));
       if (c.brokenImages > LIMITS.brokenImages) fail('broken-images', L(`${c.brokenImages} images don't load`));
+      if (c.blankImages > LIMITS.blankImages) fail('blank-images', L(`${c.blankImages} images never draw (no file, or too small to load)`));
       if (c.stuckInvisible > LIMITS.stuckInvisible) fail('blocks-stay-invisible', L(`${c.stuckInvisible} blocks never appear when scrolled to`));
       if (c.overlaysVisible?.length) fail('overlay-left', L(c.overlaysVisible.join(', ')));
       if (c.mobileMenu === 'fail') fail('phone-menu-broken', L('burger menu does not open'));
@@ -271,7 +273,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
