@@ -103,14 +103,18 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
       const id = b === document.body ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
       const r = b.getBoundingClientRect(), er = e?.getBoundingClientRect?.() || r;
-      const cx = px ?? er.left + er.width / 2, cy = py ?? er.top + er.height / 2;
+      // Centre of the part of the element inside its block: a wide strip (a gallery reel) marks its visible part.
+      const mid = (a1, a2, b1, b2) => { const lo = Math.max(a1, b1), hi = Math.min(a2, b2); return hi > lo ? (lo + hi) / 2 : (a1 + a2) / 2; };
+      const cx = px ?? mid(er.left, er.right, r.left, r.right), cy = py ?? mid(er.top, er.bottom, r.top, r.bottom);
       const f = (v) => +Math.min(1, Math.max(0, v)).toFixed(3);
       return { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
     };
   });
   let navs = 0;
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) navs++; });
-  const spot = (code, list) => { if (list?.length) out.spots[code] = [...(out.spots[code] || []), ...list].slice(0, 3); };
+  // Spots of one finding that land on the same place in a block are one spot, so no marker hides under another.
+  const near = (a, b) => a.blockId === b.blockId && Math.abs(a.x - b.x) < 0.05 && Math.abs(a.y - b.y) < 0.05;
+  const spot = (code, list) => { for (const p of list || []) { const cur = out.spots[code] || []; if (cur.length < 3 && !cur.some((q) => near(p, q))) out.spots[code] = [...cur, p]; } };
   try {
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   } catch (e) { out.loadError = String(e.message).split('\n')[0]; }
@@ -176,9 +180,9 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
     if (!i.getAttribute('src') && !i.getAttribute('srcset')) return true;
     const r = i.getBoundingClientRect();
     return !i.complete && (r.width === 0 || r.height === 0);
-  }).map((i) => window.__preserveAnchor(i.parentElement)));
+  }).map((i) => window.__preserveAnchor(i.getBoundingClientRect().width > 4 ? i : i.parentElement)));
   out.blankImages = blankList.length;
-  spot('blank-images', blankList.slice(0, 3));
+  spot('blank-images', blankList);
   out.brokenImages = await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').length);
   out.blankImages = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).length);
   await page.screenshot({ path: `${shotPrefix}-full-${profileName}.png`, fullPage: true }).catch(() => {});
