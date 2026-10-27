@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct } from './check.mjs';
+import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
@@ -44,6 +45,7 @@ async function liveSelfDiff(url, siteDir) {
         await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
         await page.screenshot({ path: path.join(siteDir, `live2-${prof}.png`) });
         await page.screenshot({ path: path.join(siteDir, `live2-full-${prof}.png`), fullPage: true });
+        if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
@@ -212,6 +214,22 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
         if (d2.heightRatio < LIMITS.heightRatio[0] || d2.heightRatio > LIMITS.heightRatio[1]) fail('page-length-differs', L(`copy is ${Math.round(d2.heightRatio * 100)}% as long as the live page`));
       }
     }
+    // A refinement: each pinned block in the copy against the same block on the live page (pins.mjs).
+    if (loadPins().length) {
+      const browser = await launch();
+      try {
+        for (const prof of ['desktop', 'mobile']) {
+          const ctx = await browser.newContext({ ...PROFILES[prof].context });
+          const page = await ctx.newPage();
+          await page.goto(`${base}/${id}/${prof}`, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+          const h = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => 0), vh = PROFILES[prof].context.viewport.height;
+          for (let y = 0; y < h + vh; y += Math.round(vh * 0.6)) { await page.evaluate((y) => scrollTo(0, y), y).catch(() => {}); await sleep(250); }
+          await shootPins(page, prof, siteDir, 'copy');
+          await ctx.close();
+        }
+      } finally { await browser.close(); }
+      info.pins = await comparePins(siteDir, LIMITS.fullPageDiffPct, info.liveSelfDiff);
+    }
   } finally { srv.close(); layoutSpots = null; }
 
   // Load time on desktop and phone 4G (loadtime.mjs). Over the 2-second target ships with a note, never a block: some
@@ -273,7 +291,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }

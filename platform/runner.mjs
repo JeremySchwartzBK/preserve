@@ -102,7 +102,9 @@ async function main() {
     const ctl = running.get(j.id);
     const work = path.join(RUN, 'work'), out = path.join(RUN, 'ready');
     fs.mkdirSync(work, { recursive: true });
-    if (j.user_context) fs.writeFileSync(path.join(work, `${j.copy_id}.user-notes.json`), JSON.stringify(j.user_context, null, 1));
+    const notesFile = path.join(work, `${j.copy_id}.user-notes.json`);
+    fs.rmSync(notesFile, { force: true });
+    if (j.user_context?.length) fs.writeFileSync(notesFile, JSON.stringify(j.user_context, null, 1));
     const jobFile = path.join(work, j.copy_id, 'job.json');
     fs.rmSync(jobFile, { force: true });
     let lastStep = null;
@@ -121,7 +123,7 @@ async function main() {
     }, 30e3);
     const code = await new Promise((res) => {
       // Own process group, so stopping the job also stops the browsers and servers it started.
-      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
       ctl.child = p;
       const jl = fs.createWriteStream(path.join(work, `${j.copy_id}.a${j.attempt}.log`), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
@@ -156,6 +158,16 @@ async function main() {
     // Lettered top to bottom within each layout (the app lists one layout at a time).
     const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.' })))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
+    // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
+    // never asks again about something already answered (Jeremy, 2026-10-27).
+    const answered = await sql(`select meta->>'code' as code, block_id, layout, meta->>'verdict' as verdict from copy_pin
+      where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)} and kind = 'finding' and resolved_at is null and coalesce(meta->>'verdict', '') <> ''`);
+    for (const p of findingPins) {
+      const a = answered.find((x) => x.code === p.code && x.block_id === p.blockId && x.layout === p.layout);
+      if (a) p.verdict = a.verdict;
+    }
+    // How each of the person's pins came out this round (pins.mjs): shown on the pin in review.
+    const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
     await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format)
@@ -165,7 +177,9 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null }))}::jsonb, ${next}, ${i});`).join('\n')}`);
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+      ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next }))}::jsonb
+        where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
     log('ready for review', j.copy_id, 'v' + next, v.result, up.files, 'files');
     // Keep the original capture for refinements. Losing it doesn't stop the copy, so a failure here is only logged.
