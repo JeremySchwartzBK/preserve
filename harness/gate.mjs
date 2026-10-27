@@ -20,6 +20,7 @@ export const LIMITS = {
   heightRatio: [0.85, 1.15],// copy page height / live page height: content missing or blown up
   stuckInvisible: 0,        // blocks still invisible after scrolling past them (animations that never ran)
   brokenImages: 0,
+  blankImages: 0,           // images with no file, or lazy ones too small to ever load (check.mjs blankImages)
 };
 
 // How much the live page differs from itself between two visits (random sticker layouts, autoplaying slideshows,
@@ -194,6 +195,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (c.loadError) fail('copy-did-not-load', L(c.loadError));
       if (c.externalRequests.length) fail('outside-requests', L(c.externalRequests.join(', ')));
       if (c.brokenImages > LIMITS.brokenImages) fail('broken-images', L(`${c.brokenImages} images don't load`));
+      if (c.blankImages > LIMITS.blankImages) fail('blank-images', L(`${c.blankImages} images never draw (no file, or too small to load)`));
       if (c.stuckInvisible > LIMITS.stuckInvisible) fail('blocks-stay-invisible', L(`${c.stuckInvisible} blocks never appear when scrolled to`));
       if (c.overlaysVisible?.length) fail('overlay-left', L(c.overlaysVisible.join(', ')));
       if (c.mobileMenu === 'fail') fail('phone-menu-broken', L('burger menu does not open'));

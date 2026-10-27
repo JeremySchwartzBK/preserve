@@ -167,6 +167,18 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   // Blocks with their page positions, to place picture differences (measured later, after the browser closes).
   out.pageSize = await page.evaluate(() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight }));
   out.blockRects = await page.evaluate(() => [...document.querySelectorAll('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id],header,footer')].map((b) => { const r = b.getBoundingClientRect(); return { el: b, x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; }).filter((r) => r.w > 10 && r.h > 10).map((r) => { const a = window.__preserveAnchor(r.el.firstElementChild || r.el, r.x - scrollX + 1, r.y - scrollY + 1); return { blockId: a.blockId, label: a.label, x: r.x, y: r.y, w: r.w, h: r.h }; }));
+  // Images that will never draw (emmagrinteriors' gallery, 2026-10-27): no file at all (a loader placeholder saved before
+  // the loader ran), or a lazy image with a box 0 wide or high, which the browser never counts as near enough to load.
+  // Only where there is room for a picture (a hidden slide or a closed menu doesn't count).
+  const blankList = await page.evaluate(() => [...document.images].filter((i) => {
+    for (let a = i; a; a = a.parentElement) if (getComputedStyle(a).display === 'none') return false;
+    const p = i.parentElement?.getBoundingClientRect(); if (!p || p.width < 10 || p.height < 10) return false;
+    if (!i.getAttribute('src') && !i.getAttribute('srcset')) return true;
+    const r = i.getBoundingClientRect();
+    return !i.complete && (r.width === 0 || r.height === 0);
+  }).map((i) => window.__preserveAnchor(i.parentElement)));
+  out.blankImages = blankList.length;
+  spot('blank-images', blankList.slice(0, 3));
   out.brokenImages = await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').length);
   out.blankImages = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).length);
   await page.screenshot({ path: `${shotPrefix}-full-${profileName}.png`, fullPage: true }).catch(() => {});
