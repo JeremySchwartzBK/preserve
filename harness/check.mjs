@@ -1,6 +1,7 @@
 // Checks what works and what breaks on a page: errors, overlays, images, scroll animations, menus,
 // galleries, the replica notice, and pixel difference against the original.
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import sharp from 'sharp';
@@ -81,7 +82,122 @@ export async function diffPct(aPath, bPath, maxH, mask = [], dpr = 1, debugOut =
   return { pct: +(100 * n / area).toFixed(1), heightRatio: +(hb / ha).toFixed(2), hot, ...(masked ? { maskedPct: +(100 * masked / (w * h)).toFixed(1) } : {}) };
 }
 
+// Where a finding is, in the same terms the app's review pins use (block id + position inside it), so the app can
+// show the finding as a pin. Keep in step with blk()/idOf() in platform/worker/src/index.js.
+const ANCHOR = () => {
+  window.__preserveAnchor = (e, px, py) => {
+    const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
+    const id = b === document.body ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
+    const r = b.getBoundingClientRect(), er = e?.getBoundingClientRect?.() || r;
+    // Centre of the part of the element inside its block: a wide strip (a gallery reel) marks its visible part.
+    const mid = (a1, a2, b1, b2) => { const lo = Math.max(a1, b1), hi = Math.min(a2, b2); return hi > lo ? (lo + hi) / 2 : (a1 + a2) / 2; };
+    const cx = px ?? mid(er.left, er.right, r.left, r.right), cy = py ?? mid(er.top, er.bottom, r.top, r.bottom);
+    const f = (v) => +Math.min(1, Math.max(0, v)).toFixed(3);
+    return { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
+  };
+};
+
 const shotHash = async (loc) => { try { const b = await loc.screenshot({ timeout: 3000 }); return b.toString('base64').length + ':' + b.subarray(b.length / 2, b.length / 2 + 64).toString('hex'); } catch { return null; } };
+
+// Galleries, carousels and slideshows, each one on the page (2026-10-28; before, only the first "next" arrow was tried).
+// Run in a page of its own, without __pvStill, so our slideshow scripts play the way a visitor sees them. For each:
+// does it move by itself (watched for a few seconds), does its "next" arrow move it, and does every slide it shows draw
+// its picture. Galleries are keyed by block id so gate.mjs can hold the copy's to the live page's.
+const NEXT_SEL = '.gallery-slideshow-control-btn[data-next], [data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .ps-gallery-controls .next, .summary-carousel-pager-next, .swiper-button-next, button[aria-label*="next" i]';
+const GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .user-items-list-simple, .summary-carousel, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .swiper, .ps-gallery, [class*="slideshow" i], [class*="carousel" i]';
+const WATCH_MS = 6000, MAX_GALLERIES = 6;
+const sha = (b) => crypto.createHash('sha1').update(b).digest('hex');
+
+export async function probeGalleries(browser, url, profileName, { isCopy = false } = {}) {
+  const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true });
+  if (isCopy) await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); return /^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol) ? r.continue() : r.abort(); });
+  await ctx.addInitScript(ANCHOR);
+  const page = await ctx.newPage();
+  const out = [];
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    if (!isCopy) await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }).catch(() => {});
+    const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
+    for (let y = 0; y < h; y += Math.round(vh * 0.7)) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(250); }
+    await page.mouse.move(0, 0);
+    const found = await page.evaluate(([gSel, nSel, max]) => {
+      const shown = (e) => { for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden' || +s.opacity < 0.05) return false; } const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
+      const pics = (e) => e.querySelectorAll('img, .swiper-slide, [data-slide-index], .slide').length;
+      const cand = new Set([...document.querySelectorAll(gSel)]);
+      for (const b of document.querySelectorAll(nSel)) if (shown(b)) { const c = b.closest(gSel) || b.parentElement?.parentElement; if (c) cand.add(c); }
+      // One per block: the outermost candidate that is on screen, big enough and holds more than one picture.
+      const byBlock = new Map();
+      for (const c of cand) {
+        const r = c.getBoundingClientRect();
+        if (r.width < 100 || r.height < 60 || !shown(c) || pics(c) < 2) continue;
+        const a = window.__preserveAnchor(c);
+        const prev = byBlock.get(a.blockId);
+        if (!prev || c.contains(prev)) byBlock.set(a.blockId, c);
+      }
+      return [...byBlock.values()].slice(0, max).map((c, i) => {
+        c.setAttribute('data-pv-g', i);
+        const block = c.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || c;
+        const btn = [...c.querySelectorAll(nSel), ...block.querySelectorAll(nSel)].find(shown);
+        if (btn) btn.setAttribute('data-pv-gn', i);
+        return { i, key: window.__preserveAnchor(c).blockId, anchor: window.__preserveAnchor(c), arrow: btn ? window.__preserveAnchor(btn) : null };
+      });
+    }, [GALLERY_SEL, NEXT_SEL, MAX_GALLERIES]);
+
+    // A picture of the part of the gallery on screen (a reel can be far wider than the window).
+    const shot = async (i) => {
+      const box = await page.evaluate((i) => { const r = document.querySelector(`[data-pv-g="${i}"]`)?.getBoundingClientRect(); if (!r) return null; const x = Math.max(0, r.left), y = Math.max(0, r.top); return { x, y, width: Math.min(innerWidth, r.right) - x, height: Math.min(innerHeight, r.bottom) - y }; }, i);
+      if (!box || box.width < 10 || box.height < 10) return null;
+      try { return sha(await page.screenshot({ clip: box, timeout: 5000 })); } catch { return null; }
+    };
+    // Pictures in the visible part of the gallery that never drew (waits up to 2 s for ones still loading).
+    const blank = async (i) => {
+      for (let t = 0; t < 5; t++) {
+        const n = await page.evaluate((i) => {
+          const g = document.querySelector(`[data-pv-g="${i}"]`); if (!g) return 0;
+          const gr = g.getBoundingClientRect();
+          return [...g.querySelectorAll('img')].filter((im) => {
+            const r = im.getBoundingClientRect();
+            const w = Math.min(r.right, gr.right, innerWidth) - Math.max(r.left, gr.left, 0), h = Math.min(r.bottom, gr.bottom, innerHeight) - Math.max(r.top, gr.top, 0);
+            if (w < 40 || h < 40) return false;
+            for (let a = im; a && a !== g.parentElement; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden' || +s.opacity < 0.1) return false; }
+            return !(im.currentSrc || im.getAttribute('src')) || !im.complete || im.naturalWidth === 0;
+          }).length;
+        }, i);
+        if (!n || t === 4) return n;
+        await sleep(500);
+      }
+    };
+
+    for (const g of found) {
+      await page.evaluate((i) => document.querySelector(`[data-pv-g="${i}"]`)?.scrollIntoView({ block: 'center' }), g.i);
+      await sleep(1500);
+      const r = { key: g.key, anchor: g.anchor, arrow: g.arrow, autoplay: false, next: g.arrow ? 'unknown' : 'n/a', blankSlides: 0 };
+      // Watch it: a change with nothing touched means it plays by itself.
+      let h0 = await shot(g.i);
+      r.blankSlides = await blank(g.i);
+      for (let t = 0; t < WATCH_MS && h0; t += 1000) {
+        await sleep(1000);
+        const h1 = await shot(g.i);
+        if (h1 && h1 !== h0) { r.autoplay = true; break; }
+      }
+      if (r.autoplay) { await sleep(1200); r.blankSlides = Math.max(r.blankSlides, await blank(g.i)); }
+      // Its arrow: right after an autoplay step (or any time, if it is still), so the next step can't be mistaken for it.
+      if (g.arrow) {
+        const before = await shot(g.i);
+        await page.locator(`[data-pv-gn="${g.i}"]`).click({ timeout: 3000 }).catch(() => {});
+        await sleep(1200);
+        await page.evaluate(() => document.activeElement?.blur()); await page.mouse.move(0, 0); await sleep(200);
+        const after = await shot(g.i);
+        r.next = !before || !after ? 'unknown' : before !== after ? 'pass' : 'fail';
+        if (r.next === 'pass') r.blankSlides = Math.max(r.blankSlides, await blank(g.i));
+      }
+      out.push(r);
+    }
+  } catch (e) { out.error = String(e.message).split('\n')[0]; }
+  await ctx.close();
+  return out;
+}
 
 export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const prof = PROFILES[profileName];
@@ -96,20 +212,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   page.on('pageerror', (e) => errors.push(e.message.slice(0, 160)));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|ERR_FAILED/.test(m.text())) consoleErrors.push(m.text().slice(0, 160)); });
   const out = { url, profile: profileName, spots: {} };
-  // Where a finding is, in the same terms the app's review pins use (block id + position inside it), so the app can
-  // show the finding as a pin. Keep in step with blk()/idOf() in platform/worker/src/index.js.
-  await ctx.addInitScript(() => {
-    window.__preserveAnchor = (e, px, py) => {
-      const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
-      const id = b === document.body ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
-      const r = b.getBoundingClientRect(), er = e?.getBoundingClientRect?.() || r;
-      // Centre of the part of the element inside its block: a wide strip (a gallery reel) marks its visible part.
-      const mid = (a1, a2, b1, b2) => { const lo = Math.max(a1, b1), hi = Math.min(a2, b2); return hi > lo ? (lo + hi) / 2 : (a1 + a2) / 2; };
-      const cx = px ?? mid(er.left, er.right, r.left, r.right), cy = py ?? mid(er.top, er.bottom, r.top, r.bottom);
-      const f = (v) => +Math.min(1, Math.max(0, v)).toFixed(3);
-      return { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
-    };
-  });
+  await ctx.addInitScript(ANCHOR);
   let navs = 0;
   page.on('framenavigated', (f) => { if (f === page.mainFrame()) navs++; });
   // Spots of one finding that land on the same place in a block are one spot, so no marker hides under another.
@@ -214,22 +317,9 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
     } else out.dropdown = 'n/a';
   }
 
-  // Galleries / carousels / slideshows: click "next" and see whether the gallery changes.
-  const next = page.locator('.gallery-slideshow-control-btn[data-next], [data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .ps-gallery-controls .next, .summary-carousel-pager-next, button[aria-label*="next" i]').filter({ visible: true });
-  if (await next.count()) {
-    const btn = next.first();
-    await btn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {}); await sleep(800);
-    const container = btn.locator('xpath=ancestor::*[contains(@class,"gallery") or contains(@class,"carousel") or contains(@class,"slideshow") or contains(@class,"summary")][1]');
-    const target = (await container.count()) ? container.first() : page.locator('body');
-    const before = await shotHash(target);
-    await sleep(600);
-    const idle = await shotHash(target); // a gallery that changes on its own (autoplay) can't be judged by a click
-    await btn.click({ timeout: 3000 }).catch(() => {}); await sleep(1500);
-    await page.evaluate(() => document.activeElement?.blur()); await sleep(200); // focus rings are not a gallery change
-    const after = await shotHash(target);
-    out.gallery = !before || !after || before !== idle ? 'unknown' : before !== after ? 'pass' : 'fail';
-    if (out.gallery === 'fail') spot('gallery-does-not-advance', [await btn.evaluate((e) => window.__preserveAnchor(e)).catch(() => null)].filter(Boolean));
-  } else out.gallery = 'n/a';
+  // Galleries / carousels / slideshows: see probeGalleries. out.gallery sums them up for older readers.
+  out.galleries = await probeGalleries(browser, url, profileName, { isCopy });
+  out.gallery = !out.galleries.length ? 'n/a' : out.galleries.some((g) => g.next === 'fail') ? 'fail' : out.galleries.some((g) => g.autoplay || g.next === 'pass') ? 'pass' : 'unknown';
 
   // Replica notice on a navigation link (copies only).
   if (isCopy) {
