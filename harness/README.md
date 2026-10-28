@@ -182,8 +182,8 @@ From the 58-site run:
   `fetchpriority=high` and a preload.
 - `loadtime.mjs`, `resize.mjs`, `retime.mjs`: the load-time check, size check and weekly re-timing (above).
 - `check.mjs`: on the original and each copy: JS errors, overlays still visible, broken images, elements stuck
-  invisible after scrolling (scroll animations that never ran), mobile menu opens, desktop dropdown opens, gallery
-  "next" changes the gallery (autoplaying ones report `unknown`), replica notice on link click, outside requests,
+  invisible after scrolling (scroll animations that never ran), mobile menu opens, desktop dropdown opens, every
+  gallery/carousel/slideshow on the page (see "Gallery check" below), replica notice on link click, outside requests,
   and pixel difference vs the original (first screen and full page).
 - `run-all.mjs`: capture -> build -> measure -> check for each site; writes `result-<site>.json` and screenshots
   into `/mnt/project-files/prototype/`.
@@ -196,8 +196,18 @@ From the 58-site run:
 - Critical CSS is a selector-match heuristic, not a full coverage tool; rules for JS-added first-screen elements can be
   missed, which shows up as a first-screen pixel diff.
 - Font subsetting is not done yet (fonttools is installable if wanted).
-- The gallery check screenshots the nearest gallery/carousel/slideshow ancestor of the "next" button; if there is
-  none it compares the whole page, which can give a false "pass" (seen on the mock site's frozen copy).
+- The gallery check sees a change in the picture, not which slide is shown: a slide that moves to the wrong picture
+  still passes. Swipe-only galleries on phones (no arrow) are only tested for autoplay and blank slides.
+
+## Gallery check (2026-10-28)
+
+`probeGalleries()` in `check.mjs` runs on the live page (in `gate.mjs`'s second look) and on the copy, in a page of its
+own without `__pvStill`, so slideshows play as a visitor sees them. It finds up to six galleries, carousels and
+slideshows (one per block, holding more than one picture) and for each: watches it for up to 6 s (a change means it
+plays by itself), clicks its "next" arrow right after (so an autoplay step can't pass for the click), and counts
+pictures in its visible part that never draw. `gate.mjs` holds each copy gallery to the live one in the same block:
+`gallery-does-not-advance` (arrow moves it live, not in the copy), `gallery-does-not-autoplay` (plays by itself live,
+still in the copy), `gallery-blank-slide` (more undrawn slide pictures than live). Each marks its gallery as a pin.
 
 ## One-step copy job and quality check (2026-10-15)
 

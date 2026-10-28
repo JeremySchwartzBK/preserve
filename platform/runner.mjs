@@ -67,6 +67,8 @@ async function main() {
     'font-not-on-google-fonts': 'A font on the live site isn’t available to us, so some text shows in a plain stand-in font.',
     'first-screen-differs': 'The first screen looks noticeably different from the live site.',
     'gallery-does-not-advance': 'A slideshow or carousel doesn’t move.',
+    'gallery-does-not-autoplay': 'A slideshow that plays by itself on your site stays still.',
+    'gallery-blank-slide': 'A slideshow or carousel shows an empty frame.',
     'outside-requests': 'The copy still reaches out to other websites.',
     'overlay-left': 'A popup or banner may still cover part of the page.',
     'page-differs': 'Parts of the page look different from the live site.',

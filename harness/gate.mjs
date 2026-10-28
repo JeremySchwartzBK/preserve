@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { check, diffPct } from './check.mjs';
+import { check, diffPct, probeGalleries } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
@@ -47,6 +47,7 @@ async function liveSelfDiff(url, siteDir) {
         await page.screenshot({ path: path.join(siteDir, `live2-full-${prof}.png`), fullPage: true });
         if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
+        out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
     }
@@ -203,7 +204,21 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (c.mobileMenu === 'fail') fail('phone-menu-broken', L('burger menu does not open'));
       if (c.dropdown === 'fail') fail('dropdown-broken', L('folder dropdown does not open'));
       if (c.replicaNotice === 'fail') fail('replica-notice-missing', L('a link navigated away instead of showing the preview notice'));
-      if (c.gallery === 'fail') fail('gallery-does-not-advance', L('gallery/slideshow "next" does nothing'), 9);
+      // Each gallery against the same one on the live page (by block): an arrow that moves it there must move it here,
+      // one that plays by itself there must play here, and every slide shown must draw its picture.
+      const liveG = new Map((info.liveSelfDiff[prof]?.galleries || []).map((g) => [g.key, g]));
+      const gal = { 'gallery-does-not-advance': [], 'gallery-does-not-autoplay': [], 'gallery-blank-slide': [] };
+      for (const g of c.galleries || []) {
+        const lv = liveG.get(g.key);
+        if (g.next === 'fail' && lv?.next !== 'fail') gal['gallery-does-not-advance'].push(g.arrow || g.anchor);
+        if (lv?.autoplay && !g.autoplay) gal['gallery-does-not-autoplay'].push(g.anchor);
+        if (g.blankSlides > (lv?.blankSlides || 0)) gal['gallery-blank-slide'].push(g.anchor);
+      }
+      for (const [code, list] of Object.entries(gal)) if (list.length) layoutSpots[code] = list.slice(0, 3);
+      const n = (k) => (gal[k].length > 1 ? `${gal[k].length} galleries: ` : '');
+      if (gal['gallery-does-not-advance'].length) fail('gallery-does-not-advance', L(n('gallery-does-not-advance') + 'gallery/slideshow "next" does nothing'), 9);
+      if (gal['gallery-does-not-autoplay'].length) fail('gallery-does-not-autoplay', L(n('gallery-does-not-autoplay') + 'a slideshow that plays by itself on the live page stays still'), 9);
+      if (gal['gallery-blank-slide'].length) fail('gallery-blank-slide', L(n('gallery-blank-slide') + 'a gallery shows a slide whose picture never draws'));
       if (c.pageErrors) warnings.push(L(`${c.pageErrors} script errors: ${c.errorSamples.join(' | ').slice(0, 200)}`));
       const d1 = c.diffFirstScreen, d2 = c.diffFullPage, self = info.liveSelfDiff[prof] || {};
       const allow1 = LIMITS.firstScreenDiffPct + (self.firstScreen?.pct || 0), allow2 = LIMITS.fullPageDiffPct + (self.fullPage?.pct || 0);
@@ -291,7 +306,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
