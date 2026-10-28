@@ -173,6 +173,57 @@ addEventListener('load',function(){draw(false)});
 });
 })();</script>`;
 
+// Galleries, carousels and slideshows (Squarespace gallery and summary blocks, gallery and list sections): the capture
+// stepped each one through its slides and wrote down what every step changes (capture.mjs recordGalleries, in
+// data-pv-gal). This plays those steps back: on its "next" / "previous" arrows, and on the site's own timer when the
+// site played it by itself (paused while our checks compare pictures, and for visitors who ask for less motion).
+// Classes are the ones this copy gives to the classes the capture saw (renamed as our stylesheet renames them), learned
+// from the first step, where both the shown and the hidden slides' classes are present. Positions were measured at the
+// capture width; at any other width they are scaled by how much wider or narrower the gallery is. Squarespace moved
+// some galleries with its own animation code rather than CSS, so moving parts get a short transition of their own.
+const GALLERY_SCRIPT = `<script id="preserve-gallery">(function(){
+var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+[].forEach.call(document.querySelectorAll('[data-pv-gal]'),function(g){
+var cfg;try{cfg=JSON.parse(g.getAttribute('data-pv-gal'))}catch(e){return}
+var steps=cfg.steps||[],n=steps.length;if(n<2)return;
+var els=[];[].forEach.call(g.querySelectorAll('[data-pv-gi]'),function(e){els[+e.getAttribute('data-pv-gi')]=e});
+if(g.hasAttribute('data-pv-gi'))els[+g.getAttribute('data-pv-gi')]=g;
+var map={},base=[],own=[];
+els.forEach(function(e,j){if(!e)return;var c=steps[0][j][0];if(!(c in map))map[c]=e.getAttribute('class')||'';base[j]=e.getAttribute('style')||'';var t=getComputedStyle(e).transitionDuration;own[j]=t&&t.split(',').some(function(x){return parseFloat(x)>0})});
+function cls(e,j,c){if(c in map)return e.setAttribute('class',map[c]);var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
+was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(x)});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(x)})}
+function scale(css){var k=g.getBoundingClientRect().width/(cfg.w||1);if(!k||Math.abs(k-1)<0.01)return css;
+return css.replace(/(^|;)\\s*(left|right|transform|translate|margin-left|margin-right)\\s*:[^;]*/g,function(d){return d.replace(/(-?\\d*\\.?\\d+)px/g,function(_,v){return(+v*k).toFixed(2)+'px'})})}
+var cur=0;
+function decl(css){var o={};(css||'').split(';').forEach(function(d){var k=d.indexOf(':');if(k>0)o[d.slice(0,k).trim().toLowerCase()]=d.slice(k+1).trim()});return o}
+var first=steps[0].map(function(s){return decl(s[1])});
+function draw(i,anim){steps[i].forEach(function(s,j){var e=els[j];if(!e)return;cls(e,j,s[0]);
+e.setAttribute('style',base[j]);if(!base[j])e.removeAttribute('style');
+if(i){var to=decl(scale(s[1]||''));for(var k in first[j])if(!(k in to))e.style.removeProperty(k);
+for(k in to){var v=to[k],imp=/!important$/.test(v);e.style.setProperty(k,v.replace(/\\s*!important$/,''),imp?'important':'')}}
+var a0=kv(steps[0][j][2]),a1=kv(s[2]);for(var a in a0)if(!(a in a1))e.removeAttribute(a);for(a in a1)e.setAttribute(a,a1[a]);
+if(anim&&!reduce&&!own[j])e.style.transition='left .6s ease,right .6s ease,transform .6s ease,opacity .6s ease,margin-left .6s ease'});
+order(i)}
+function kv(t){var o={};(t||'').split('\u001f').forEach(function(x){var k=x.indexOf('=');if(k>0)o[x.slice(0,k)]=x.slice(k+1)});return o}
+function order(i){var ps=[];els.forEach(function(e){if(e&&e.parentElement&&ps.indexOf(e.parentElement)<0)ps.push(e.parentElement)});
+ps.forEach(function(p){var kids=[];els.forEach(function(e,j){if(e&&e.parentElement===p)kids.push(j)});if(kids.length<2)return;
+var moved=kids.some(function(j){return steps[i][j][3]!==steps[0][j][3]})||i===0;if(!moved)return;
+var anchor=null;kids.forEach(function(j){var nx=els[j].nextSibling;while(nx&&kids.some(function(k){return els[k]===nx}))nx=nx.nextSibling;if(!anchor||(nx&&anchor.compareDocumentPosition(nx)&4))anchor=nx});
+kids.sort(function(a,b){return steps[i][a][3]-steps[i][b][3]}).forEach(function(j){p.insertBefore(els[j],anchor)})})}
+function go(i){cur=((i%n)+n)%n;draw(cur,true)}
+// A recorded rhythm (dt: ms before each step) can split one slide change into quick steps; an arrow plays a whole one.
+var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}function major(i){return !dt||dt[i]>=900}
+var timer=null,sub=null;function restart(){clearTimeout(timer);if(!cfg.auto||reduce||window.__pvStill)return;
+timer=setTimeout(function tick(){if(!document.hidden)go(cur+1);timer=setTimeout(tick,wait((cur+1)%n))},wait((cur+1)%n))}
+function slide(d){clearTimeout(sub);var i=cur;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
+go(i);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j);more()},Math.min(wait(j),900))}})()}
+function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();slide(d);restart()},true)})}
+bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
+var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(function(){if(cur)draw(cur,false)},60)});
+restart();
+});
+})();</script>`;
+
 // Text highlights drawn as shapes (Squarespace's marker, underline, wave, scribble, circle...): absolutely placed SVG
 // strokes, sized by Squarespace's script for the width it was drawn at. At any other width the text wraps differently,
 // so this script places them again from where the highlighted text now falls, on load and on resize. Every shape is
@@ -319,7 +370,7 @@ function isOwnerScript($, el) {
   return true;
 }
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, SHAPES_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -373,6 +424,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('body').append(MOTION_SCRIPT);
       $('body').append(MENU_SCRIPT);
       $('body').append(SLIDER_SCRIPT);
+      if ($('[data-pv-gal]').length) $('body').append(GALLERY_SCRIPT);
       $('body').append(SHAPES_SCRIPT);
       const pxPad = (_, el) => /padding-top:\s*[\d.]+px/.test($(el).attr('style') || '');
       const padded = [$('.header-menu').filter(pxPad).first(), $('section.page-section').first().filter(pxPad)].filter((x) => x.length);
