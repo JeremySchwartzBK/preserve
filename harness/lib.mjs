@@ -99,3 +99,12 @@ export function markPromos() {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Galleries, carousels and slideshows, and their "next" / "previous" arrows (check.mjs probeGalleries, capture.mjs
+// recordGalleries). Only buttons and links count: 7.1 fullscreen slideshows also mark slides data-next. Squarespace 7.0 gallery and summary blocks, 7.1 gallery and list sections, and generic names.
+export const GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .user-items-list-simple, .summary-carousel, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .swiper, .ps-gallery, [class*="slideshow" i], [class*="carousel" i]';
+export const NEXT_SEL = '.gallery-slideshow-control-btn[data-next], button[data-next], a[data-next], [role="button"][data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .ps-gallery-controls .next, .summary-carousel-pager-next, .swiper-button-next, button[aria-label*="next" i]';
+export const PREV_SEL = '.gallery-slideshow-control-btn[data-previous], button[data-previous], a[data-previous], [role="button"][data-previous], button[data-prev], .user-items-list-carousel__arrow-button--left, .gallery-reel-control-btn[data-previous], .sqs-gallery-controls .previous, .ps-gallery-controls .previous, .summary-carousel-pager-prev, .swiper-button-prev, button[aria-label*="prev" i]';
+// Squarespace's own galleries, the ones capture.mjs records for the copy's player. A carousel from the site's own
+// code (elahousestudio's blog carousel holds whole page sections) is left as captured: custom code is on hold.
+export const SQS_GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .summary-carousel, .summary-block-wrapper, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel';

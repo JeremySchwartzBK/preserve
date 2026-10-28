@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
 import { loadPins, focusPins } from './pins.mjs';
 
@@ -60,6 +60,122 @@ export async function loadPlaceholders(page) {
     for (const i of todo) if (i.naturalWidth) { i.setAttribute('data-load', 'true'); if (document.querySelector('img.loaded')) i.classList.add('loaded'); }
     return { tried: todo.length, loaded: todo.filter((i) => i.naturalWidth).length };
   }).catch(() => ({ tried: 0, loaded: 0 }));
+}
+
+// Galleries, carousels and slideshows (known limitation 9; Jeremy 2026-10-28: "make that fix"). A copy has none of
+// Squarespace's scripts, so its galleries never moved. Rather than rebuild each kind of gallery's script, the capture
+// steps each gallery through its slides here, the way the site's own script does it (its "next" arrow, or Squarespace's
+// gallery object for blocks that have no arrow), and writes down what each step changes: the classes and inline styles
+// of the elements that move. The copy's player (build.mjs GALLERY_SCRIPT) replays those steps on its arrows and, when
+// the site played the gallery by itself, on the same timer. The timer is the site's setting where Squarespace records
+// one (gallery blocks), otherwise measured here by watching the gallery before touching it. Swiper sliders have their
+// own player (SLIDER_SCRIPT), and carousels from a site's own code are not Squarespace's, so both are left out. The gallery is put back on its first slide before the page is saved.
+export async function recordGalleries(page, { watchMs = 9000, maxSteps = 30, maxMs = 45000 } = {}) {
+  return page.evaluate(async ([gSel, nSel, pSel, watchMs, maxSteps, maxMs]) => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const BLOCK = '[id^="block-"],.sqs-block,[data-block-id],section[data-section-id]';
+    const shown = (e) => { for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; } const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
+    const pics = (e) => e.querySelectorAll('img, .swiper-slide, [data-slide-index], .slide').length;
+    const blockOf = (e) => e.closest(BLOCK) || e.parentElement;
+    const cand = new Set([...document.querySelectorAll(gSel)]);
+    for (const b of document.querySelectorAll(nSel)) { const c = b.closest(gSel); if (c) cand.add(c); }
+    const byBlock = new Map();
+    for (const c of cand) {
+      const r = c.getBoundingClientRect();
+      if (r.width < 100 || r.height < 60 || !shown(c) || pics(c) < 2 || c.closest('.swiper') || c.querySelector('.swiper-initialized,.swiper-container-initialized')) continue;
+      const b = blockOf(c), prev = byBlock.get(b);
+      if (!prev || c.contains(prev)) byBlock.set(b, c);
+    }
+    const insts = (() => { try { return window.Y?.Squarespace?.GalleryManager?.getGalleries?.() || []; } catch { return []; } })();
+    const out = [];
+    let id = 0;
+    for (const [block, g] of byBlock) {
+      const res = { kind: (g.className.baseVal ?? g.className).toString().trim().split(/\s+/)[0] };
+      out.push(res);
+      const els = [g, ...g.querySelectorAll('*')];
+      // What a step can change on an element: its classes, its inline style, short state attributes (7.1 gallery
+      // sections mark the shown slide with data-active / data-in, list carousels with aria-hidden, arrows at the end with
+      // aria-disabled), and its place
+      // among its siblings (7.1 fullscreen slideshows move the shown slide to the end of the list).
+      const STATE = /^(data-(?!src$|image$|image-|load$|slide-url$|pv-|preserve)[\w-]+|aria-(?!label|labelledby|describedby|controls|roledescription)[\w-]+|tabindex|inert|disabled)$/;
+      const attrs = (e) => [...e.attributes].filter((a) => STATE.test(a.name) && a.value.length < 40).map((a) => a.name + '=' + a.value).sort().join('\u001f');
+      const ord = (e) => (e.parentElement ? [...e.parentElement.children].indexOf(e) : 0);
+      const snap = () => els.map((e) => [e.getAttribute('class') || '', e.getAttribute('style') || '', attrs(e), ord(e)]);
+      const same = (a, b) => a.length === b.length && a.every((x, i) => x[0] === b[i][0] && x[1] === b[i][1] && x[2] === b[i][2] && x[3] === b[i][3]);
+      const settle = async () => { let a = snap(); for (let t = 0; t < 20; t++) { await sleep(150); const b = snap(); if (same(a, b)) return b; a = b; } return a; };
+      const grew = () => g.querySelectorAll('*').length + 1 !== els.length;
+      g.scrollIntoView({ block: 'center' }); await sleep(600);
+      // Its own timer: the block's setting, else what it does untouched for a few seconds.
+      let cfg = {}; try { cfg = JSON.parse(g.closest('[data-block-json]')?.getAttribute('data-block-json') || '{}'); } catch {}
+      let auto = cfg.autoplay ? Math.round((+cfg['autoplay-duration'] || 3) * 1000) : 0;
+      const inst = insts.find((x) => { try { const n = x.get('container'); const d = n && (n._node || n.getDOMNode?.()); return d && (d === g || g.contains(d) || d.contains(g)); } catch { return false; } });
+      if (!auto) {
+        let last = await settle(); const t0 = performance.now(), seen = [];
+        while (performance.now() - t0 < watchMs) { await sleep(200); const s = snap(); if (!same(s, last)) { seen.push(performance.now()); last = await settle(); } }
+        if (seen.length >= 2) auto = Math.max(1500, Math.round((seen[1] - seen[0]) / 250) * 250);
+        else if (seen.length === 1) auto = Math.max(2000, Math.round((seen[0] - t0) / 500) * 500);
+      }
+      if (inst) { try { inst._clearAutoplay?.(); inst.set?.('autoplay', false); } catch {} }
+      // Its arrows: all of them get the copy's player (a block can hold one pair per layout); the one on screen is used here.
+      const nexts = [...new Set([...g.querySelectorAll(nSel), ...block.querySelectorAll(nSel)])], prevs = [...new Set([...g.querySelectorAll(pSel), ...block.querySelectorAll(pSel)])];
+      const next = nexts.find(shown) || nexts[0];
+      // Squarespace's gallery object ignores "next" while a slide is still moving, so wait for it to stop first.
+      const idle = async () => { for (let t = 0; t < 50 && inst.get('inMotion'); t++) await sleep(100); };
+      const total = inst ? +(inst._getNumberOfSlides?.() || 0) : 0;
+      let step = inst && typeof inst.nextSlide === 'function' ? async () => { await idle(); const i0 = inst.get('currentIndex'); inst.nextSlide(); for (let t = 0; t < 40 && inst.get('currentIndex') === i0; t++) await sleep(100); await idle(); } : next ? async () => { next.click(); await sleep(700); } : null;
+      // One that plays by itself is recorded by letting it play: clicking as well would mix its steps with ours.
+      if (auto && !inst) step = async () => { const a = snap(), t = performance.now(); while (performance.now() - t < auto + 2500) { await sleep(200); if (!same(snap(), a)) return; } };
+      res.auto = auto; res.how = inst ? 'gallery' : auto ? 'timer' : next ? 'arrow' : 'none';
+      if (!step) continue;
+      if (inst) await idle();
+      const states = [await settle()], dt = [0];
+      let tPrev = performance.now();
+      const classes = (st) => st.map((x) => x[0] + '|' + x[2]).join('\n');
+      const t1 = performance.now();
+      for (let k = 1; k < (total > 1 ? Math.min(total, maxSteps) : maxSteps) && performance.now() - t1 < (auto && !inst ? maxMs * 2 : maxMs); k++) {
+        await step();
+        await sleep(250);
+        let s = await settle();
+        // A click while the slide is still moving can be ignored: give it one more try before calling it the end.
+        if (!auto && same(s, states[states.length - 1])) { await sleep(1000); await step(); await sleep(250); s = await settle(); }
+        if (grew()) { res.skip = 'the gallery adds or removes elements as it moves'; break; }
+        // Back at the start: the same state, or (when something else keeps counting up, like a stacking order) the
+        // same classes and state attributes as the first slide after they had changed.
+        const now = performance.now(), gap = Math.round(now - tPrev); tPrev = now;
+        if (same(s, states[0]) || (classes(s) === classes(states[0]) && states.some((x) => classes(x) !== classes(states[0])))) { res.stop = 'back to the first slide'; dt[0] = gap; break; }
+        if (same(s, states[states.length - 1])) { res.stop = 'no change'; break; }
+        if (states.some((x) => same(s, x))) { res.stop = 'repeats'; break; }
+        states.push(s); dt.push(gap);
+      }
+      res.steps = states.length;
+      if (res.skip || states.length < 2) continue;
+      const moving = els.map((_, i) => i).filter((i) => states.some((s) => s[i].some((v, k) => v !== states[0][i][k])));
+      moving.forEach((i, j) => els[i].setAttribute('data-pv-gi', j));
+      // Back to the first slide, as the page was before.
+      for (const i of moving) {
+        const [c, st, at] = states[0][i], e = els[i];
+        if (c) e.setAttribute('class', c); else e.removeAttribute('class');
+        if (st) e.setAttribute('style', st); else e.removeAttribute('style');
+        for (const a of [...e.attributes]) if (STATE.test(a.name) && a.value.length < 40) e.removeAttribute(a.name);
+        for (const kv of at ? at.split('\u001f') : []) { const k = kv.indexOf('='); e.setAttribute(kv.slice(0, k), kv.slice(k + 1)); }
+      }
+      const parents = new Set(moving.map((i) => els[i].parentElement).filter(Boolean));
+      for (const p of parents) { const kids = moving.filter((i) => els[i].parentElement === p).sort((a, b) => states[0][a][3] - states[0][b][3]); for (const i of kids) p.insertBefore(els[i], p.children[states[0][i][3]] || null); }
+      // Pictures set in a style (background-image) stay as the page has them: their addresses are rewritten to the
+      // copy's own files only where the page uses them, not inside this record.
+      const noUrl = (st) => st.replace(/(^|;)\s*[\w-]+\s*:[^;]*url\([^)]*\)[^;]*/g, '$1').replace(/^;+|;;+/g, ';').replace(/^;/, '');
+      // Played by itself: how long after the one before each step came, so the copy keeps the site's rhythm (a slide
+      // change can come in two or three quick steps, such as fading the new slide in, then settling it).
+      // Squarespace's class names as the copy has them (own-css.mjs renames them; none may be left in a copy).
+      const ren = (t) => t.replace(/data-sqsp?-/g, 'data-ps-').replace(/(^|[^\w-])sqsrte-/g, '$1rte-').replace(/(^|[^\w-])sqsp?-/g, '$1ps-').replace(/(^|[^\w-])tweak-/g, '$1tw-');
+      const timed = res.how === 'timer' ? { dt: dt.map((x) => x || auto) } : {};
+      g.setAttribute('data-pv-gal', JSON.stringify({ id, auto, ...timed, w: Math.round(g.getBoundingClientRect().width), steps: states.map((s) => moving.map((i) => [ren(s[i][0]), ren(noUrl(s[i][1])), ren(s[i][2]), s[i][3]])) }));
+      for (const b of nexts) b.setAttribute('data-pv-gal-next', id);
+      for (const b of prevs) b.setAttribute('data-pv-gal-prev', id);
+      res.moving = moving.length; res.id = id++;
+    }
+    return out;
+  }, [SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL, watchMs, maxSteps, maxMs]).catch((e) => ({ error: String(e.message).split('\n')[0] }));
 }
 
 async function scrollThrough(page) {
@@ -148,6 +264,10 @@ export async function capture(url, outDir) {
     const pins = loadPins();
     if (pins.length) (info.pinsFocused ||= {})[prof] = await focusPins(page, prof, pins);
     (info.placeholders ||= {})[prof] = await loadPlaceholders(page);
+    // Back to where the page was scrolled: the header's look (shrunk or not) is saved with the page.
+    const y0 = await page.evaluate(() => scrollY);
+    (info.galleries ||= {})[prof] = await recordGalleries(page);
+    await page.evaluate((y) => scrollTo(0, y), y0); await sleep(500);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await shadowStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);

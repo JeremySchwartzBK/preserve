@@ -199,6 +199,23 @@ From the 58-site run:
 - The gallery check sees a change in the picture, not which slide is shown: a slide that moves to the wrong picture
   still passes. Swipe-only galleries on phones (no arrow) are only tested for autoplay and blank slides.
 
+## Gallery player (2026-10-28)
+
+Copies have none of Squarespace's scripts, so galleries, carousels and slideshows never moved (known limitation 9;
+the gallery check above found emmagrinteriors' reel frozen). Instead of rebuilding each kind of gallery's script,
+`recordGalleries()` in `capture.mjs` steps each gallery on the live page through its slides, the way the site does:
+Squarespace's own gallery object for 7.0 gallery blocks (waiting while a slide is still moving), the site's own timer
+for galleries that play by themselves (so the copy keeps the rhythm, including slide changes made of two or three
+quick steps), or its "next" arrow. For each step it writes down what changed on the elements that move: classes,
+inline style, short state attributes (`data-active`, `aria-hidden`...) and their order among their siblings. It stops
+when the gallery is back on its first slide, repeats itself, stops changing, or after 30 steps (45 s; 90 s when
+it has to wait on the site's timer). It skips galleries that add or remove elements as they move (cloned slides), and
+Swiper sliders, which have their own player. The record goes in `data-pv-gal` on the gallery, `data-pv-gi` on each
+moving element and `data-pv-gal-next` / `-prev` on the arrows; the gallery is put back on its first slide before
+the page is saved. `GALLERY_SCRIPT` in `build.mjs` plays the steps back on the arrows and on the recorded timer
+(paused under `__pvStill` and for visitors who ask for less motion), with the copy's own class names, positions
+scaled to the gallery's width, and a short transition where Squarespace animated in script.
+
 ## Gallery check (2026-10-28)
 
 `probeGalleries()` in `check.mjs` runs on the live page (in `gate.mjs`'s second look) and on the copy, in a page of its

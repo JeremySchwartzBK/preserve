@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import sharp from 'sharp';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL } from './lib.mjs';
 
 
 
@@ -101,11 +101,9 @@ const shotHash = async (loc) => { try { const b = await loc.screenshot({ timeout
 
 // Galleries, carousels and slideshows, each one on the page (2026-10-28; before, only the first "next" arrow was tried).
 // Run in a page of its own, without __pvStill, so our slideshow scripts play the way a visitor sees them. For each:
-// does it move by itself (watched for a few seconds), does its "next" arrow move it, and does every slide it shows draw
+// does it move by itself (watched for a few seconds once it holds still), does its "next" arrow move it, and does every slide it shows draw
 // its picture. Galleries are keyed by block id so gate.mjs can hold the copy's to the live page's.
-const NEXT_SEL = '.gallery-slideshow-control-btn[data-next], [data-next], .user-items-list-carousel__arrow-button--right, .gallery-reel-control-btn[data-next], .sqs-gallery-controls .next, .ps-gallery-controls .next, .summary-carousel-pager-next, .swiper-button-next, button[aria-label*="next" i]';
-const GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .user-items-list-simple, .summary-carousel, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .swiper, .ps-gallery, [class*="slideshow" i], [class*="carousel" i]';
-const WATCH_MS = 6000, MAX_GALLERIES = 6;
+const SETTLE_MS = 5000, WATCH_MS = 7000, MAX_GALLERIES = 6;
 const sha = (b) => crypto.createHash('sha1').update(b).digest('hex');
 
 export async function probeGalleries(browser, url, profileName, { isCopy = false } = {}) {
@@ -144,12 +142,26 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
       });
     }, [GALLERY_SEL, NEXT_SEL, MAX_GALLERIES]);
 
+    // Pinned things outside the galleries (menus, badges) would sit in a gallery's picture: hide them while probing.
+    await page.evaluate(() => { for (const e of document.querySelectorAll('body *')) { const p = getComputedStyle(e).position; if ((p === 'fixed' || p === 'sticky') && !e.querySelector('[data-pv-g]') && !e.closest('[data-pv-g]')) e.style.setProperty('visibility', 'hidden', 'important'); } });
     // A picture of the part of the gallery on screen (a reel can be far wider than the window).
     const shot = async (i) => {
       const box = await page.evaluate((i) => { const r = document.querySelector(`[data-pv-g="${i}"]`)?.getBoundingClientRect(); if (!r) return null; const x = Math.max(0, r.left), y = Math.max(0, r.top); return { x, y, width: Math.min(innerWidth, r.right) - x, height: Math.min(innerHeight, r.bottom) - y }; }, i);
       if (!box || box.width < 10 || box.height < 10) return null;
       try { return sha(await page.screenshot({ clip: box, timeout: 5000 })); } catch { return null; }
     };
+    // Where its slides are, as the page's own state (positions, transforms, which slide is active, scroll offsets): it
+    // sees the gallery alone, where a picture would also catch a spinning badge or a pinned menu drawn over it.
+    const state = (i) => page.evaluate((i) => {
+      const g = document.querySelector(`[data-pv-g="${i}"]`); if (!g) return null;
+      let h = 0;
+      for (const e of [g, ...g.querySelectorAll('*')].slice(0, 800)) {
+        const c = getComputedStyle(e);
+        const v = [e.className?.baseVal ?? e.className, c.transform, c.translate, c.left, c.top, c.marginLeft, c.opacity, c.visibility, e.scrollLeft, e.currentSrc || ''].join('|');
+        for (let k = 0; k < v.length; k++) h = (h * 31 + v.charCodeAt(k)) | 0;
+      }
+      return h;
+    }, i).catch(() => null);
     // Pictures in the visible part of the gallery that never drew (waits up to 2 s for ones still loading).
     const blank = async (i) => {
       for (let t = 0; t < 5; t++) {
@@ -173,13 +185,21 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
       await page.evaluate((i) => document.querySelector(`[data-pv-g="${i}"]`)?.scrollIntoView({ block: 'center' }), g.i);
       await sleep(1500);
       const r = { key: g.key, anchor: g.anchor, arrow: g.arrow, autoplay: false, next: g.arrow ? 'unknown' : 'n/a', blankSlides: 0 };
-      // Watch it: a change with nothing touched means it plays by itself.
-      let h0 = await shot(g.i);
-      r.blankSlides = await blank(g.i);
-      for (let t = 0; t < WATCH_MS && h0; t += 1000) {
+      // Watch it: a change with nothing touched means it plays by itself. It first has to hold still for a second
+      // (pictures fading in as they load are not autoplay); one that never holds still is moving all the time.
+      let h0 = await state(g.i), still = false;
+      for (let t = 0; t < SETTLE_MS && h0 != null; t += 1000) {
         await sleep(1000);
-        const h1 = await shot(g.i);
-        if (h1 && h1 !== h0) { r.autoplay = true; break; }
+        const h1 = await state(g.i);
+        if (h1 === h0) { still = true; break; }
+        h0 = h1;
+      }
+      r.blankSlides = await blank(g.i);
+      if (h0 != null && !still) r.autoplay = true;
+      for (let t = 0; t < WATCH_MS && h0 != null && still; t += 500) {
+        await sleep(500);
+        const h1 = await state(g.i);
+        if (h1 != null && h1 !== h0) { r.autoplay = true; break; }
       }
       if (r.autoplay) { await sleep(1200); r.blankSlides = Math.max(r.blankSlides, await blank(g.i)); }
       // Its arrow: right after an autoplay step (or any time, if it is still), so the next step can't be mistaken for it.
