@@ -149,7 +149,7 @@ function newCopy() {
 // Desktop is shown at a real 1440px desktop width, scaled down to fit, so the copy lays out as it would on a monitor.
 const DESKTOP_W = 1440, PHONE_W = 390;
 let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
-const KIND_FOR = { check: 'issue', report: 'issue', tour: 'tour' };
+const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
 // Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
 // a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
@@ -178,7 +178,9 @@ function copyPage(id) {
   const review = c.status === 'review';
   const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['credits', 'Credits']] : [];
   const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
-    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits'], ['report', 'Report an issue']];
+    // Accepted: the captured page can never change again (Jeremy, 2026-10-28), so there is no issue reporting here;
+    // only the Tour, Credits, link name and Live/Archived stay editable.
+    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
   if (view.frameKey !== key || !$('#fr')) {
@@ -208,7 +210,7 @@ function copyPage(id) {
   $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}${k === 'fonts' && nf ? ` <span class="count">${nf}</span>` : ''}</button>`).join('');
   app.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t; view.pinFor = null; sendMode(); copyPage(id); }));
   panel(c, review);
-  $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' || view.pinFor === 'report' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
+  $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
     : 'Click the spot on the page. Press Esc to cancel.';
   sendPins(c);
 }
@@ -253,7 +255,7 @@ const letter = (i) => String.fromCharCode(65 + (i % 26));
 const VERDICTS = [['ignore', 'Ignore issue'], ['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
 const verdictOf = (p) => (p.meta.verdict === 'fine' ? 'not-a-problem' : p.meta.verdict);
 const pinsFor = (c, tab) => c.pins.filter((p) => tab === 'tour' ? p.kind === 'tour' : tab === 'credits' ? p.kind === 'credit'
-  : p.kind === 'issue' && (tab === 'report' ? !!p.meta?.report : !p.meta?.report));
+  : p.kind === 'issue' && !p.meta?.report);
 
 function onFrameMessage(m, id) {
   if (m.source !== frameWin()) return;
@@ -274,8 +276,7 @@ function onFrameMessage(m, id) {
     noteDialog(forWhat, null, async (vals) => {
       const pin = { blockId: d.blockId, x: d.x, y: d.y, layout: d.layout, label: d.label };
       if (forWhat === 'tour') await store.addPin(id, { ...pin, kind: 'tour', body: vals.body, meta: { title: vals.title } });
-      else await store.addPin(id, { ...pin, kind: 'issue', body: vals.body, meta: forWhat === 'report' ? { report: true } : {} });
-      if (forWhat === 'report') toast('Thanks. We’ve logged it and will look into it.');
+      else await store.addPin(id, { ...pin, kind: 'issue', body: vals.body, meta: {} });
     });
     copyPage(id);
   }
@@ -286,7 +287,7 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#notes') && !$
 addEventListener('blur', () => { const p = $('#notes'); if (p) p.hidden = true; });   // a click inside the preview frame
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { view.pinFor = null; sendMode(); if (view.id) copyPage(view.id); } });
 
-// A small form in a dialog (instead of the browser's prompt box). kind: issue | report | tour.
+// A small form in a dialog (instead of the browser's prompt box). kind: issue | tour.
 function noteDialog(kind, current, save) {
   const dlg = $('#dlg'), f = $('#dlgf');
   const tour = kind === 'tour';
@@ -380,10 +381,6 @@ function panel(c, review) {
       <div class="row"><button class="btn small" id="cl">Copy link</button><button class="btn small secondary" id="ce">Copy embed code</button><a class="btn small secondary" href="${esc(store.link(c))}" target="_blank" rel="noopener">Open</a></div>
       <p class="fine">Old links keep working after a name change. Embed codes never change.</p>
 `;
-  } else if (view.tab === 'report') {
-    P.innerHTML = `<h2>Report an issue</h2><p class="sub">Something not working on this Preserve? Click <b>+ Issue</b>, drop a pin, and tell us what’s wrong. We’ll look into it.</p>
-      <p>${pinButton('report', '+ Issue')}</p>
-      <h3 class="semi">Reported</h3>${pinList(c, 'report', { empty: 'Nothing reported yet.', remove: false })}`;
   }
   const on = (sel, f) => { const el = P.querySelector(sel); if (el) el.onclick = f; };
   P.querySelectorAll('[data-pin]').forEach((b) => (b.onclick = () => startPin(b.dataset.pin)));

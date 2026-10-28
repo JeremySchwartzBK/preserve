@@ -82,7 +82,9 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 - User-testing questions are collected in /mnt/project-files/product/user-testing-questions.md.
 - Round 2 (2026-10-27): house style is numbers under 10 spelled out in sentences (digits in labels and counters) and
   status names capitalized in sentences (Live, Archived, Archiving). Live Preserves lose the Manage tab (card actions
-  cover it); "Report an issue" is the tab for telling us something is broken.
+  cover it).
+- Accepted Preserves can never be modified (Jeremy, 2026-10-28): the "Report an issue" tab is gone. The Tour, Credits,
+  link name and Live/Archived stay editable. The only exception is an admin-only, recorded removal for legal reasons.
 
 ## Fonts step (review, 2026-10-27)
 
