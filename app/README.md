@@ -67,3 +67,32 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 - Database: `platform/schema-findings.sql` (loaded). People can only mark findings, not add or remove them (trigger). For triage, `finding_triage` view (service only) lists every marked finding; `not-a-problem` rows are false alarms to tune the check.
 - Also fixed on the way: the phone video mask in the picture comparison was misplaced (phone screenshots are 3x), so phone comparisons around video are now fairer.
 - 2026-10-17 (Jeremy's review): findings list shows only the layout on screen, lettered top to bottom (`meta.pageY`, set by the check; older pins backfilled); the block-text snippet is gone; "Known limits" is no longer shown to users (not actionable, only worrying); "Bigger preview" is now "Hide panel".
+
+## Review flow feedback (Jeremy, 2026-10-26, pins on the flow markup page)
+- Say "Preserve", never "copy", in anything people read ("copy" reads as page text). Code names stay `copy`.
+- Review steps: 1. Look and Feel, 2. Tour, 3. Credits, then Accept Preserve. "+ Issue" drops a pin. Suspected
+  issues from our check are answered Ignore issue / Fix issue / Not an issue. Refine Preserve appears once anything
+  is marked to fix (a pin of their own, or Fix issue). Accept asks for confirmation ("cannot be refined"; Review
+  Preserve goes back to step 1), then goes live if the plan has a free live spot, otherwise starts Archived.
+- Tour and credits stay editable after accepting. Tour stops can be moved; a stop whose block is gone after a
+  refinement is flagged to move (the review bridge reports pins it couldn't place).
+- Dashboard: "Your Preserves", newest first, 20 a page, search on site name and address, filter All / Live / Ready
+  to review / Pending / Archived. Cards show the capture date and Copy link, Copy embed code, a Live/Archived switch,
+  Review and Delete. Deleting asks first and says it's permanent.
+- User-testing questions are collected in /mnt/project-files/product/user-testing-questions.md.
+- Round 2 (2026-10-27): house style is numbers under 10 spelled out in sentences (digits in labels and counters) and
+  status names capitalized in sentences (Live, Archived, Archiving). Live Preserves lose the Manage tab (card actions
+  cover it).
+- Accepted Preserves can never be modified (Jeremy, 2026-10-28): the "Report an issue" tab is gone. The Tour, Credits,
+  link name and Live/Archived stay editable. The only exception is an admin-only, recorded removal for legal reasons.
+
+## Fonts step (review, 2026-10-27)
+
+When a Preserve has fonts to check (`copy.fonts`), review starts with **Fonts**: one row per font with the original's
+name, a picture of it in the page's own words (taken at capture, since Adobe files can't be shipped), the font the
+Preserve uses, and Show on page. Choices follow who holds the license: Squarespace's Adobe fonts get a lookalike unless
+the person uploads their own file; fonts the owner uploaded are kept unless they say they don't have the rights; a font
+covered by a file saved in Your fonts needs no look. An upload is checked (same family, matching widths) and rebuilds
+only the fonts. Above Accept Preserve, the person confirms rights to the fonts kept as on the site; that, and every
+choice, is recorded with who and when. Demo only so far: the database side (copy fonts, studio fonts, the record) and
+the capture-time samples are still to build, and Show on page outlining needs the Preserve viewer redeployed.

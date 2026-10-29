@@ -1,4 +1,5 @@
-// Preserve app screens: sign in, dashboard, new copy, review (pinned notes, tour, credits), copy details, plan.
+// Preserve app screens: sign in, dashboard, new Preserve, review (look and feel, tour, credits, accept), Preserve details, plan.
+// (A "Preserve" is what the code calls a copy; the word copy stays out of what people read, where it reads as page text.)
 // Plain JS, no build step. Routes: #/ dashboard, #/new, #/copy/<id>, #/plan.
 import { store, PLANS } from './store.js';
 import { GOOGLE } from './config.js';
@@ -9,7 +10,16 @@ const app = $('#app');
 const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200); };
 const copyText = async (t, what) => { try { await navigator.clipboard.writeText(t); toast(`${what} copied`); } catch { prompt(`Copy the ${what.toLowerCase()}:`, t); } };
 const when = (iso) => { const d = (Date.now() - Date.parse(iso)) / 1000; return d < 60 ? 'just now' : d < 3600 ? `${Math.round(d / 60)} min ago` : d < 86400 ? `${Math.round(d / 3600)} h ago` : `${Math.round(d / 86400)} d ago`; };
-const STATUS = { processing: ['Copying…', 'busy'], review: ['Ready to review', 'attn'], ready: ['Live', 'ok'], paused: ['Paused', 'muted'], archived: ['Archived', 'muted'], failed: ['Couldn’t copy', 'bad'] };
+const day = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const STATUS = { processing: ['Pending', 'busy'], review: ['Ready to review', 'attn'], ready: ['Live', 'ok'], paused: ['Paused', 'muted'], archived: ['Archived', 'muted'], failed: ['Couldn’t preserve', 'bad'] };
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+// House style (Jeremy, 2026-10-27): in sentences, numbers under 10 are spelled out; labels and counters keep digits.
+// Status names (Live, Archived, Pending…) are capitalized wherever they appear in a sentence.
+const NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const num = (n) => (n >= 0 && n < 10 ? NUM[n] : String(n));
+const count = (n, one, many = one + 's') => `${num(n)} ${n === 1 ? one : many}`;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const planFull = () => { const n = store.plan().copies; return n === 1 ? 'Your plan provides for one Live Preserve, which is currently in use.' : `Your plan provides for ${count(n, 'Live Preserve')}, which are all currently in use.`; };
 const thumb = (c) => ['minaab', 'breathpod', 'kosa', 'designforward', 'xanadu'].find((s) => c.url.includes(s.replace('kosa', 'kosa.squarespace'))) || null;
 
 function shell(body, { back } = {}) {
@@ -20,16 +30,31 @@ function shell(body, { back } = {}) {
     <button class="link" id="out">Sign out</button></nav></header>
     <div id="notes" class="pop" hidden>${store.notifications().length ? store.notifications().slice(0, 8).map((n) => `<a href="#/copy/${n.copy}" class="${n.read ? '' : 'unread'}">${esc(n.text)}<small>${when(n.at)}</small></a>`).join('') : '<p>No notifications yet.</p>'}</div>
     <main>${body}</main>
-    ${store.real ? '' : '<div class="demo-bar">Demo: everything here is stored only in this browser, and new copies are simulated. <button class="link" id="reset">Reset demo</button></div>'}`;
+    <dialog id="cdlg"></dialog>
+    ${store.real ? '' : '<div class="demo-bar">Demo: everything here is stored only in this browser, and new Preserves are simulated. <button class="link" id="reset">Reset demo</button></div>'}`;
   $('#out').onclick = async () => { await store.signOut(); location.hash = '#/'; };
   if ($('#reset')) $('#reset').onclick = () => { store.reset(); location.hash = '#/'; };
-  $('#bell').onclick = () => { const p = $('#notes'); p.hidden = !p.hidden; if (!p.hidden) setTimeout(() => store.markRead(), 1500); };
+  $('#bell').onclick = (e) => { e.stopPropagation(); const p = $('#notes'); p.hidden = !p.hidden; if (!p.hidden) setTimeout(() => store.markRead(), 1500); };
 }
+
+// A confirmation card (instead of the browser's confirm box). Resolves true when the main button is pressed.
+// While it is open, background refreshes don't redraw the screen underneath it (see route()).
+function confirmCard({ title, body, ok, cancel = 'Cancel', danger }) {
+  return new Promise((done) => {
+    const dlg = $('#cdlg');
+    dlg.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2><p class="sub">${esc(body)}</p>
+      <div class="row end"><button class="btn secondary" value="cancel">${esc(cancel)}</button><button class="btn ${danger ? 'danger solid' : ''}" value="ok">${esc(ok)}</button></div></form>`;
+    dlg.returnValue = '';
+    dlg.onclose = () => { done(dlg.returnValue === 'ok'); if (routeWaiting) { routeWaiting = false; setTimeout(route); } };
+    dlg.showModal();
+  });
+}
+const confirmDelete = () => confirmCard({ title: 'Confirm Deletion', body: 'Once a Preserve is deleted it can’t be recovered and its links and embed codes will stop working.', ok: 'Delete', danger: true });
 
 // 1. Sign in ---------------------------------------------------------------------------------------------------
 function signIn() {
   app.innerHTML = `<div class="signin"><div class="card narrow">
-    <h1>Preserve</h1><p class="lede">Live, interactive copies of the sites you’ve designed, for your portfolio. Fast, private, and they never break.</p>
+    <h1>Preserve</h1><p class="lede">Preserve the sites you’ve designed as live, interactive pages for your portfolio. Fast, private, and they never break.</p>
     ${!store.real || GOOGLE ? '<button class="btn wide google" id="g"><span>G</span> Continue with Google</button><div class="or">or</div>' : ''}
     <form id="f"><label>Email<input type="email" id="email" required placeholder="you@studio.com"></label>
     <button class="btn wide secondary">Email me a sign-in link</button></form>
@@ -47,55 +72,96 @@ function signIn() {
 }
 
 // 2. Dashboard -------------------------------------------------------------------------------------------------
+// Newest first, 20 to a page, with a search (site title and address) and a filter by state. The list redraws on its
+// own, so typing in the search box or a background refresh never loses the search box's focus.
+const PAGE = 20;
+const FILTERS = [['all', 'All'], ['live', 'Live'], ['review', 'Ready to review'], ['pending', 'Pending'], ['archived', 'Archived']];
+const inFilter = (c, f) => f === 'all' || (f === 'live' ? ['ready', 'paused'].includes(c.status) : f === 'pending' ? c.status === 'processing' : c.status === f);
+const hostOf = (c) => new URL(c.url).hostname.replace(/^www\./, '');
+let dash = { q: '', filter: 'all', page: 0 };
+
 function dashboard() {
-  const cs = store.copies().filter((c) => c.status !== 'archived');
-  const archived = store.copies().filter((c) => c.status === 'archived');
-  const plan = store.plan();
-  const card = (c) => {
-    const [label, tone] = STATUS[c.status];
-    const t = thumb(c);
-    return `<article class="copy">
-      <a href="#/copy/${c.id}" class="shot">${t ? `<img src="thumbs/${t}.webp" alt="" loading="lazy">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
-      <div class="meta"><a href="#/copy/${c.id}" class="title">${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
-      <div class="sub">${esc(new URL(c.url).hostname.replace(/^www\./, ''))} · ${when(c.created)}</div>
-      ${c.status === 'ready' ? `<div class="actions"><button class="btn small" data-link="${c.id}">Copy link</button><button class="btn small secondary" data-embed="${c.id}">Copy embed code</button></div>`
-        : c.status === 'review' ? `<div class="actions"><a class="btn small" href="#/copy/${c.id}">Review copy</a></div>`
-        : c.status === 'failed' ? `<p class="sub">${esc(c.message || '')}</p>` : ''}
-    </article>`;
-  };
-  shell(`<div class="head"><div><h1>Your copies</h1><p class="sub">${plan.copies >= 100000 ? `${store.liveCount()} copies · ${esc(plan.name)} plan` : `${store.liveCount()} of ${plan.copies} on your ${esc(plan.name)} plan`}</p></div><a href="#/new" class="btn">+ New copy</a></div>
-    <section class="grid">${cs.map(card).join('') || '<p>No copies yet. Make your first one.</p>'}</section>
-    ${archived.length ? `<details class="arch"><summary>Archived (${archived.length})</summary><section class="grid">${archived.map(card).join('')}</section></details>` : ''}`);
-  app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
-  app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => copyText(store.embed(store.copy(b.dataset.embed)), 'Embed code')));
+  if ($('#dashq')) { refreshHeader(); drawList(); return; }
+  shell(`<div class="head"><div><h1>Your Preserves</h1><p class="sub" id="cap"></p></div><a href="#/new" class="btn">+ New Preserve</a></div>
+    <div class="dashbar"><input id="dashq" type="search" placeholder="Search by site name or address" value="${esc(dash.q)}" aria-label="Search your Preserves">
+      <div class="seg" id="filt">${FILTERS.map(([k, l]) => `<button data-f="${k}" class="${dash.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <section class="grid" id="list"></section><nav class="pager" id="pager"></nav>`);
+  $('#dashq').oninput = () => { dash.q = $('#dashq').value; dash.page = 0; drawList(); };
+  app.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { dash.filter = b.dataset.f; dash.page = 0; app.querySelectorAll('[data-f]').forEach((x) => x.classList.toggle('on', x === b)); drawList(); }));
+  drawList();
 }
 
-// 3. New copy --------------------------------------------------------------------------------------------------
+function drawList() {
+  const plan = store.plan();
+  $('#cap').textContent = plan.copies >= 100000 ? `${plural(store.liveCount(), 'Live Preserve')} · ${plan.name} plan` : `${store.liveCount()} of ${plan.copies} Live on your ${plan.name} plan`;
+  const q = dash.q.trim().toLowerCase();
+  const all = store.copies().filter((c) => c.status !== 'deleted').sort((a, b) => b.created.localeCompare(a.created));
+  const shown = all.filter((c) => inFilter(c, dash.filter) && (!q || c.title.toLowerCase().includes(q) || c.url.toLowerCase().includes(q)));
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
+  dash.page = Math.min(dash.page, pages - 1);
+  $('#list').innerHTML = shown.slice(dash.page * PAGE, (dash.page + 1) * PAGE).map(card).join('')
+    || `<p class="sub">${all.length ? 'No Preserves match.' : 'No Preserves yet. Make your first one.'}</p>`;
+  $('#pager').innerHTML = pages > 1 ? `<button class="btn small secondary" data-pg="-1" ${dash.page ? '' : 'disabled'}>← Newer</button><span class="sub">Page ${dash.page + 1} of ${pages}</span><button class="btn small secondary" data-pg="1" ${dash.page < pages - 1 ? '' : 'disabled'}>Older →</button>` : '';
+  app.querySelectorAll('[data-pg]').forEach((b) => (b.onclick = () => { dash.page += +b.dataset.pg; drawList(); scrollTo(0, 0); }));
+  app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
+  app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => copyText(store.embed(store.copy(b.dataset.embed)), 'Embed code')));
+  app.querySelectorAll('[data-live]').forEach((b) => (b.onchange = async () => {
+    const err = await store.setStatus(b.dataset.live, b.checked ? 'ready' : 'archived');
+    if (err) { b.checked = !b.checked; toast(err); } else toast(b.checked ? 'Live again' : 'Archived. Its link now shows “preview paused”.');
+  }));
+  app.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (await confirmDelete()) { await store.remove(b.dataset.del); toast('Deleted'); } }));
+}
+
+function card(c) {
+  const [label, tone] = STATUS[c.status] || ['', 'muted'];
+  const t = thumb(c);
+  const accepted = ['ready', 'paused', 'archived'].includes(c.status);
+  const del = `<button class="link danger" data-del="${c.id}">Delete</button>`;
+  return `<article class="copy">
+    <a href="#/copy/${c.id}" class="shot">${t ? `<img src="thumbs/${t}.webp" alt="" loading="lazy">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
+    <div class="meta"><a href="#/copy/${c.id}" class="title">${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
+    <div class="sub">${esc(hostOf(c))} · ${day(c.created)}</div>
+    ${accepted ? `<div class="actions"><button class="btn small" data-link="${c.id}">Copy link</button><button class="btn small secondary" data-embed="${c.id}">Copy embed code</button></div>
+      <div class="actions minor"><label class="switch"><input type="checkbox" data-live="${c.id}" ${c.status === 'archived' ? '' : 'checked'}><span class="knob"></span><span class="on">Live</span><span class="off">Archived</span></label>
+        <a class="link" href="#/copy/${c.id}">Review</a>${del}</div>`
+      : c.status === 'review' ? `<div class="actions"><a class="btn small" href="#/copy/${c.id}">Review</a></div><div class="actions minor">${del}</div>`
+      : c.status === 'failed' ? `<p class="sub">${esc(c.message || '')}</p><div class="actions minor">${del}</div>` : ''}
+  </article>`;
+}
+
+// 3. New Preserve ----------------------------------------------------------------------------------------------
 function newCopy() {
-  shell(`<div class="card narrow"><h1>New copy</h1><p class="lede">Paste the address of a Squarespace page you designed. We’ll copy that page as it looks right now, on phone and desktop.</p>
+  shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a Squarespace page you designed. We’ll preserve that page as it looks right now, on phone and desktop.</p>
     <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
-    <p class="err" id="err" hidden></p><button class="btn wide">Make the copy</button></form>
+    <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
     <p class="fine">Takes a few minutes. You can leave this page; we’ll let you know here (and soon by email) when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
   $('#f').onsubmit = async (e) => {
     e.preventDefault();
     const r = await store.create($('#u').value.trim());
     if (r.error) { $('#err').textContent = r.error; $('#err').hidden = false; return; }
-    app.querySelector('main').innerHTML = `<div class="card narrow center"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your copy is being made. It usually takes a few minutes, and you don’t need to keep this page open. We’ll notify you when it’s ready to review.</p><a class="btn" href="#/">Back to your copies</a></div>`;
+    app.querySelector('main').innerHTML = `<div class="card narrow center"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. We’ll notify you when it’s ready to review.</p><a class="btn" href="#/">Back to your Preserves</a></div>`;
   };
 }
 
-// 4. One copy: processing / review / live --------------------------------------------------------------------
+// 4. One Preserve: pending / review / live --------------------------------------------------------------------
 // The preview frame is built once per copy and layout and then left alone, so saving a note, adding a tour stop or
 // a background refresh never reloads it or scrolls it back to the top; only the side panel is redrawn.
 // Desktop is shown at a real 1440px desktop width, scaled down to fit, so the copy lays out as it would on a monitor.
 const DESKTOP_W = 1440, PHONE_W = 390;
-let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null };
-const KIND_FOR = { check: 'issue', report: 'issue', tour: 'tour' };
+let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
+const KIND_FOR = { check: 'issue', tour: 'tour' };
+// Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
+// Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
+// a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
+const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
+const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload');
+// Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
+const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
 function copyPage(id) {
   const c = store.copy(id);
   if (!c || c.status === 'deleted') { location.hash = '#/'; return; }
-  if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null };
+  if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
   if (c.status === 'processing') {
     view.frameKey = null;
     shell(`<div class="card narrow"><h1>${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
@@ -105,13 +171,16 @@ function copyPage(id) {
   }
   if (c.status === 'failed') {
     view.frameKey = null;
-    shell(`<div class="card narrow"><h1>We couldn’t copy this page yet</h1><p class="lede">${esc(c.message || 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.')}</p><button class="btn secondary" id="del">Remove</button></div>`, { back: '#/' });
-    $('#del').onclick = async () => { await store.remove(id); location.hash = '#/'; };
+    shell(`<div class="card narrow"><h1>We couldn’t preserve this page yet</h1><p class="lede">${esc(c.message || 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.')}</p><button class="btn secondary" id="del">Delete</button></div>`, { back: '#/' });
+    $('#del').onclick = async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } };
     return;
   }
   const review = c.status === 'review';
-  const tabs = review ? [['check', '1. Check the copy'], ['tour', '2. Tour'], ['credits', '3. Credits']]
-    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits'], ['report', 'Report'], ['manage', 'Manage']];
+  const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['credits', 'Credits']] : [];
+  const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
+    // Accepted: the captured page can never change again (Jeremy, 2026-10-28), so there is no issue reporting here;
+    // only the Tour, Credits, link name and Live/Archived stay editable.
+    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
   if (view.frameKey !== key || !$('#fr')) {
@@ -119,27 +188,30 @@ function copyPage(id) {
     // Title, link and the preview controls share one row so the preview starts high and gets the height.
     shell(`<div class="head copyhead"><div class="ttlwrap"><h1 id="ttl"></h1><p class="sub"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p></div>
           <div class="toolbar"><span class="hint" id="hint"></span><div class="seg"><button data-l="desktop" class="${view.layout === 'desktop' ? 'on' : ''}">Desktop</button><button data-l="mobile" class="${view.layout === 'mobile' ? 'on' : ''}">Phone</button></div>
-            <button class="btn small secondary" id="expand">${view.wide ? 'Show panel' : 'Hide panel'}</button></div></div>
+            <button class="btn small secondary" id="expand"></button></div></div>
       <div class="split ${view.wide ? 'wide' : ''}">
         <div class="stage">
-          <div class="frame ${view.layout}" id="fw"><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=1" title="Copy preview"></iframe></div>
+          <div class="frame ${view.layout}" id="fw"><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=1" title="Preserve preview"></iframe></div>
         </div>
         <aside class="side"><nav class="tabs" id="tabs"></nav><div id="panel"></div></aside>
       </div>
       <dialog id="dlg"><form method="dialog" id="dlgf"></form></dialog>`, { back: '#/' });
     app.querySelectorAll('[data-l]').forEach((b) => (b.onclick = () => { view.layout = b.dataset.l; view.pinFor = null; copyPage(id); }));
     $('main').classList.add('full');
-    $('#expand').onclick = () => { view.wide = !view.wide; $('.split').classList.toggle('wide', view.wide); $('#expand').textContent = view.wide ? 'Show panel' : 'Hide panel'; fitFrame(); };
+    $('#expand').onclick = () => { view.wide = !view.wide; $('.split').classList.toggle('wide', view.wide); copyPage(id); fitFrame(); };
     fitFrame();
     window.onmessage = (m) => onFrameMessage(m, id);
   } else {
     refreshHeader();
   }
   $('#ttl').innerHTML = `${esc(c.title)} <span class="pill ${STATUS[c.status][1]}">${STATUS[c.status][0]}</span>`;
-  $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}</button>`).join('');
+  $('#expand').textContent = `${view.wide ? 'Show' : 'Hide'} ${review ? 'review panel' : 'panel'}`;
+  const nf = fontsToCheck(c).length;
+  $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}${k === 'fonts' && nf ? ` <span class="count">${nf}</span>` : ''}</button>`).join('');
   app.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t; view.pinFor = null; sendMode(); copyPage(id); }));
   panel(c, review);
-  $('#hint').textContent = view.pinFor ? 'Click the spot on the page. Press Esc to cancel.' : '';
+  $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
+    : 'Click the spot on the page. Press Esc to cancel.';
   sendPins(c);
 }
 
@@ -179,30 +251,43 @@ function sendPins(c, force) {
 // Findings for the layout on screen, top to bottom (lettered in that order, on the page and in the list).
 const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
-const VERDICTS = [['fine', 'Looks fine'], ['fix', 'Needs fixing'], ['not-a-problem', 'Not a problem']];
+// The person's answer for each suspected issue (Jeremy, 2026-10-26). 'fine' is the older "Looks fine" answer.
+const VERDICTS = [['ignore', 'Ignore issue'], ['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
+const verdictOf = (p) => (p.meta.verdict === 'fine' ? 'not-a-problem' : p.meta.verdict);
 const pinsFor = (c, tab) => c.pins.filter((p) => tab === 'tour' ? p.kind === 'tour' : tab === 'credits' ? p.kind === 'credit'
-  : p.kind === 'issue' && (tab === 'report' ? !!p.meta?.report : !p.meta?.report));
+  : p.kind === 'issue' && !p.meta?.report);
 
 function onFrameMessage(m, id) {
   if (m.source !== frameWin()) return;
   const d = m.data || {};
   const c = store.copy(id);
   if (d.type === 'preserve-ready') { sendPins(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
+  // Pins the page couldn't place (their block isn't there, e.g. after a refinement): tour stops are marked to move.
+  if (d.type === 'preserve-missing') { const k = (d.blockIds || []).join('|'); if (k !== view.missing.join('|')) { view.missing = d.blockIds || []; copyPage(id); } }
+  if (d.type === 'preserve-pin' && view.pinFor?.startsWith('move:')) {
+    const p = c.pins.find((x) => String(x.id) === view.pinFor.slice(5));
+    view.pinFor = null; sendMode();
+    if (p) store.updatePin(id, p.id, { body: p.body, meta: p.meta, blockId: d.blockId, x: d.x, y: d.y });
+    copyPage(id); return;
+  }
   if (d.type === 'preserve-pin' && view.pinFor) {
     const forWhat = view.pinFor;
     view.pinFor = null; sendMode(); $('#hint').textContent = '';
     noteDialog(forWhat, null, async (vals) => {
       const pin = { blockId: d.blockId, x: d.x, y: d.y, layout: d.layout, label: d.label };
       if (forWhat === 'tour') await store.addPin(id, { ...pin, kind: 'tour', body: vals.body, meta: { title: vals.title } });
-      else await store.addPin(id, { ...pin, kind: 'issue', body: vals.body, meta: forWhat === 'report' ? { report: true } : {} });
-      if (forWhat === 'report') toast('Thanks. We’ve logged it and will look into it.');
+      else await store.addPin(id, { ...pin, kind: 'issue', body: vals.body, meta: {} });
     });
     copyPage(id);
   }
 }
+// The notifications list closes on a click anywhere outside it, or Esc.
+addEventListener('click', (e) => { const p = $('#notes'); if (p && !p.hidden && !e.target.closest('#notes')) p.hidden = true; });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#notes') && !$('#notes').hidden) $('#notes').hidden = true; });
+addEventListener('blur', () => { const p = $('#notes'); if (p) p.hidden = true; });   // a click inside the preview frame
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { view.pinFor = null; sendMode(); if (view.id) copyPage(view.id); } });
 
-// A small form in a dialog (instead of the browser's prompt box). kind: issue | report | tour.
+// A small form in a dialog (instead of the browser's prompt box). kind: issue | tour.
 function noteDialog(kind, current, save) {
   const dlg = $('#dlg'), f = $('#dlgf');
   const tour = kind === 'tour';
@@ -216,65 +301,86 @@ function noteDialog(kind, current, save) {
 }
 
 function startPin(forWhat) { view.pinFor = view.pinFor === forWhat ? null : forWhat; sendMode(); copyPage(view.id); }
-const pinButton = (forWhat, label) => `<button class="btn small ${view.pinFor === forWhat ? '' : 'secondary'}" data-pin="${forWhat}">${view.pinFor === forWhat ? 'Click the spot on the page…' : label}</button>`;
+// While a pin is being placed its button turns green; the label stays the same (the hint above the preview says what to do).
+const pinButton = (forWhat, label) => `<button class="btn small ${view.pinFor === forWhat ? '' : 'secondary'}" data-pin="${forWhat}" aria-pressed="${view.pinFor === forWhat}">${label}</button>`;
 const pinList = (c, tab, opts = {}) => {
   const list = pinsFor(c, tab);
   if (!list.length) return `<p class="sub">${opts.empty}</p>`;
   return `<ol class="pins ${tab === 'tour' ? 'tour' : ''}">${list.map((p) => `<li>${p.meta?.title ? `<b>${esc(p.meta.title)}</b>` : ''}<span class="pbody">${esc(p.body)}</span>
-    <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
-    <span class="row"><button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
+    <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
+    ${tab === 'check' && p.meta?.round_result ? roundResult(p) : ''}
+    ${tab === 'tour' && view.missing.includes(p.blockId) ? '<small class="warn">This stop no longer lands on the page. Move it to the right spot.</small>' : ''}
+    <span class="row"><button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
 };
+
+// How a pin came out in the last refinement (the check compares the pinned spot with the live site).
+const roundResult = (p) => p.meta.round_result === 'looks-fixed' ? '<small class="ok">Looks fixed in the latest refinement. Remove the pin if you agree.</small>'
+  : p.meta.round_result === 'still-different' ? '<small class="warn">Still different from your site after the latest refinement. It will be included in the next one.</small>'
+  : '<small class="warn">We couldn’t find this spot after the latest refinement. Check it, and pin it again if it’s still wrong.</small>';
 
 function panel(c, review) {
   const id = c.id, P = $('#panel');
   const flash = view.flash ? `<p class="note ok">${view.flash}</p>` : '';
+  const fix = review ? toFix(c) : 0;
+  // Credits are typed straight into the panel: once drawn, the rows are left alone (only new rows get their ids), so a
+  // save when a field loses focus never redraws the panel under the next click.
+  const key = `${id}|${view.tab}|${c.status}|${view.flash || ''}`;
+  if (view.tab === 'credits' && P.dataset.k === key) {
+    const shown = new Set([...P.querySelectorAll('.cred')].map((r) => r.dataset.cid));
+    const added = pinsFor(c, 'credits').filter((p) => !shown.has(String(p.id)));
+    P.querySelectorAll('.cred[data-cid="saving"]').forEach((r, i) => { if (added[i]) r.dataset.cid = added[i].id; });
+    return;
+  }
+  P.dataset.k = view.tab === 'credits' ? key : '';
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
     const found = findingsOf(c);
-    const fresh = pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt).length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
     const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).length;
     const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
-    P.innerHTML = `<h2>Does this look right?</h2>
-      ${capped ? `<p class="note">We’ve refined this copy as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can publish it as it is, or leave it here.</p>`
-        : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier notes are kept below; add new ones for anything still off.</p>`
-        : `<p class="sub">Compare it with your live site. If something’s off, point at it and say what’s wrong, then ask for a refinement. You can do this as many times as you need.</p>`}
-      ${found.length ? `<h3>Our check flagged these</h3><p class="fine">Lettered on the ${view.layout === 'mobile' ? 'phone' : 'desktop'} page. Tell us what you think of each; you can publish without answering.</p>
+    P.innerHTML = `<h2>Look and Feel</h2>
+      <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
+      <p class="sub">To report an issue, click <b>+ Issue</b>, drop a pin, and describe the issue.</p>
+      <p>${pinButton('check', '+ Issue')}</p>
+      ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
+      ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
+        : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
+      ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
         <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${p.meta.verdict === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button></span></li>`).join('')}</ol>` : ''}
-      ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${otherN} more on the ${other === 'mobile' ? 'phone' : 'desktop'} view</button></p>` : ''}
-      ${listed.length ? `<h3>${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
-      <h3>Your notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
-      <p>${pinButton('check', '📍 Point out a problem')}</p>
-      <div class="stack"><button class="btn wide" id="ok">Looks good, publish it</button>
-      ${capped ? '' : `<button class="btn wide secondary" id="refine" ${fresh ? '' : 'disabled'}>Refine with my ${fresh > 1 ? `${fresh} new notes` : fresh ? 'new note' : 'notes'}</button>
-        ${fresh ? '' : `<p class="fine center">${c.rounds ? 'Add a new note, or mark a flagged item “Needs fixing”, to refine again.' : 'Point out a problem, or mark a flagged item “Needs fixing”, to refine.'}</p>`}`}
-      <button class="link" id="del">Discard this copy</button></div>`;
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button></span></li>`).join('')}</ol>` : ''}
+      ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
+      ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
+      <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
+      <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
+      ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>` : ''}
+      <button class="link" id="del">Delete this Preserve</button></div>`;
+  } else if (view.tab === 'fonts') {
+    loadLookalikes(c);
+    P.innerHTML = `<h2>Fonts</h2>
+      <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Check each one below. Changing a font takes seconds and doesn’t use a refinement.</p>
+      ${c.fonts.map((f) => fontRow(c, f)).join('')}
+      <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>
+      <input type="file" id="fontfile" accept=".woff2,.woff,.otf,.ttf" style="display:none">`;
   } else if (view.tab === 'tour') {
-    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Point out design decisions. Visitors see numbered dots they can open, under a “Tour” button.</p>
-      ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
+    const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
+    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
+      ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but tour stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
+      ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', '+ Add a stop')}</p>
-      ${review ? '<div class="stack"><button class="btn wide secondary" data-t2="credits">Next: credits</button></div>' : flash ? '<div class="stack"><button class="btn wide secondary" data-t2="credits">Next: credits</button></div>' : ''}`;
+      ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
+      ${review ? '<div class="stack"><button class="btn wide" data-t2="credits">Next: Create Credits</button></div>' : ''}`;
   } else if (view.tab === 'credits') {
     const cr = pinsFor(c, 'credits');
     P.innerHTML = `${flash}<h2>Credits <span class="opt">optional</span></h2><p class="sub">The people behind the site. Visitors see them under “Credits”.</p>
       <div id="crl">${cr.map((p) => credRow(p)).join('')}</div>
       <p><button class="btn small secondary" id="addcr">+ Add a credit</button></p>
-      ${review ? '<div class="stack"><button class="btn wide" data-t2="check">Back to checking, then publish</button></div>'
-        : flash ? '<div class="stack"><a class="btn wide" href="#/" id="done">Done</a></div>' : ''}`;
+      ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
-    P.innerHTML = `<h2>Share</h2><label>Link <span class="fine">(click the name to change it)</span>
+    P.innerHTML = `${flash}<h2>Share</h2><label>Link <span class="fine">(click the name to change it)</span>
         <div class="linkedit"><span>${esc(base.replace(/^https?:\/\//, ''))}</span><input id="nm" value="${esc(c.name)}" spellcheck="false" aria-label="Name in the link"><span>/</span></div></label>
       <div class="row"><button class="btn small" id="cl">Copy link</button><button class="btn small secondary" id="ce">Copy embed code</button><a class="btn small secondary" href="${esc(store.link(c))}" target="_blank" rel="noopener">Open</a></div>
       <p class="fine">Old links keep working after a name change. Embed codes never change.</p>
 `;
-  } else if (view.tab === 'report') {
-    P.innerHTML = `<h2>Report a problem</h2><p class="sub">Point at the spot that isn’t working and tell us what’s wrong.</p>
-      <p>${pinButton('report', '📍 Point out a problem')}</p>
-      <h3>Reported</h3>${pinList(c, 'report', { empty: 'Nothing reported yet.', remove: false })}`;
-  } else {
-    P.innerHTML = `<h2>Manage</h2><div class="row wrap"><button class="btn small secondary" id="arch">${c.status === 'archived' ? 'Restore' : 'Archive'}</button><button class="btn small danger" id="del">Delete</button></div>
-      <p class="fine">Archived copies stop showing to visitors and don’t count toward your plan. Deleting removes the copy and its links for good.</p>`;
   }
   const on = (sel, f) => { const el = P.querySelector(sel); if (el) el.onclick = f; };
   P.querySelectorAll('[data-pin]').forEach((b) => (b.onclick = () => startPin(b.dataset.pin)));
@@ -287,18 +393,35 @@ function panel(c, review) {
   P.querySelectorAll('[data-l2]').forEach((b) => (b.onclick = () => { view.layout = b.dataset.l2; view.pinFor = null; copyPage(id); }));
   P.querySelectorAll('[data-verdict]').forEach((b) => (b.onclick = () => {
     const p = c.pins.find((x) => String(x.id) === b.dataset.fid);
-    const v = p.meta.verdict === b.dataset.verdict ? null : b.dataset.verdict;   // clicking the chosen answer again clears it
+    const v = verdictOf(p) === b.dataset.verdict ? null : b.dataset.verdict;   // clicking the chosen answer again clears it
     store.updatePin(id, p.id, { body: p.body, meta: { ...p.meta, verdict: v, marked_at: v ? new Date().toISOString() : null } });
   }));
   P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, (v) => store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } })); }));
-  P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; copyPage(id); }));
-  on('#ok', async () => { await store.approve(id); view.tab = 'tour'; view.flash = 'Published. Your link and embed code are ready under Share. You can add a tour and credits now, or any time later.'; copyPage(id); });
+  P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; view.pinFor = null; sendMode(); copyPage(id); }));
+  on('#acc', () => accept(id));
+  const cert = P.querySelector('#cert'); if (cert) cert.onchange = () => { P.querySelector('#acc').disabled = !cert.checked; };
+  P.querySelectorAll('[data-font]').forEach((b) => (b.onclick = () => store.setFont(id, b.dataset.fid, b.dataset.font)));
+  P.querySelectorAll('[data-showfont]').forEach((b) => (b.onclick = () => {
+    const f = c.fonts.find((x) => x.id === b.dataset.showfont);
+    frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: f.block }, '*');
+    frameWin()?.postMessage({ type: 'preserve-show-font', name: f.name }, '*');
+  }));
+  P.querySelectorAll('[data-upload]').forEach((b) => (b.onclick = () => { const inp = $('#fontfile'); inp.value = ''; inp.dataset.fid = b.dataset.upload; inp.click(); }));
+  const ff = $('#fontfile');
+  if (ff) ff.onchange = async () => {
+    const fid = ff.dataset.fid, file = ff.files[0]; if (!file) return;
+    view.fontBusy = fid; view.fontErr = null; panel(store.copy(id), review);
+    await new Promise((r) => setTimeout(r, 1200));   // the real rebuild of the fonts takes a few seconds
+    view.fontBusy = null;
+    const err = await store.uploadFont(id, fid, file);
+    view.fontErr = err ? { fid, text: err } : null;
+    if (!err) toast('Font updated. Your Preserve now uses your file.');
+    copyPage(id);
+  };
   on('#refine', () => store.refine(id));
-  on('#del', async () => { if (confirm(review ? 'Discard this copy?' : 'Delete this copy? Its link and embeds will stop working.')) { await store.remove(id); location.hash = '#/'; } });
+  on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => copyText(store.embed(c), 'Embed code'));
-  on('#arch', () => store.setStatus(id, c.status === 'archived' ? 'ready' : 'archived'));
-  on('#done', () => { view.flash = null; });
   on('#addcr', () => { const row = document.createElement('div'); row.innerHTML = credRow(null); $('#crl').appendChild(row.firstElementChild); wireCred(id); row.remove(); $('#crl').lastElementChild.querySelector('input').focus(); });
   wireCred(id);
   const nm = $('#nm');
@@ -308,6 +431,64 @@ function panel(c, review) {
     nm.onblur = save;
     nm.oninput = () => { nm.style.width = Math.max(4, nm.value.length + 1) + 'ch'; }; nm.oninput();
   }
+}
+
+// One row per font (font licensing decisions, 2026-10-26): the original's name, a before/after sample, where it shows,
+// and the choices that fit who holds the license.
+const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function fontRow(c, f) {
+  const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
+  const look = f.decision === 'lookalike' || (f.holder === 'platform' && f.decision !== 'upload');
+  const state = f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
+    : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
+    : f.holder === 'platform' ? `From Squarespace’s font menu. Squarespace licenses it from Adobe for Squarespace sites only, so your Preserve uses a lookalike, ${esc(f.look)}, unless you upload your own licensed file.`
+    : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${esc(f.look)}.`
+    : 'You uploaded this font to your site, so we kept it. Keep it only if your license covers this Preserve.';
+  const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
+  const actions = view.fontBusy === f.id ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
+    : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
+    : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
+    : `${chip('keep', 'I have the rights')}${chip('lookalike', 'I don’t have rights to this one')}<button class="link" data-upload="${f.id}">Replace the file</button>`;
+  const after = look ? `<span class="fsample" style="font-family:'${esc(f.look)}',sans-serif">${esc(f.text)}</span>` : `<img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">`;
+  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">Show on page</button></div>
+    <p class="fine">${state}</p>
+    <div class="fsamples"><span class="fl">On your site</span><img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">
+      <span class="fl">In your Preserve</span>${after}</div>
+    <div class="row wrap">${actions}</div>
+    ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : ''}</div>`;
+}
+// Above Accept: the fonts the Preserve ships as on the site, which the person confirms they may use (F1).
+function certify(c) {
+  const kept = keptFonts(c);
+  if (!kept.length) return '';
+  return `<label class="certify"><input type="checkbox" id="cert"> <span>These fonts stay as on your site: ${esc(kept.map((f) => f.name).join(', '))}. By accepting this Preserve, you confirm you have the right to use them here, on embeds and in exports.</span></label>`;
+}
+let lookLoaded = '';
+function loadLookalikes(c) {
+  const fams = [...new Set(c.fonts.map((f) => f.look))].sort();
+  const href = `https://fonts.googleapis.com/css2?${fams.map((f) => 'family=' + f.replace(/ /g, '+')).join('&')}&display=swap`;
+  if (lookLoaded === href) return;
+  lookLoaded = href;
+  document.head.insertAdjacentHTML('beforeend', `<link rel="stylesheet" href="${href}">`);
+}
+
+// Accept: the last step of review. Accepted Preserves can't be refined. It goes live if the plan has room for another
+// live Preserve, and otherwise starts in Archived (the database decides, so two tabs can't both take the last spot).
+async function accept(id) {
+  const fix = toFix(store.copy(id));
+  const yes = await confirmCard({ title: 'Accept this Preserve?',
+    body: `Once a Preserve has been accepted, it cannot be refined.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
+    ok: 'Accept Preserve', cancel: 'Review Preserve' });
+  if (!yes) { view.tab = 'check'; copyPage(id); return; }
+  const kept = keptFonts(store.copy(id));
+  await store.approve(id, kept.length ? { certified: kept.map((f) => f.name), wording: $('#cert')?.parentElement?.textContent.trim() } : null);
+  const c = store.copy(id);
+  if (!c || c.status === 'review') return;   // the database said no (the reason was shown)
+  view.tab = 'share';
+  view.flash = c.status === 'archived'
+    ? `Accepted. ${planFull()} This Preserve is currently Archived but can be made Live by Archiving a Live Preserve or by upgrading your plan.`
+    : 'Accepted and Live. Your link and embed code are below. You can change the tour and credits any time.';
+  copyPage(id);
 }
 
 const credRow = (p) => `<div class="cred" data-cid="${p?.id ?? ''}"><input placeholder="Role, e.g. Photography" value="${esc(p?.meta?.role || '')}" data-f="role"><input placeholder="Name" value="${esc(p?.body || '')}" data-f="name"><input placeholder="Link (optional)" value="${esc(p?.meta?.url || '')}" data-f="url"><button class="link" data-crm>Remove</button></div>`;
@@ -323,14 +504,14 @@ function wireCred(id) {
       toast('Credit saved');
     };
     row.querySelectorAll('input').forEach((i) => { i.onchange = save; });
-    row.querySelector('[data-crm]').onclick = () => (row.dataset.cid && row.dataset.cid !== 'saving' ? store.removePin(id, row.dataset.cid) : row.remove());
+    row.querySelector('[data-crm]').onclick = () => { const pid = row.dataset.cid; row.remove(); if (pid && pid !== 'saving') store.removePin(id, pid); };
   });
 }
 
 // 5. Plan ------------------------------------------------------------------------------------------------------
 function planPage() {
   const cur = store.plan();
-  shell(`<div class="head"><div><h1>Your plan</h1><p class="sub">You have ${store.liveCount()} live ${store.liveCount() === 1 ? 'copy' : 'copies'}.</p></div></div>
+  shell(`<div class="head"><div><h1>Your plan</h1><p class="sub">You have ${count(store.liveCount(), 'Live Preserve')}.</p></div></div>
     <section class="plans">${PLANS.map((p) => `<div class="plan ${p.id === cur.id ? 'cur' : ''}"><h2>${p.name}</h2><div class="price">${p.price ? `$${p.price}<small>/month</small>` : 'Free'}</div><p>${p.blurb}</p>
       ${p.id === cur.id ? '<span class="pill ok">Current plan</span>' : `<button class="btn ${p.price > cur.price ? '' : 'secondary'}" data-p="${p.id}">${p.price > cur.price ? 'Upgrade' : 'Downgrade'}</button>`}</div>`).join('')}</section>
     <p class="fine">Payment, receipts and card changes are handled by Stripe. <button class="link" id="portal">Manage billing</button> · Prices are placeholders.</p>`, { back: '#/' });
@@ -338,13 +519,15 @@ function planPage() {
     const p = PLANS.find((x) => x.id === b.dataset.p);
     const over = store.liveCount() - p.copies;
     const msg = p.price > cur.price ? `Upgrade to ${p.name} for $${p.price}/month? (In the real app this opens Stripe checkout.)`
-      : `Switch to ${p.name}? It takes effect at the end of this billing period.` + (over > 0 ? `\n\n${p.name} includes ${p.copies} live ${p.copies === 1 ? 'copy' : 'copies'}, so ${over} of yours will be archived then: their links will show “preview paused”. Nothing is deleted, and you can choose which copies stay live or restore them by upgrading again.` : '');
+      : `Switch to ${p.name}? It takes effect at the end of this billing period.` + (over > 0 ? `\n\n${p.name} provides for ${count(p.copies, 'Live Preserve')}, so ${num(over)} of yours will be Archived then: their links will show “preview paused”. Nothing is deleted, and you can choose which Preserves stay Live or make them Live again by upgrading.` : '');
     if (confirm(msg)) { store.setPlan(p.id); toast(`You’re on ${p.name}.`); }
   }));
   $('#portal').onclick = () => alert('In the real app this opens Stripe’s billing page for your card, invoices and cancelling.');
 }
 
+let routeWaiting = false;
 function route() {
+  if ($('#cdlg')?.open) { routeWaiting = true; return; }   // redrawn when the confirmation card closes
   if (store.ready && !store.ready()) { app.innerHTML = '<div class="signin"><div class="spin big"></div></div>'; return; }
   if (!store.me()) return signIn();
   const h = location.hash.slice(1) || '/';
