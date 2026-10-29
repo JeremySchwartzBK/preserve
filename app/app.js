@@ -131,7 +131,7 @@ function card(c) {
 
 // 3. New Preserve ----------------------------------------------------------------------------------------------
 function newCopy() {
-  shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a Squarespace page you designed. We’ll preserve that page as it looks right now, on phone and desktop.</p>
+  shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop.</p>
     <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
     <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
     <p class="fine">Takes a few minutes. You can leave this page; we’ll let you know here (and soon by email) when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
