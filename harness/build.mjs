@@ -325,7 +325,7 @@ const LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name
 const widthScript = (layout) => `<script id="preserve-width">(function(){var m=${layout === 'mobile' ? 'true' : 'false'},t;
 function w(){return document.documentElement.clientWidth||innerWidth}
 addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((w()<${BREAKPOINT})===m)return;
-var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){}
+var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}
 if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
 
 // Nothing on a phone page reaches past the screen's right edge: the live site clips it (with its own script or
@@ -370,6 +370,18 @@ function isOwnerScript($, el) {
   return true;
 }
 
+// Kept owner code runs the same on every load (custom code stage one, Jeremy 2026-10-29): it sees a clock that reads
+// the moment of capture (moving on with the page's own timer, so its animations still run) and randomness seeded from
+// the page, so a "quote of the day" or a shuffled grid shows what the person reviewed. Only owner code sees these: each
+// kept script is wrapped in a block that shadows Date and Math, and our own scripts keep the real ones.
+const STEADY_SCRIPT = (t0, seed) => `<script id="preserve-steady">(function(){var D=Date,T0=${t0},P=performance;
+function now(){return T0+Math.round(P.now())}
+function PvDate(){if(!(this instanceof PvDate))return new D(now()).toString();var a=[].slice.call(arguments);return a.length?new(Function.prototype.bind.apply(D,[null].concat(a))):new D(now())}
+PvDate.prototype=D.prototype;PvDate.now=now;PvDate.parse=D.parse;PvDate.UTC=D.UTC;
+var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}
+var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
+const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
+
 export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
@@ -389,12 +401,19 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
     // Scripts.
+    let owners = 0;
     $('script').each((_, el) => {
       const c = v.scripts === 'none' ? (/ld\+json|application\/json/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : isOwnerScript($, el) ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
-      if (c.kind === 'site owner code (self-contained)') $(el).html(`try{${$(el).html()}\n}catch(e){}`);
+      if (c.kind === 'site owner code (self-contained)') { $(el).html(ownerWrap($(el).html())).attr('data-pv-owner', String(owners++)); }
       if (outName !== 'mobile.html') report.scripts.push({ keep: c.keep, kind: c.kind, what: (c.what || '').slice(0, 140) });
       if (!c.keep) $(el).remove();
     });
+    // The steady clock and randomness come first, so owner code anywhere on the page finds them.
+    if (owners) {
+      const t0 = Math.round(fs.statSync(path.join(siteDir, src)).mtimeMs);
+      const seed = [...(siteHost || name)].reduce((h, ch) => Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0, 2166136261);
+      $('head').prepend(STEADY_SCRIPT(t0, seed));
+    }
     if (v.scripts === 'none') {
       $('noscript').remove();
       $('link[rel=preload][as=script],link[rel=modulepreload]').remove();

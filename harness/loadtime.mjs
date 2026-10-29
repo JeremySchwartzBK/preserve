@@ -4,6 +4,7 @@
 // An owner's intro animation doesn't count against the time: the page is "ready" once its first-screen files have
 // loaded and the intro has started, and the intro's length is reported beside it (Jeremy, 2026-10-22).
 // Usage: node loadtime.mjs <copiesRoot> <id> [runs]
+import { policyHeaders } from './policy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -27,11 +28,11 @@ export function hostLike(root, wait = HOST_WAIT_MS) {
         const size = fs.statSync(p).size;
         if (range && !text) {
           const a = +range[1], b = range[2] ? +range[2] : size - 1;
-          res.writeHead(206, { 'content-type': CT[ext] || 'application/octet-stream', 'content-range': `bytes ${a}-${b}/${size}`, 'content-length': b - a + 1, 'accept-ranges': 'bytes' });
+          res.writeHead(206, { 'content-type': CT[ext] || 'application/octet-stream', ...policyHeaders(ext), 'content-range': `bytes ${a}-${b}/${size}`, 'content-length': b - a + 1, 'accept-ranges': 'bytes' });
           return fs.createReadStream(p, { start: a, end: b }).pipe(res);
         }
         const gz = text && /\bbr\b/.test(req.headers['accept-encoding'] || '');
-        res.writeHead(200, { 'content-type': CT[ext] || 'application/octet-stream', 'accept-ranges': 'bytes', ...(gz ? { 'content-encoding': 'br' } : { 'content-length': size }) });
+        res.writeHead(200, { 'content-type': CT[ext] || 'application/octet-stream', ...policyHeaders(ext), 'accept-ranges': 'bytes', ...(gz ? { 'content-encoding': 'br' } : { 'content-length': size }) });
         const s = fs.createReadStream(p);
         gz ? s.pipe(zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })).pipe(res) : s.pipe(res);
       }, wait);

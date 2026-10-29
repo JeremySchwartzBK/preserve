@@ -219,6 +219,53 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
   return out;
 }
 
+// Which parts of the page move by themselves (custom code stage one, Jeremy 2026-10-29: a widget that moved or reacted
+// on the live site but is still in the Preserve is a fidelity gap; one still in both needs no note). The first few
+// screens are each watched for a couple of seconds with fixed and sticky parts hidden, and each block whose pixels
+// change is "moving". Galleries are left to probeGalleries. Keyed by block id so gate.mjs can hold the copy to the
+// live page. Run without __pvStill, as visitors see it.
+const MOTION_SCREENS = 3, MOTION_GAP_MS = 2000, MOTION_MIN = 0.02;
+export async function probeMotion(browser, url, profileName, { isCopy = false } = {}) {
+  const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true });
+  if (isCopy) await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); return /^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol) ? r.continue() : r.abort(); });
+  await ctx.addInitScript(ANCHOR);
+  const page = await ctx.newPage();
+  const out = {};
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    if (!isCopy) await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }).catch(() => {});
+    await page.mouse.move(0, 0);
+    const vh = await page.evaluate(() => innerHeight), h = await page.evaluate(() => document.documentElement.scrollHeight);
+    for (let i = 0; i < MOTION_SCREENS && i * vh < h; i++) {
+      await page.evaluate((y) => scrollTo(0, y), i * vh); await sleep(1500);
+      const blocks = await page.evaluate((gSel) => {
+        for (const e of document.querySelectorAll('body *')) { const p = getComputedStyle(e).position; if ((p === 'fixed' || p === 'sticky') && !e.dataset.pvHid) { e.dataset.pvHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }
+        const sel = '[id^="block-"],[data-block-id]';
+        return [...document.querySelectorAll(sel)].filter((b) => !b.querySelector(sel) && !b.matches(gSel) && !b.querySelector(gSel)).map((b) => {
+          const r = b.getBoundingClientRect();
+          const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top), x1 = Math.min(innerWidth, r.right), y1 = Math.min(innerHeight, r.bottom);
+          return x1 - x0 < 16 || y1 - y0 < 16 ? null : { at: window.__preserveAnchor(b), x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) };
+        }).filter(Boolean);
+      }, GALLERY_SEL);
+      const a = PNG.sync.read(await page.screenshot()); await sleep(MOTION_GAP_MS); const b = PNG.sync.read(await page.screenshot());
+      for (const bl of blocks) {
+        let changed = 0;
+        for (let y = bl.y; y < bl.y + bl.h && y < a.height; y += 2) for (let x = bl.x; x < bl.x + bl.w && x < a.width; x += 2) {
+          const k = (y * a.width + x) * 4;
+          if (Math.abs(a.data[k] - b.data[k]) + Math.abs(a.data[k + 1] - b.data[k + 1]) + Math.abs(a.data[k + 2] - b.data[k + 2]) > 48) changed++;
+        }
+        const frac = changed / (Math.ceil(bl.w / 2) * Math.ceil(bl.h / 2));
+        const id = bl.at.blockId, prev = out[id];
+        if (!prev || frac > prev.frac) out[id] = { moving: frac >= MOTION_MIN, frac: +frac.toFixed(3), at: bl.at };
+      }
+      await page.evaluate(() => { for (const e of document.querySelectorAll('[data-pv-hid]')) { e.style.visibility = e.dataset.pvHid === '-' ? '' : e.dataset.pvHid; delete e.dataset.pvHid; } });
+    }
+  } catch (e) { out.__error = String(e.message).split('\n')[0]; }
+  finally { await ctx.close(); }
+  return out;
+}
+
 export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const prof = PROFILES[profileName];
   const browser = await launch();

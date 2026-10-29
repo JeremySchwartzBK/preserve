@@ -26,6 +26,10 @@ const SLUG = /^[a-z0-9](?:-?[a-z0-9])*$/;
 const TYPES = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', webp: 'image/webp', avif: 'image/avif', jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', svg: 'image/svg+xml', ico: 'image/x-icon', mp4: 'video/mp4', webm: 'video/webm', woff2: 'font/woff2', woff: 'font/woff', txt: 'text/plain; charset=utf-8', ttf: 'font/ttf', otf: 'font/otf' };
 const AI_BOTS = ['GPTBot', 'ChatGPT-User', 'CCBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'Applebot-Extended', 'PerplexityBot', 'Bytespider', 'Amazonbot', 'meta-externalagent', 'cohere-ai', 'Diffbot', 'ia_archiver', 'archive.org_bot'];
 
+// Every Preserve page is served with these rules: no network, and sealed off from other Preserves (custom code stage
+// one). Same text as harness/policy.mjs, which the quality check serves copies with (harness/test-policy.mjs checks).
+const PRESERVE_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
+
 const url = (req) => new URL(req.url);
 
 // Small lookup records (copy:<id>, name:<studio>/<name>, tour:<id>) live in R2 at lookup/<kind>/<key>.json.
@@ -109,13 +113,17 @@ async function serveCopy(req, env, ctx, id, rest) {
   // Assets never change under a given key (content-hashed names inside a numbered version), so the edge cache can
   // keep them; pages are re-read so a new version or a pause shows within a minute.
   const cache = caches.default;
-  const cacheKey = new Request(new URL(`/__r2/${key}`, req.url));
+  // v2: font responses gained a CORS header (2026-10-29); older cached copies lack it.
+  const cacheKey = new Request(new URL(`/__r2v2/${key}`, req.url));
   if (asset) { const hit = await cache.match(cacheKey); if (hit) return withRange(req, hit); }
   const obj = await env.COPIES.get(key);
   if (!obj) return notFound();
   const h = new Headers({ 'content-type': TYPES[file.split('.').pop()] || 'application/octet-stream', 'x-robots-tag': ROBOTS, 'etag': obj.httpEtag, 'accept-ranges': 'bytes' });
   h.set('cache-control', asset ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
   if (vary) h.set('vary', 'User-Agent, Sec-CH-UA-Mobile');
+  // The page's rules (review and visitors alike); a sealed page asks for its fonts from no origin, so fonts allow any.
+  if (file.endsWith('.html')) h.set('content-security-policy', PRESERVE_CSP);
+  if (/\.(woff2?|ttf|otf)$/.test(file)) h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   // Later this requires a signed token from the app; for now the parameter alone turns it on.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
