@@ -305,6 +305,19 @@ for (const layout of ['desktop', 'mobile']) {
   if (videosWired) $('body').append(MEDIA_SCRIPT);
   videoCount += videosWired;
   if (licenseFile) $('head').append(`<link rel="license" href="a/${licenseFile}">`);
+  // A sealed page (policy.mjs) can't draw an icon from an SVG file, not even its own: each <use> of a sprite file points
+  // at the symbol in the page instead, with the file's symbols put in the page once (unless the page has them already).
+  const sprites = new Set();
+  for (const el of $('use').toArray()) for (const a of ['href', 'xlink:href']) {
+    const m = /^a\/([\w.-]+\.svg)#(.+)$/.exec($(el).attr(a) || '');
+    if (!m) continue;
+    if (!$(`[id="${m[2]}"]`).length && !sprites.has(m[1]) && fs.existsSync(path.join(assetDir, m[1]))) {
+      sprites.add(m[1]);
+      const $s = cheerio.load(fs.readFileSync(path.join(assetDir, m[1]), 'utf8'), { xmlMode: true });
+      $('body').prepend(`<svg class="preserve-sprite" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">${$s('svg').first().html() || ''}</svg>`);
+    }
+    $(el).attr(a, '#' + m[2]);
+  }
   fs.writeFileSync(path.join(outRoot, site, `${layout}.html`), $.html());
 }
 

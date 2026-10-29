@@ -3,8 +3,8 @@
 //   - no network: nothing may load from anywhere but the Preserve's own files, and no connections at all (fetch, XHR,
 //     WebSocket, beacons), so zero reliance on the original site is something the browser enforces;
 //   - a sealed box (the sandbox rule, no allow-same-origin): one Preserve can't read or change another's saved data,
-//     even though all of them share one web address. Its fonts then load as cross-origin requests, which is why font
-//     files are served with Access-Control-Allow-Origin.
+//     even though all of them share one web address. Its own files then load as cross-origin requests, which is why
+//     they are served with Access-Control-Allow-Origin, and why SVG icons are put in the page (export-static.mjs).
 // The viewer (platform/worker/src/index.js) sends the same text; test-policy.mjs checks the two match. The quality
 // check serves copies with these rules too, so it checks what visitors get.
 export const PRESERVE_CSP = [
@@ -24,9 +24,9 @@ export const PRESERVE_CSP = [
   'sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation',
 ].join('; ');
 
-// Headers for one file of a Preserve, by its extension.
+// Headers for one file of a Preserve, by its extension. A sealed page asks for its own files from no origin, so
+// every file allows any origin: fonts and images marked crossorigin load only that way. They are public anyway.
 export function policyHeaders(ext) {
   if (ext === 'html') return { 'content-security-policy': PRESERVE_CSP };
-  if (/^(woff2?|ttf|otf)$/.test(ext)) return { 'access-control-allow-origin': '*' };
-  return {};
+  return { 'access-control-allow-origin': '*' };
 }

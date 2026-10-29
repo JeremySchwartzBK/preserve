@@ -113,7 +113,7 @@ async function serveCopy(req, env, ctx, id, rest) {
   // Assets never change under a given key (content-hashed names inside a numbered version), so the edge cache can
   // keep them; pages are re-read so a new version or a pause shows within a minute.
   const cache = caches.default;
-  // v2: font responses gained a CORS header (2026-10-29); older cached copies lack it.
+  // v2: files gained a CORS header (2026-10-29); older cached copies lack it.
   const cacheKey = new Request(new URL(`/__r2v2/${key}`, req.url));
   if (asset) { const hit = await cache.match(cacheKey); if (hit) return withRange(req, hit); }
   const obj = await env.COPIES.get(key);
@@ -121,9 +121,10 @@ async function serveCopy(req, env, ctx, id, rest) {
   const h = new Headers({ 'content-type': TYPES[file.split('.').pop()] || 'application/octet-stream', 'x-robots-tag': ROBOTS, 'etag': obj.httpEtag, 'accept-ranges': 'bytes' });
   h.set('cache-control', asset ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
   if (vary) h.set('vary', 'User-Agent, Sec-CH-UA-Mobile');
-  // The page's rules (review and visitors alike); a sealed page asks for its fonts from no origin, so fonts allow any.
+  // The page's rules (review and visitors alike); a sealed page asks for its own files from no origin, so they allow
+  // any (fonts and images marked crossorigin load only that way).
   if (file.endsWith('.html')) h.set('content-security-policy', PRESERVE_CSP);
-  if (/\.(woff2?|ttf|otf)$/.test(file)) h.set('access-control-allow-origin', '*');
+  else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   // Later this requires a signed token from the app; for now the parameter alone turns it on.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
