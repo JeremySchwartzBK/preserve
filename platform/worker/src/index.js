@@ -54,6 +54,7 @@ document.body.appendChild(box);document.body.appendChild(layer)}
 if(layer){layer.style.display=on?'block':'none';if(!on)box.style.display='none'}}
 addEventListener('message',function(m){var d=m.data||{};if(d.type==='preserve-pin-mode')mode(!!d.on);
 if(d.type==='preserve-pins'){document.querySelectorAll('.preserve-pin').forEach(function(x){x.remove()});var miss=[];(d.pins||[]).forEach(function(p,i){var b=p.blockId&&find(p.blockId);if(!b){if(p.blockId)miss.push(p.blockId);return}if(getComputedStyle(b).position==='static')b.style.position='relative';var dot=document.createElement('div');dot.className='preserve-pin';dot.textContent=p.n||i+1;dot.title=p.body||'';dot.style.cssText='position:absolute;z-index:2147483640;left:'+(p.x*100)+'%;top:'+(p.y*100)+'%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:'+(COL[p.kind]||COL.issue)+';color:#fff;font:600 13px/26px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.3);pointer-events:none';b.appendChild(dot)});P.postMessage({type:'preserve-missing',blockIds:miss},'*')}
+if(d.type==='preserve-fonts'){var fs=document.getElementById('preserve-fonts');if(!fs){fs=document.createElement('style');fs.id='preserve-fonts';document.body.appendChild(fs)}fs.textContent=d.css||''}
 if(d.type==='preserve-scroll-to'){var b=find(d.blockId);if(b)b.scrollIntoView({behavior:'smooth',block:'center'})}
 if(d.type==='preserve-show-font'){var q=function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'')},want=q(d.name).slice(0,6),hit=[];document.querySelectorAll('.preserve-font-hit').forEach(function(x){x.classList.remove('preserve-font-hit')});if(want){document.querySelectorAll('body *').forEach(function(el){if(!el.childNodes.length||![].some.call(el.childNodes,function(n){return n.nodeType===3&&n.textContent.trim()}))return;if(q(getComputedStyle(el).fontFamily.split(',')[0]).indexOf(want)===0){el.classList.add('preserve-font-hit');hit.push(el)}});if(!document.getElementById('preserve-font-css')){var st=document.createElement('style');st.id='preserve-font-css';st.textContent='.preserve-font-hit{outline:2px solid #e8a33d!important;outline-offset:2px}';document.head.appendChild(st)}if(hit[0])hit[0].scrollIntoView({behavior:'smooth',block:'center'})}}});
 P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'*')})();</script>`;
@@ -61,6 +62,12 @@ P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'
 // Visitors' Tour and Credits: the copy's notes (KV tour:<id>, written by the runner from the app's database) plus the
 // small tour script (R2 platform/tour.js). Not added in the app's frame, which draws its own pins.
 const tourTags = (data) => `<script id="preserve-tour-data" type="application/json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script><script src="/_p/tour.js" defer></script>`;
+
+// Font choices from review (KV fonts:<id>, written by the runner, schema-fonts.sql): the lookalike or the person's
+// licensed file in place of a font on the page. Added last, so these @font-face rules win over the page's own of the
+// same name; the files sit beside the copy's other files (a/...).
+const css = (s) => String(s).replace(/[\\"<>\n]/g, '');
+const fontTags = (list) => `<style id="preserve-fonts">${list.map((f) => `@font-face{font-family:"${css(f.family)}";font-weight:${css(f.weight)};font-style:${css(f.style)};font-display:swap;src:url(a/${css(f.src)})}`).join('')}</style>`;
 
 const page = (status, title, text) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="${ROBOTS}"><title>${title}</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif;color:#555;background:#f7f6f3;text-align:center;padding:0 24px}p{max-width:28em}</style></head><body><p>${text}</p></body></html>`, { status, headers: { 'content-type': TYPES.html, 'cache-control': 'no-store', 'x-robots-tag': ROBOTS } });
 const notFound = () => page(404, 'Not found', 'There is no preview at this address.');
@@ -111,17 +118,20 @@ async function serveCopy(req, env, ctx, id, rest) {
   if (vary) h.set('vary', 'User-Agent, Sec-CH-UA-Mobile');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   // Later this requires a signed token from the app; for now the parameter alone turns it on.
+  const fonts = asset ? null : await lookup(env, `fonts:${id}`);
+  const fontCss = fonts?.length ? fontTags(fonts) : '';
   if (!asset && url(req).searchParams.has('review')) {
     h.set('cache-control', 'no-store');
-    const html = (await obj.text()).replace(/<\/body>/i, REVIEW_BRIDGE + '</body>');
+    const html = (await obj.text()).replace(/<\/body>/i, fontCss + REVIEW_BRIDGE + '</body>');
     return new Response(html, { headers: h });
   }
   if (!asset) {
     const tour = await lookup(env, `tour:${id}`);
     // Tour stops belong to a page (credits are for the whole copy): show only this page's stops.
     if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
-    if (tour && ((tour.spots || []).length || (tour.credits || []).length)) {
-      const html = (await obj.text()).replace(/<\/body>/i, tourTags(tour) + '</body>');
+    const hasTour = tour && ((tour.spots || []).length || (tour.credits || []).length);
+    if (hasTour || fontCss) {
+      const html = (await obj.text()).replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + '</body>');
       return new Response(html, { headers: h });
     }
   }

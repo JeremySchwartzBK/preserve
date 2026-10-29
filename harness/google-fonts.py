@@ -90,7 +90,8 @@ def name_lines(path):
     except Exception: return {}
     lines = {k: n.getDebugName(i) for k, i in (('copyright', 0), ('license', 13), ('license_url', 14))}
     names = ' '.join(x for x in (n.getDebugName(i) for i in (0, 1, 3, 4, 13, 16)) if x)
-    return {**{k: v.strip()[:500] for k, v in lines.items() if v}, **({'trial_hint': True} if TRIAL.search(names) else {})}
+    fam = n.getDebugName(16) or n.getDebugName(1)
+    return {**{k: v.strip()[:500] for k, v in lines.items() if v}, **({'font_name': fam.strip()[:100]} if fam else {}), **({'trial_hint': True} if TRIAL.search(names) else {})}
 
 def cmap(path):
     try: return set(TTFont(path).getBestCmap() or {})
@@ -151,12 +152,14 @@ def google_css(family, tuples):
 # file: an open-license family of the same kind, at the nearest weight it has. A stand-in until the curated lookalike
 # list in fonts/font-flow-scenarios.md exists. family: (weights, has italic)
 LOOKALIKES = {'sans': ('Inter', (100, 900), True), 'serif': ('Source Serif 4', (200, 900), True),
-              'mono': ('Roboto Mono', (100, 700), True), 'script': ('Dancing Script', (400, 700), False)}
+              'mono': ('Roboto Mono', (100, 700), True), 'script': ('Dancing Script', (400, 700), False),
+              'pixel': ('Pixelify Sans', (400, 700), False)}
 
 def kind_of(path, family):
     # What kind of face it is, from the most telling clue we have: its name, then how the site's styles list it (the
     # generic family after it, e.g. "'EB Garamond', serif"), then the font's own classification (often left blank).
     name = family.lower()
+    if re.search(r'pixel|bitmap|8-?bit', name): return 'pixel'
     if re.search(r'mono|code|typewriter', name): return 'mono'
     if re.search(r'script|hand|brush|signature|callig', name): return 'script'
     if re.search(r'sans|grotesk|grotesque|gothic', name): return 'sans'
@@ -305,8 +308,16 @@ for u, e in fonts_loaded.items():
         except Exception: fam, weight, style = u.split('?')[0].rsplit('/', 1)[-1], '400', 'normal'
     host = re.sub(r'^https?://', '', u).split('/')[0]
     holder, source = ('designer', 'upload') if UPLOAD.search(u) else ('anyone', 'google') if host == 'fonts.gstatic.com' else ('other', host)
+    # A lookalike for fonts kept on the designer's word, fetched now and shipped unused, so choosing "I don't have
+    # rights to this one" at review swaps it in without rebuilding the Preserve (the viewer adds the swap).
+    alt = None
+    if holder != 'anyone':
+        try:
+            rec = lookalike(None, {'family': fam, 'weight': str(weight).replace('normal', '400').replace('bold', '700'), 'style': style, 'range': None, 'label': 'latin', 'cmap': set()}, path)
+            if rec: alt = {'family': rec['family'], 'file': rec['file'], 'weight': rec['weight'], 'style': rec['style']}
+        except Exception as ex: print('ALT', fam, weight, style, ex)
     result['record'].append({'family': fam, 'weight': weight, 'style': style, 'holder': holder, 'source': source, 'action': 'kept',
-                             **(name_lines(path) if holder != 'anyone' else {})})
+                             **(name_lines(path) if holder != 'anyone' else {}), **({'alt': alt} if alt else {})})
 
 # One row per face: the same face can arrive as several files (subsets, formats).
 seen, rows = set(), []
@@ -316,7 +327,7 @@ for r in result['record']:
 result['record'] = rows
 
 # Each family the copy uses ships with its license.
-for family in sorted({v['family'] for v in result['fonts'].values()}):
+for family in sorted({v['family'] for v in result['fonts'].values()} | {r['alt']['family'] for r in result['record'] if r.get('alt')}):
     result['licenses'][family] = None
     slug = re.sub(r'[^a-z0-9]', '', family.lower())
     for d, f in (('ofl', 'OFL.txt'), ('apache', 'LICENSE.txt'), ('ufl', 'UFL.txt')):

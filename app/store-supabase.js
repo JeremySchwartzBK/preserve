@@ -8,9 +8,11 @@ import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building the fast copy', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
 const STEP_KEYS = Object.keys(STEP_NAMES);
-const ERRORS = { 'plan-limit': null, 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
+const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
 
-let me = null, studio = null, copies = [], notes = [], ready = false, timer = null;
+let me = null, studio = null, copies = [], notes = [], studioFonts = [], ready = false, timer = null;
+// Font files uploaded in this browser, kept as data: addresses so the preview shows them while the file is checked.
+const justUploaded = {};
 const listeners = new Set();
 const emit = () => listeners.forEach((f) => f());
 const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `Your ${planOf().name} plan’s Live Preserves are all in use. Archive a Live Preserve or upgrade your plan first.` : m); };
@@ -21,12 +23,14 @@ async function refresh() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { me = null; studio = null; copies = []; ready = true; emit(); return; }
   const uid = session.user.id;
-  const [{ data: person }, { data: st }, { data: cs }, { data: nt }] = await Promise.all([
+  const [{ data: person }, { data: st }, { data: cs }, { data: nt }, { data: sf }] = await Promise.all([
     sb.from('person').select('*').eq('id', uid).maybeSingle(),
     sb.from('studio').select('*').limit(1).maybeSingle(),
-    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,created_at), copy_job(attempt,state,step,error,queued_at), copy_pin(*)').order('created_at', { ascending: false }),
+    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
     sb.from('notification').select('*').order('created_at', { ascending: false }).limit(30),
+    sb.from('studio_font').select('id,font_key,name,file_name,asset,state,problem,created_at').order('created_at', { ascending: false }),
   ]);
+  studioFonts = sf || [];
   me = person ? { email: person.email, name: person.name } : { email: session.user.email };
   studio = st;
   notes = (nt || []).map((n) => ({ at: n.created_at, copy: n.copy_id, text: n.body, read: !!n.read_at, id: n.id }));
@@ -34,7 +38,8 @@ async function refresh() {
   ready = true;
   emit();
   clearTimeout(timer);
-  if (copies.some((c) => c.status === 'processing')) timer = setTimeout(refresh, 5000);
+  // Keep looking while a Preserve is being made or an uploaded font is being checked.
+  if (copies.some((c) => c.status === 'processing') || studioFonts.some((f) => f.state === 'checking')) timer = setTimeout(refresh, 5000);
 }
 
 function shape(r) {
@@ -54,7 +59,27 @@ function shape(r) {
     stepNames: Object.values(STEP_NAMES), step: Math.max(0, STEP_KEYS.indexOf(job?.step)),
     rounds: Math.max(0, jobs.length - 1), lastRoundAt: jobs.length ? jobs.map((j) => j.queued_at).sort().at(-1) : null,
     message: r.status === 'failed' ? (job?.error || null) : null,
+    fonts: r.status === 'review' || last?.fonts?.length ? fontsOf(r, last) : null,
   };
+}
+
+// The review's Fonts rows (schema-fonts.sql) in the shape the screens use (store-local.js SEED_FONTS): the version's
+// fonts, the person's choice for each, and their studio's uploads. A font with no choice yet is covered by an upload
+// of the same font that passed its check.
+function fontsOf(r, last) {
+  const rows = last?.fonts || [];
+  if (!rows.length) return null;
+  return rows.map((f) => {
+    const ch = (r.copy_font || []).find((x) => x.font_id === f.id);
+    const up = ch?.decision === 'upload' ? studioFonts.find((x) => x.id === ch.studio_font_id) : null;
+    const cover = !ch ? studioFonts.find((x) => x.font_key === f.id && x.state === 'ok') : null;
+    return {
+      ...f, sample: f.sample ? `${VIEW}/c/${r.id}/${f.sample}` : null,
+      decision: up && up.state === 'rejected' ? null : ch?.decision || null,
+      file: up?.file_name, uploadedAt: up?.created_at, checking: up?.state === 'checking', problem: up?.state === 'rejected' ? up.problem : null,
+      covered: cover?.id || null, studioFont: (up && up.state !== 'rejected' ? up : cover) || null,
+    };
+  });
 }
 
 const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw error; await refresh(); return data; };
@@ -99,7 +124,31 @@ export const store = {
     const { error } = await sb.from('copy_pin').update(row).eq('id', pid); if (error) alert(say(error)); await refresh();
   },
   async removePin(id, pid) { await sb.from('copy_pin').delete().eq('id', pid); await refresh(); },
-  approve: (id) => act('approve_copy', { cid: id, ver: copies.find((c) => c.id === id).versions.at(-1).v }),
+  // Fonts during review: each choice is recorded with who and when, and the viewer swaps the font in (no refinement).
+  studioFonts: () => studioFonts.filter((f) => f.state === 'ok').map((f) => ({ id: f.id, name: f.name, file: f.file_name, at: f.created_at })),
+  setFont: (id, fid, decision) => act('set_font_choice', { cid: id, fid, choice: decision }),
+  async uploadFont(id, fid, file) {
+    if (!/\.(woff2|woff|otf|ttf)$/i.test(file.name)) return 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.';
+    if (file.size > 5 * 1024 * 1024) return 'That file is too big for a web font. Upload one under 5 MB.';
+    const url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file); });
+    try { await rpc('upload_font', { cid: id, fid, fname: file.name, b64: url.split(',')[1] }); } catch (e) { return say(e); }
+    justUploaded[fid] = url;
+    return null;
+  },
+  // The font swaps for the review frame, the same as the viewer's (runner.mjs fontSwaps), so a choice shows at once.
+  fontCss(c) {
+    const face = (f, src) => `@font-face{font-family:"${f.family}";font-weight:${f.weight};font-style:${f.style};font-display:swap;src:url(${src})}`;
+    return (c.fonts || []).flatMap((f) => {
+      const sf = f.studioFont;
+      if (sf && (sf.state === 'ok' || justUploaded[f.id])) return (f.faces || []).map((x) => face(x, justUploaded[f.id] && sf.state !== 'ok' ? justUploaded[f.id] : `a/${sf.asset}`));
+      if (f.decision === 'lookalike' && f.holder === 'user') return (f.faces || []).filter((x) => x.alt).map((x) => face(x, `a/${x.alt}`));
+      return [];
+    }).join('');
+  },
+  async approve(id, fontCert) {
+    if (fontCert) { try { await rpc('certify_fonts', { cid: id, cert: fontCert }); } catch (e) { alert(say(e)); return; } }
+    return act('approve_copy', { cid: id, ver: copies.find((c) => c.id === id).versions.at(-1).v });
+  },
   async create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
     try { return { id: await rpc('request_copy', { page_url: u.href }) }; } catch (e) { return { error: say(e) }; }

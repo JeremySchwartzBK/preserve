@@ -289,7 +289,10 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   if (fontRecord.length) {
     const w = (x) => String(x).replace('normal', '400').replace('bold', '700').split(' ')[0];
     const same = (r, u) => u.family.toLowerCase() === String(r.family).toLowerCase() && w(u.weight) === w(r.weight) && (u.style === 'normal') === (r.style === 'normal');
-    info.fonts = fontRecord.map((r) => ({ ...r, shown: Object.entries(info.layouts).filter(([, c]) => (c.fontsUsed || []).some((u) => same(r, u))).map(([l]) => l) }));
+    // With each font's picture from the live site and its lookalike file, both in a/ (export-static.mjs).
+    const fr = fs.existsSync(path.join(siteDir, 'fonts-review.json')) ? JSON.parse(fs.readFileSync(path.join(siteDir, 'fonts-review.json'), 'utf8')) : {};
+    info.fonts = fontRecord.map((r) => ({ ...r, shown: Object.entries(info.layouts).filter(([, c]) => (c.fontsUsed || []).some((u) => same(r, u))).map(([l]) => l),
+      sample: fr.samples?.[String(r.family).toLowerCase()] || null, alt: fr.alts?.[`${r.family}|${r.weight}|${r.style}`] || null }));
     const name = (f) => f.split(/[-_ ]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' ');
     const adobe = new Map();
     for (const r of info.fonts) if (r.holder === 'platform' && r.action === 'lookalike' && r.shown.length) adobe.set(name(r.family), r.served_as);
