@@ -469,8 +469,9 @@ export async function ownCss(stage) {
   } finally { srv.close(); }
   const html = ['desktop', 'mobile'].map((l) => fs.readFileSync(path.join(stage, `${l}.html`), 'utf8')).join('\n');
   let removed = 0;
-  // Stylesheets and fonts nothing uses any more (Squarespace's, copied at export; its icon font, now redrawn).
-  for (const f of fs.readdirSync(path.join(stage, 'a'))) if (/\.(css|woff2?|ttf|otf)$/.test(f) && !html.includes(f)) { fs.rmSync(path.join(stage, 'a', f)); removed++; }
+  // Stylesheets and fonts nothing uses any more (Squarespace's, copied at export; its icon font, now redrawn). Lookalikes
+  // for the review's Fonts step (alt-...) stay: the viewer swaps them in when chosen.
+  for (const f of fs.readdirSync(path.join(stage, 'a'))) if (/\.(css|woff2?|ttf|otf)$/.test(f) && !f.startsWith('alt-') && !html.includes(f)) { fs.rmSync(path.join(stage, 'a', f)); removed++; }
   report.removedFiles = removed;
   return report;
 }

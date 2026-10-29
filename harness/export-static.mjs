@@ -192,8 +192,9 @@ for (const [fam, s] of Object.entries(capInfo.fontSamples || {})) {
 for (const r of (fs.existsSync(gf) ? JSON.parse(fs.readFileSync(gf, 'utf8')).record || [] : [])) {
   const src = r.alt && path.join(siteDir, 'fonts-google', r.alt.file);
   if (!src || !fs.existsSync(src)) continue;
-  fs.copyFileSync(src, path.join(assetDir, r.alt.file));
-  fontReview.alts[`${r.family}|${r.weight}|${r.style}`] = r.alt;
+  // "alt-": kept when own-css.mjs clears out font files the pages don't use.
+  fs.copyFileSync(src, path.join(assetDir, 'alt-' + r.alt.file));
+  fontReview.alts[`${r.family}|${r.weight}|${r.style}`] = { ...r.alt, file: 'alt-' + r.alt.file };
 }
 fs.writeFileSync(path.join(siteDir, 'fonts-review.json'), JSON.stringify(fontReview, null, 1));
 
