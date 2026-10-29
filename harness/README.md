@@ -199,6 +199,22 @@ From the 58-site run:
 - The gallery check sees a change in the picture, not which slide is shown: a slide that moves to the wrong picture
   still passes. Swipe-only galleries on phones (no arrow) are only tested for autoplay and blank slides.
 
+## Fonts review (2026-10-29)
+
+The review's Fonts step works on real Preserves, not only the demo. Each font that needs the person's look (Adobe fonts
+from Squarespace's menu, fonts the owner uploaded, fonts from other hosts; open fonts never do) gets a row with:
+
+- **A picture from the live site** (`capture.mjs` `fontSamples`): the first visible words drawn in that font, photographed
+  tight at desktop width, plus the block they sit in. Adobe's files can't ship; pictures can.
+- **A lookalike** for fonts kept on the designer's word (`google-fonts.py` `alt`), fetched and shipped unused beside the
+  Preserve, with its license. Adobe fonts already ship as their lookalike.
+
+`export-static.mjs` puts both in `a/` and maps them in `fonts-review.json`; `gate.mjs` adds them to `info.fonts`; the runner
+turns that into one row per family (`copy_version.fonts`). Choosing "I don't have rights to this one", or uploading a
+licensed file, never rebuilds the Preserve: the viewer adds `@font-face` rules of the same name after the page's own
+(KV `fonts:<id>`), which win. An uploaded file is checked by `check-font.py` (a font file, and the font it claims to
+replace) and converted to WOFF2 before any Preserve uses it.
+
 ## Gallery player (2026-10-28)
 
 Copies have none of Squarespace's scripts, so galleries, carousels and slideshows never moved (known limitation 9;

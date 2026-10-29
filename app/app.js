@@ -154,7 +154,7 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
 // a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
 const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
-const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload');
+const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
@@ -213,6 +213,7 @@ function copyPage(id) {
   $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
     : 'Click the spot on the page. Press Esc to cancel.';
   sendPins(c);
+  sendFonts(c);
 }
 
 // Re-render only the header bits that shell() would otherwise redraw (notifications, plan).
@@ -236,6 +237,14 @@ addEventListener('resize', fitFrame);
 
 const frameWin = () => $('#fr')?.contentWindow;
 function sendMode() { frameWin()?.postMessage({ type: 'preserve-pin-mode', on: !!view.pinFor }, '*'); }
+// The person's font choices, drawn in the preview at once (the viewer adds the same for visitors).
+let lastFonts = '';
+function sendFonts(c, force) {
+  const css = store.fontCss ? store.fontCss(c) : '';
+  if (css === lastFonts && !force) return;
+  lastFonts = css;
+  frameWin()?.postMessage({ type: 'preserve-fonts', css }, '*');
+}
 let lastPins = '';
 function sendPins(c, force) {
   const kind = KIND_FOR[view.tab];
@@ -261,7 +270,7 @@ function onFrameMessage(m, id) {
   if (m.source !== frameWin()) return;
   const d = m.data || {};
   const c = store.copy(id);
-  if (d.type === 'preserve-ready') { sendPins(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
+  if (d.type === 'preserve-ready') { sendPins(c, true); if (store.fontCss) sendFonts(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
   // Pins the page couldn't place (their block isn't there, e.g. after a refinement): tour stops are marked to move.
   if (d.type === 'preserve-missing') { const k = (d.blockIds || []).join('|'); if (k !== view.missing.join('|')) { view.missing = d.blockIds || []; copyPage(id); } }
   if (d.type === 'preserve-pin' && view.pinFor?.startsWith('move:')) {
@@ -411,11 +420,11 @@ function panel(c, review) {
   if (ff) ff.onchange = async () => {
     const fid = ff.dataset.fid, file = ff.files[0]; if (!file) return;
     view.fontBusy = fid; view.fontErr = null; panel(store.copy(id), review);
-    await new Promise((r) => setTimeout(r, 1200));   // the real rebuild of the fonts takes a few seconds
-    view.fontBusy = null;
+    if (!store.real) await new Promise((r) => setTimeout(r, 1200));   // the demo stands in for the real check
     const err = await store.uploadFont(id, fid, file);
+    view.fontBusy = null;
     view.fontErr = err ? { fid, text: err } : null;
-    if (!err) toast('Font updated. Your Preserve now uses your file.');
+    if (!err) toast(store.real ? 'Font uploaded. We’re checking the file now.' : 'Font updated. Your Preserve now uses your file.');
     copyPage(id);
   };
   on('#refine', () => store.refine(id));
@@ -439,23 +448,28 @@ const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'sh
 function fontRow(c, f) {
   const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
   const look = f.decision === 'lookalike' || (f.holder === 'platform' && f.decision !== 'upload');
-  const state = f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
+  const lookName = esc(f.look || 'a standard font');
+  const state = f.checking ? `Checking your file ${esc(f.file)}. Your Preserve uses it as soon as it passes.`
+    : f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
     : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
-    : f.holder === 'platform' ? `From Squarespace’s font menu. Squarespace licenses it from Adobe for Squarespace sites only, so your Preserve uses a lookalike, ${esc(f.look)}, unless you upload your own licensed file.`
-    : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${esc(f.look)}.`
+    : f.holder === 'platform' ? `From Squarespace’s font menu. Squarespace licenses it from Adobe for Squarespace sites only, so your Preserve uses a lookalike, ${lookName}, unless you upload your own licensed file.`
+    : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
     : 'You uploaded this font to your site, so we kept it. Keep it only if your license covers this Preserve.';
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
-  const actions = view.fontBusy === f.id ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
+  const actions = view.fontBusy === f.id || f.checking ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
     : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
     : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
     : `${chip('keep', 'I have the rights')}${chip('lookalike', 'I don’t have rights to this one')}<button class="link" data-upload="${f.id}">Replace the file</button>`;
-  const after = look ? `<span class="fsample" style="font-family:'${esc(f.look)}',sans-serif">${esc(f.text)}</span>` : `<img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">`;
+  // A font we couldn't photograph on the live site shows its name in place of the picture.
+  const words = f.text || f.name;
+  const site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
+  const after = look ? `<span class="fsample" style="font-family:'${esc(f.look || '')}',sans-serif">${esc(words)}</span>` : site;
   return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">Show on page</button></div>
     <p class="fine">${state}</p>
-    <div class="fsamples"><span class="fl">On your site</span><img src="${esc(f.sample)}" alt="${esc(f.text)} in ${esc(f.name)}">
+    <div class="fsamples"><span class="fl">On your site</span>${site}
       <span class="fl">In your Preserve</span>${after}</div>
     <div class="row wrap">${actions}</div>
-    ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : ''}</div>`;
+    ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
 }
 // Above Accept: the fonts the Preserve ships as on the site, which the person confirms they may use (F1).
 function certify(c) {
@@ -465,7 +479,8 @@ function certify(c) {
 }
 let lookLoaded = '';
 function loadLookalikes(c) {
-  const fams = [...new Set(c.fonts.map((f) => f.look))].sort();
+  const fams = [...new Set(c.fonts.map((f) => f.look).filter(Boolean))].sort();
+  if (!fams.length) return;
   const href = `https://fonts.googleapis.com/css2?${fams.map((f) => 'family=' + f.replace(/ /g, '+')).join('&')}&display=swap`;
   if (lookLoaded === href) return;
   lookLoaded = href;

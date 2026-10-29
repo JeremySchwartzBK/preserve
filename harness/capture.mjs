@@ -225,6 +225,64 @@ async function shadowStills(page, outDir, prof, info) {
   await page.evaluate(() => scrollTo(0, 0)); await sleep(500);
 }
 
+// A picture of each font as the live site draws it, in the page's own words, for the review's Fonts step (Adobe files
+// can't be shipped; pictures can). For each font face the page loaded: the first visible text drawn in it, photographed
+// tight around the words, and the block it sits in (for "Show on page").
+async function fontSamples(page, outDir, info) {
+  // Desktop first; the phone layout adds fonts only it shows.
+  const done = Object.keys(info.fontSamples || {});
+  const found = await page.evaluate((done) => {
+    const unq = (s) => s.trim().replace(/^["']|["']$/g, '').toLowerCase();
+    const fams = new Set([...document.fonts].filter((f) => f.status === 'loaded').map((f) => unq(f.family)));
+    const out = [], seen = new Set(done);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      const el = n.parentElement;
+      if (t.length < 2 || !el || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(el.tagName)) continue;
+      const cs = getComputedStyle(el);
+      const fam = unq(cs.fontFamily.split(',')[0]);
+      if (!fams.has(fam) || seen.has(fam) || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      const box = r.getBoundingClientRect();
+      if (box.width < 8 || box.height < 6) continue;
+      seen.add(fam);
+      const b = el.closest('[id^="block-"],[data-block-id],section[data-section-id]') || el.closest('header,footer');
+      const block = !b ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
+      el.setAttribute('data-pv-fsample', String(out.length));
+      out.push({ family: fam, text: t.slice(0, 60), block });
+    }
+    return out;
+  }, done).catch(() => []);
+  if (!found.length) return;
+  fs.mkdirSync(path.join(outDir, 'font-samples'), { recursive: true });
+  info.fontSamples ||= {};
+  for (const [i, f] of found.entries()) {
+    const el = await page.$(`[data-pv-fsample="${i}"]`);
+    if (!el) continue;
+    await el.scrollIntoViewIfNeeded().catch(() => {}); await sleep(300);
+    // A fixed header that doesn't hold the words would otherwise land in the picture.
+    await el.evaluate((w) => { for (const e of document.querySelectorAll('body *')) if (getComputedStyle(e).position === 'fixed' && !e.contains(w)) { e.dataset.preserveHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }).catch(() => {});
+    const box = await el.evaluate((e) => {
+      const n = [...e.childNodes].find((x) => x.nodeType === 3 && x.textContent.trim());
+      const r = document.createRange(); r.selectNodeContents(n || e);
+      const b = r.getBoundingClientRect();
+      return { x: b.left, y: b.top, width: b.width, height: b.height };
+    }).catch(() => null);
+    await el.evaluate((e) => e.removeAttribute('data-pv-fsample')).catch(() => {});
+    if (!box) continue;
+    const pad = 6, vp = page.viewportSize();
+    const clip = { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: Math.min(640, box.width + 2 * pad), height: Math.min(160, box.height + 2 * pad) };
+    clip.width = Math.min(clip.width, vp.width - clip.x); clip.height = Math.min(clip.height, vp.height - clip.y);
+    if (clip.width < 8 || clip.height < 6) continue;
+    const file = `${hash(f.family)}.png`;
+    const ok = await page.screenshot({ path: path.join(outDir, 'font-samples', file), clip }).then(() => true, () => false);
+    if (ok) info.fontSamples[f.family] = { file, text: f.text, block: f.block };
+    await page.evaluate(() => { for (const e of document.querySelectorAll('[data-preserve-hid]')) { e.style.visibility = e.dataset.preserveHid === '-' ? '' : e.dataset.preserveHid; delete e.dataset.preserveHid; } }).catch(() => {});
+  }
+  await page.evaluate(() => scrollTo(0, 0)); await sleep(300);
+}
+
 export async function capture(url, outDir) {
   fs.mkdirSync(path.join(outDir, 'raw'), { recursive: true });
   const manifest = {}; // url -> { status, ct, file, size, type }
@@ -284,6 +342,7 @@ export async function capture(url, outDir) {
     await sleep(300);
     await page.screenshot({ path: path.join(outDir, `ref-${prof}.png`) });
     await page.screenshot({ path: path.join(outDir, `ref-full-${prof}.png`), fullPage: true }).catch(() => {});
+    await fontSamples(page, outDir, info);
     if (prof === 'desktop') {
       Object.assign(info, await page.evaluate(() => ({
         scripts: [...document.scripts].filter((s) => s.src).map((s) => s.src),

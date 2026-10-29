@@ -176,6 +176,27 @@ if (Object.keys(licenses).length) {
   fs.writeFileSync(path.join(assetDir, licenseFile), buf);
 }
 
+// For the review's Fonts step (google-fonts.py record, capture.mjs fontSamples): each font's picture from the live
+// site, and the lookalike files for fonts kept on the designer's word. Both ship unused by the pages; the viewer swaps
+// a lookalike in when the person chooses it. fonts-review.json maps them to their names in a/ for the quality check.
+const fontReview = { samples: {}, alts: {} };
+const capInfo = fs.existsSync(path.join(siteDir, 'capture-info.json')) ? JSON.parse(fs.readFileSync(path.join(siteDir, 'capture-info.json'), 'utf8')) : {};
+for (const [fam, s] of Object.entries(capInfo.fontSamples || {})) {
+  const src = path.join(siteDir, 'font-samples', s.file);
+  if (!fs.existsSync(src)) continue;
+  const buf = fs.readFileSync(src);
+  const name = 'fs-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12) + '.png';
+  fs.writeFileSync(path.join(assetDir, name), buf);
+  fontReview.samples[fam] = { file: name, text: s.text, block: s.block };
+}
+for (const r of (fs.existsSync(gf) ? JSON.parse(fs.readFileSync(gf, 'utf8')).record || [] : [])) {
+  const src = r.alt && path.join(siteDir, 'fonts-google', r.alt.file);
+  if (!src || !fs.existsSync(src)) continue;
+  fs.copyFileSync(src, path.join(assetDir, r.alt.file));
+  fontReview.alts[`${r.family}|${r.weight}|${r.style}`] = r.alt;
+}
+fs.writeFileSync(path.join(siteDir, 'fonts-review.json'), JSON.stringify(fontReview, null, 1));
+
 for (const layout of ['desktop', 'mobile']) {
   const pageUrl = `${base}/${VARIANT}/${layout}.html`;
   const $ = cheerio.load(fs.readFileSync(path.join(siteDir, 'variants', VARIANT, `${layout}.html`), 'utf8'));

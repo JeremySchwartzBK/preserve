@@ -87,6 +87,46 @@ async function main() {
   const GENERIC = 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.';
   const STEP = { 'check-url': 'check-url', 'capture-and-build': 'capture-and-build', export: 'export', 'subset-fonts': 'fonts', scrub: 'scrub', 'quality-check': 'quality-check' };
 
+  // The review's Fonts step (schema-fonts.sql): one row per font family that needs the person's look, from the quality
+  // check's font record (google-fonts.py, gate.mjs). Open fonts never do, nor fonts no layout shows.
+  const fontKey = (fam) => String(fam).toLowerCase().replace(/[^a-z0-9]/g, '');
+  // The font's own name when it has one (an uploaded "malamocco-unlicensed-trial-bl0cl3" says "Malamocco"), without
+  // trial wording or the random ending Squarespace adds to uploads.
+  const fontName = (r) => {
+    const raw = r.font_name || (/[A-Z ]/.test(r.family) ? String(r.family) : String(r.family).replace(/-[a-z0-9]{6}$/, '').split(/[-_]+/).filter(Boolean).map((x) => x[0].toUpperCase() + x.slice(1)).join(' '));
+    return raw.replace(/\b(unlicen[sc]ed|trial|test|demo|personal use( only)?|for personal use)\b/gi, '').replace(/\s+/g, ' ').trim() || raw;
+  };
+  function fontRows(fonts) {
+    const rows = new Map();
+    for (const r of fonts || []) {
+      if (r.holder === 'anyone' || r.action === 'open-equivalent' || !r.shown?.length) continue;
+      const id = fontKey(fontName(r));
+      const row = rows.get(id) || { id, name: fontName(r), holder: r.holder === 'platform' ? 'platform' : 'user', source: r.source, look: null, sample: null, text: null, block: null, shown: [], faces: [], trial: false };
+      row.look ||= (r.holder === 'platform' ? r.served_as : r.alt?.family) || null;
+      if (r.sample && !row.sample) Object.assign(row, { sample: 'a/' + r.sample.file, text: r.sample.text, block: r.sample.block });
+      row.shown = [...new Set([...row.shown, ...r.shown])];
+      row.faces.push({ family: r.family, weight: String(r.weight), style: r.style || 'normal', alt: r.alt?.file || null });
+      if (r.trial_hint) row.trial = true;
+      rows.set(id, row);
+    }
+    return [...rows.values()];
+  }
+  // What the viewer draws in place of the fonts on the page (worker: fonts:<id>), from the person's choices: the
+  // lookalike for a font they have no rights to, their checked upload for one they licensed (or one an earlier upload
+  // in their studio covers). A same-named @font-face added after the page's own wins, so nothing is rebuilt.
+  function fontSwaps(rows, choices, studioFonts) {
+    const out = [];
+    for (const row of rows || []) {
+      const ch = (choices || []).find((x) => x.font_id === row.id);
+      const ok = (sf) => sf && sf.state === 'ok' && sf.asset;
+      const upload = ch?.decision === 'upload' ? (studioFonts || []).find((x) => x.id === ch.studio_font_id)
+        : !ch ? (studioFonts || []).filter((x) => x.font_key === row.id && ok(x)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] : null;
+      if (ok(upload)) for (const f of row.faces) out.push({ family: f.family, weight: f.weight, style: f.style, src: upload.asset, studioFont: upload.id });
+      else if (ch?.decision === 'lookalike' && row.holder === 'user') for (const f of row.faces) if (f.alt) out.push({ family: f.family, weight: f.weight, style: f.style, src: f.alt });
+    }
+    return out;
+  }
+
   async function notify(copyId, kind, body) {
     await sql(`insert into notification (person_id, kind, copy_id, body) select sm.person_id, ${lit(kind)}, c.id, ${lit(body)} from copy c join studio_member sm on sm.studio_id = c.studio_id where c.id = ${lit(copyId)}`);
   }
@@ -172,8 +212,9 @@ async function main() {
     const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
-    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format)
-        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)}, 2);
+    const fonts = fontRows(v.info?.fonts || v.pages?.[0]?.info?.fonts);
+    await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format, fonts)
+        values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)}, 2, ${lit(JSON.stringify(fonts))}::jsonb);
       update copy_job set state = ${lit(job.state)}, step = null, finished_at = now(), version = ${next}, verdict = ${lit(JSON.stringify(v))}::jsonb where id = ${lit(j.id)};
       update copy set status = 'review', title = coalesce(title, ${lit(title)}), updated_at = now() where id = ${lit(j.copy_id)};
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
@@ -209,7 +250,9 @@ async function main() {
   async function syncServing(ids = null) {
     const rows = ids?.length === 0 ? [] : await sql(`select c.id, c.status, c.live_version, c.served, s.slug,
         (select max(version) from copy_version v where v.copy_id = c.id) as latest,
-        (select jsonb_object_agg(version, jsonb_build_object('fmt', storage_format, 'pages', pages)) from copy_version v where v.copy_id = c.id) as stored,
+        (select jsonb_object_agg(version, jsonb_build_object('fmt', storage_format, 'pages', pages, 'fonts', fonts)) from copy_version v where v.copy_id = c.id) as stored,
+        coalesce((select jsonb_agg(jsonb_build_object('font_id', f.font_id, 'decision', f.decision, 'studio_font_id', f.studio_font_id)) from copy_font f where f.copy_id = c.id), '[]') as font_choices,
+        coalesce((select jsonb_agg(jsonb_build_object('id', sf.id, 'font_key', sf.font_key, 'state', sf.state, 'asset', sf.asset, 'created_at', sf.created_at)) from studio_font sf where sf.studio_id = c.studio_id), '[]') as studio_fonts,
         (select name from copy_name n where n.copy_id = c.id and n.is_current) as name,
         coalesce((select array_agg(name) from copy_name n where n.copy_id = c.id and not n.is_current), '{}') as old,
         coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'page', p.page_id, 'block', p.block_id, 'x', p.x, 'y', p.y, 'title', coalesce(p.meta->>'title', ''), 'body', p.body) order by p.sort, p.created_at)
@@ -227,12 +270,22 @@ async function main() {
       // A version in the page layout tells the viewer where its pages are.
       const sv = r.stored?.[v] || {};
       const layout = sv.fmt === 2 ? { fmt: 2, pages: Object.fromEntries((sv.pages || []).map((p) => [p.path, p.page_id])) } : {};
-      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null };
+      const swaps = fontSwaps(sv.fonts, r.font_choices, r.studio_fonts);
+      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null };
       const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((m, kk) => ((m[kk] = v[kk]), m), {}) : v));  // key order differs once stored as jsonb
       if (canon(want) === canon(r.served)) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
       if (canon(want.tour) !== canon(r.served?.tour ?? null)) await (want.tour ? store.kvPut(`tour:${r.id}`, want.tour) : store.kvDel(`tour:${r.id}`).catch(() => {}));
+      if (canon(want.fonts) !== canon(r.served?.fonts ?? null)) {
+        // An uploaded font goes beside the Preserve first (shared files never change, so it is written once).
+        const have = new Set(await store.list(`copies/${r.id}/a/`));
+        for (const f of new Set((want.fonts || []).filter((x) => x.studioFont && !have.has(`copies/${r.id}/a/${x.src}`)).map((x) => x.studioFont))) {
+          const [row] = await sql(`select asset, encode(web, 'base64') as b64 from studio_font where id = ${lit(f)}`);
+          if (row?.b64) await store.put(`copies/${r.id}/a/${row.asset}`, Buffer.from(row.b64, 'base64'), 'font/woff2');
+        }
+        await (want.fonts ? store.kvPut(`fonts:${r.id}`, want.fonts.map(({ studioFont, ...x }) => x)) : store.kvDel(`fonts:${r.id}`).catch(() => {}));
+      }
       await sql(`update copy set served = ${lit(JSON.stringify(want))}::jsonb where id = ${lit(r.id)}`);
       log('served', r.id, status, 'v' + want.v, r.name || '');
     }
@@ -242,6 +295,28 @@ async function main() {
       for (const n of t.names || []) await store.kvDel(`name:${t.studio_slug}/${n}`).catch(() => {});
       await sql(`update copy_tombstone set cleared_at = now() where copy_id = ${lit(t.copy_id)}`);
       log('deleted', t.copy_id);
+    }
+  }
+
+  // Font files people uploaded at review (schema-fonts.sql): check each is the font it replaces and make its web file.
+  // A checked file is served from beside each Preserve that uses it (syncServing); a wrong one is turned down with why.
+  async function checkStudioFonts() {
+    for (const f of await sql(`select id, name, file_name, encode(data, 'base64') as b64 from studio_font where state = 'checking' order by created_at limit 5`)) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'font-'));
+      try {
+        const src = path.join(dir, 'upload' + path.extname(f.file_name).toLowerCase()), out = path.join(dir, 'web.woff2');
+        fs.writeFileSync(src, Buffer.from(f.b64, 'base64'));
+        const r = JSON.parse(execFileSync('python3', [path.join(HARNESS, 'check-font.py'), src, f.name, out], { timeout: 60e3 }).toString());
+        if (r.ok) {
+          const web = fs.readFileSync(out);
+          const asset = 'uf-' + (await import('node:crypto')).createHash('sha1').update(web).digest('hex').slice(0, 12) + '.woff2';
+          await sql(`update studio_font set state = 'ok', web = decode(${lit(web.toString('base64'))}, 'base64'), asset = ${lit(asset)}, problem = null where id = ${lit(f.id)}`);
+        } else await sql(`update studio_font set state = 'rejected', problem = ${lit(r.problem)} where id = ${lit(f.id)}`);
+        log('font checked', f.name, f.file_name, r.ok ? 'ok' : 'rejected');
+      } catch (e) {
+        log('font check failed', f.file_name, e.message);
+        await sql(`update studio_font set state = 'rejected', problem = ${lit('We couldn’t read that file. Upload a .woff2, .woff, .otf or .ttf file.')} where id = ${lit(f.id)}`).catch(() => {});
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
     }
   }
 
@@ -283,6 +358,7 @@ async function main() {
     while (!stopping) {
       try {
         if (Date.now() - full > 60 * 60e3) { full = Date.now(); await syncServing(); await sql(`delete from serving_outbox where queued_at < now() - interval '10 seconds'`); }
+        await checkStudioFonts().catch((e) => log('font checks failed', e.message));
         const ids = (await sql(`delete from serving_outbox where copy_id in (select copy_id from serving_outbox order by queued_at limit 50 for update skip locked) returning copy_id`)).map((r) => r.copy_id);
         if (ids.length) lastBusy = Date.now();
         await syncServing(ids);
