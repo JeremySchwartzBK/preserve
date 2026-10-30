@@ -69,6 +69,7 @@ async function main() {
     'gallery-does-not-advance': 'A slideshow or carousel doesn’t move.',
     'gallery-does-not-autoplay': 'A slideshow that plays by itself on your site stays still.',
     'gallery-blank-slide': 'A slideshow or carousel shows an empty frame.',
+    'widget-frozen': 'Something that moves by itself on your site stays still in the Preserve.',
     'outside-requests': 'The copy still reaches out to other websites.',
     'overlay-left': 'A popup or banner may still cover part of the page.',
     'page-differs': 'Parts of the page look different from the live site.',
@@ -85,7 +86,7 @@ async function main() {
     'password-protected': 'This page is password protected, so we couldn’t copy it.',
   };
   const GENERIC = 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.';
-  const STEP = { 'check-url': 'check-url', 'capture-and-build': 'capture-and-build', export: 'export', 'subset-fonts': 'fonts', scrub: 'scrub', 'quality-check': 'quality-check' };
+  const STEP = { 'check-url': 'check-url', 'capture-and-build': 'capture-and-build', export: 'export', 'own-stylesheet': 'export', 'subset-fonts': 'fonts', scrub: 'scrub', steady: 'scrub', 'quality-check': 'quality-check' };
 
   // The review's Fonts step (schema-fonts.sql): one row per font family that needs the person's look, from the quality
   // check's font record (google-fonts.py, gate.mjs). Open fonts never do, nor fonts no layout shows.

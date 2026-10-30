@@ -20,5 +20,8 @@ jobs:
       - name: Formulas in our own form
         working-directory: harness
         run: node test-own-forms.mjs
+      - name: Viewer and quality check serve the same rules
+        working-directory: harness
+        run: node test-policy.mjs
       - name: Scripts parse
         run: for f in platform/*.mjs platform/worker/*.mjs harness/*.mjs app/*.js; do node --check "$f" || exit 1; done

@@ -299,12 +299,25 @@ for (const layout of ['desktop', 'mobile']) {
   // Switch layout when the width given doesn't match: on load (a frame or window the edge guessed wrong) and on resize.
   // The width is the layout width (clientWidth), not innerWidth, and a switch back within 5 s is refused: see
   // widthScript in build.mjs (a phone zoomed out by an over-wide element flipped layouts forever).
-  $('#preserve-width').text(`(function(){var m=${layout === 'mobile'},t;function c(){if(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT})===m)return;var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){}if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+location.search+location.hash)}c();addEventListener('resize',function(){clearTimeout(t);t=setTimeout(c,250)})})();`);
+  $('#preserve-width').text(`(function(){var m=${layout === 'mobile'},t;function c(){if(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT})===m)return;var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+location.search+location.hash)}c();addEventListener('resize',function(){clearTimeout(t);t=setTimeout(c,250)})})();`);
   // Squarespace 7.1 fixed headers turn solid ("shrink") once the page scrolls; its script did that on the live site.
   $('body').append(`<script id="preserve-header">(function(){if(!document.body.classList.contains('tweak-fixed-header'))return;var h=document.querySelector('header.header,#header');if(!h)return;function f(){h.classList.toggle('shrink',scrollY>0)}addEventListener('scroll',f,{passive:true});f()})();</script>`);
   if (videosWired) $('body').append(MEDIA_SCRIPT);
   videoCount += videosWired;
   if (licenseFile) $('head').append(`<link rel="license" href="a/${licenseFile}">`);
+  // A sealed page (policy.mjs) can't draw an icon from an SVG file, not even its own: each <use> of a sprite file points
+  // at the symbol in the page instead, with the file's symbols put in the page once (unless the page has them already).
+  const sprites = new Set();
+  for (const el of $('use').toArray()) for (const a of ['href', 'xlink:href']) {
+    const m = /^a\/([\w.-]+\.svg)#(.+)$/.exec($(el).attr(a) || '');
+    if (!m) continue;
+    if (!$(`[id="${m[2]}"]`).length && !sprites.has(m[1]) && fs.existsSync(path.join(assetDir, m[1]))) {
+      sprites.add(m[1]);
+      const $s = cheerio.load(fs.readFileSync(path.join(assetDir, m[1]), 'utf8'), { xmlMode: true });
+      $('body').prepend(`<svg class="preserve-sprite" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">${$s('svg').first().html() || ''}</svg>`);
+    }
+    $(el).attr(a, '#' + m[2]);
+  }
   fs.writeFileSync(path.join(outRoot, site, `${layout}.html`), $.html());
 }
 

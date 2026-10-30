@@ -91,9 +91,11 @@ async function finish() {
     await step('subset-fonts', () => run('python3', ['subset-fonts.py', p.stage], 10 * 60e3));
     p.scrub = await step('scrub', () => run('python3', ['scrub.py', p.stage, p.url], 5 * 60e3));
     fs.writeFileSync(path.join(p.siteDir, 'scrub-output.txt'), p.scrub);
+    // Same on every load: owner code that isn't gets frozen (steady.mjs).
+    p.steadyReport = await step('steady', async () => { const o = await run('node', ['steady.mjs', p.stage], 10 * 60e3); const r = JSON.parse(o.slice(o.indexOf('{'))); fs.writeFileSync(path.join(p.siteDir, 'steady-report.json'), JSON.stringify(r, null, 1)); return r; });
   }
   const verdicts = [];
-  for (const p of pages) verdicts.push(p.verdict = await step('quality-check', () => runGate({ id: path.basename(p.stage), url: p.url, siteDir: p.siteDir, copyDir: p.stage, exportReport: p.exportReport, scrubOutput: p.scrub, ownCssReport: p.ownCssReport })));
+  for (const p of pages) verdicts.push(p.verdict = await step('quality-check', () => runGate({ id: path.basename(p.stage), url: p.url, siteDir: p.siteDir, copyDir: p.stage, exportReport: p.exportReport, scrubOutput: p.scrub, ownCssReport: p.ownCssReport, steadyReport: p.steadyReport })));
   return mergeVerdicts(verdicts);
 }
 const writePagesFile = () => { const f = path.join(WORK, `${id}.pages.json`); fs.writeFileSync(f, JSON.stringify(pages.map((p) => ({ path: p.path, source_url: p.url, dir: p.stage })))); return f; };

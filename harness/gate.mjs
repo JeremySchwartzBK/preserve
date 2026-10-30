@@ -6,11 +6,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { check, diffPct, probeGalleries } from './check.mjs';
+import { check, diffPct, probeGalleries, probeMotion } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
+import { policyHeaders } from './policy.mjs';
 
 // Thresholds, calibrated on the five hand-checked copies (see gate-calibration in the write-up).
 export const LIMITS = {
@@ -27,6 +28,8 @@ export const LIMITS = {
 // How much the live page differs from itself between two visits (random sticker layouts, autoplaying slideshows,
 // clocks, video frames). The copy is held to the same pixel limits plus that amount, so a page that is never the same
 // twice isn't failed for it, while a still page keeps the strict limits.
+const withBrowser = async (f) => { const b = await launch(); try { return await f(b); } finally { await b.close(); } };
+
 async function liveSelfDiff(url, siteDir) {
   const out = {};
   const browser = await launch();
@@ -48,6 +51,7 @@ async function liveSelfDiff(url, siteDir) {
         if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
+        out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
     }
@@ -70,7 +74,8 @@ function serve(root) {
       let p = path.join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
       if (!fs.existsSync(p) && fs.existsSync(p + '.html')) p += '.html';
       if (!fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); return res.end('nf'); }
-      res.writeHead(200, { 'content-type': CT[p.split('.').pop()] || 'application/octet-stream' });
+      // With the rules visitors get (policy.mjs), so the check sees what they see.
+      res.writeHead(200, { 'content-type': CT[p.split('.').pop()] || 'application/octet-stream', ...policyHeaders(p.split('.').pop()) });
       fs.createReadStream(p).pipe(res);
     }).listen(0, '127.0.0.1', () => resolve(srv));
   });
@@ -121,7 +126,7 @@ const OWN_CSS_MAX_DIFF = 1;
 // A copy resized to a width should look as it does opened at that width (the scripts re-measure on resize).
 const RESIZE_MAX_DIFF = 2;
 
-export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null }) {
+export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null, steadyReport = null }) {
   const reasons = [], notes = [], warnings = [], info = {};
   // Each finding keeps where it was seen (spots: block + position, per layout) so the app can show it as a pin.
   let layoutSpots = null, layoutName = null;
@@ -219,6 +224,14 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (gal['gallery-does-not-advance'].length) fail('gallery-does-not-advance', L(n('gallery-does-not-advance') + 'gallery/slideshow "next" does nothing'), 9);
       if (gal['gallery-does-not-autoplay'].length) fail('gallery-does-not-autoplay', L(n('gallery-does-not-autoplay') + 'a slideshow that plays by itself on the live page stays still'), 9);
       if (gal['gallery-blank-slide'].length) fail('gallery-blank-slide', L(n('gallery-blank-slide') + 'a gallery shows a slide whose picture never draws'));
+      // A part that moves by itself on the live page must move in the copy too (galleries have their own check above).
+      {
+        const liveM = info.liveSelfDiff[prof]?.motion || {};
+        const copyM = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+        info.motion = { ...(info.motion || {}), [prof]: { live: Object.values(liveM).filter((m) => m?.moving).length, copy: Object.values(copyM).filter((m) => m?.moving).length } };
+        const frozen = Object.entries(liveM).filter(([k, m]) => m?.moving && copyM[k] && !copyM[k].moving).map(([, m]) => m.at);
+        if (frozen.length) { layoutSpots['widget-frozen'] = frozen.slice(0, 3); fail('widget-frozen', L(`${frozen.length} part(s) move by themselves on the live page but stay still: ${frozen.map((f) => f.blockId).slice(0, 3).join(', ')}`), 5); }
+      }
       if (c.pageErrors) warnings.push(L(`${c.pageErrors} script errors: ${c.errorSamples.join(' | ').slice(0, 200)}`));
       const d1 = c.diffFirstScreen, d2 = c.diffFullPage, self = info.liveSelfDiff[prof] || {};
       const allow1 = LIMITS.firstScreenDiffPct + (self.firstScreen?.pct || 0), allow2 = LIMITS.fullPageDiffPct + (self.fullPage?.pct || 0);
@@ -309,7 +322,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
