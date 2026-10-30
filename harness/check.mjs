@@ -238,7 +238,8 @@ export async function probeMotion(browser, url, profileName, { isCopy = false } 
     await page.mouse.move(0, 0);
     const vh = await page.evaluate(() => innerHeight), h = await page.evaluate(() => document.documentElement.scrollHeight);
     for (let i = 0; i < MOTION_SCREENS && i * vh < h; i++) {
-      await page.evaluate((y) => scrollTo(0, y), i * vh); await sleep(1500);
+      // Long enough for entrance animations to finish: only motion that keeps going counts.
+      await page.evaluate((y) => scrollTo(0, y), i * vh); await sleep(2500);
       const blocks = await page.evaluate((gSel) => {
         for (const e of document.querySelectorAll('body *')) { const p = getComputedStyle(e).position; if ((p === 'fixed' || p === 'sticky') && !e.dataset.pvHid) { e.dataset.pvHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }
         const sel = '[id^="block-"],[data-block-id]';
@@ -248,14 +249,19 @@ export async function probeMotion(browser, url, profileName, { isCopy = false } 
           return x1 - x0 < 16 || y1 - y0 < 16 ? null : { at: window.__preserveAnchor(b), x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) };
         }).filter(Boolean);
       }, GALLERY_SEL);
-      const a = PNG.sync.read(await page.screenshot()); await sleep(MOTION_GAP_MS); const b = PNG.sync.read(await page.screenshot());
-      for (const bl of blocks) {
+      // Three pictures a couple of seconds apart; a block moves if it changed between both pairs.
+      const shots = [];
+      for (let k = 0; k < 3; k++) { if (k) await sleep(MOTION_GAP_MS); shots.push(PNG.sync.read(await page.screenshot())); }
+      const changedIn = (a, b, bl) => {
         let changed = 0;
         for (let y = bl.y; y < bl.y + bl.h && y < a.height; y += 2) for (let x = bl.x; x < bl.x + bl.w && x < a.width; x += 2) {
           const k = (y * a.width + x) * 4;
           if (Math.abs(a.data[k] - b.data[k]) + Math.abs(a.data[k + 1] - b.data[k + 1]) + Math.abs(a.data[k + 2] - b.data[k + 2]) > 48) changed++;
         }
-        const frac = changed / (Math.ceil(bl.w / 2) * Math.ceil(bl.h / 2));
+        return changed / (Math.ceil(bl.w / 2) * Math.ceil(bl.h / 2));
+      };
+      for (const bl of blocks) {
+        const frac = Math.min(changedIn(shots[0], shots[1], bl), changedIn(shots[1], shots[2], bl));
         const id = bl.at.blockId, prev = out[id];
         if (!prev || frac > prev.frac) out[id] = { moving: frac >= MOTION_MIN, frac: +frac.toFixed(3), at: bl.at };
       }
