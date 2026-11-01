@@ -123,7 +123,10 @@ async function serveCopy(req, env, ctx, id, rest) {
   if (vary) h.set('vary', 'User-Agent, Sec-CH-UA-Mobile');
   // The page's rules (review and visitors alike); a sealed page asks for its own files from no origin, so they allow
   // any (fonts and images marked crossorigin load only that way).
-  if (file.endsWith('.html')) h.set('content-security-policy', PRESERVE_CSP);
+  // Pages made before stage one (no preserve-steady script) point at SVG icon files, which a sealed page can't use:
+  // they keep the no-network rules without the seal, so they look exactly as they did when accepted.
+  const text = asset ? null : await obj.text();
+  if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
   else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   // Later this requires a signed token from the app; for now the parameter alone turns it on.
@@ -131,7 +134,7 @@ async function serveCopy(req, env, ctx, id, rest) {
   const fontCss = fonts?.length ? fontTags(fonts) : '';
   if (!asset && url(req).searchParams.has('review')) {
     h.set('cache-control', 'no-store');
-    const html = (await obj.text()).replace(/<\/body>/i, fontCss + REVIEW_BRIDGE + '</body>');
+    const html = text.replace(/<\/body>/i, fontCss + REVIEW_BRIDGE + '</body>');
     return new Response(html, { headers: h });
   }
   if (!asset) {
@@ -140,11 +143,11 @@ async function serveCopy(req, env, ctx, id, rest) {
     if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
     const hasTour = tour && ((tour.spots || []).length || (tour.credits || []).length);
     if (hasTour || fontCss) {
-      const html = (await obj.text()).replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + '</body>');
+      const html = text.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + '</body>');
       return new Response(html, { headers: h });
     }
   }
-  const res = new Response(obj.body, { headers: h });
+  const res = new Response(asset ? obj.body : text, { headers: h });
   if (asset) { ctx.waitUntil(cache.put(cacheKey, res.clone())); }
   return withRange(req, res);
 }
