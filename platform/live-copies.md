@@ -12,10 +12,13 @@ Served by the Worker in `worker/src/index.js` from R2 bucket `preserve-copies`, 
 
 ## Embed snippet
 
-Same for every copy; only the ID changes. The frame picks the phone or desktop layout from its own width.
+Same for every Preserve; only the ID changes. The frame picks the phone or desktop layout from its own width. Inside a
+Squarespace block (Code or Embed) it fills the block; anywhere else it is full width and 600 px tall (Jeremy confirmed
+it on his Squarespace page, 2026-11-03; thread "Fix embed height on Squarespace").
 
 ```html
-<div style="position:relative;width:100%;aspect-ratio:16/10;max-height:90vh">
+<style>.fe-block .sqs-block:has(.preserve-embed){position:relative}.fe-block .sqs-block:has(.preserve-embed) :has(.preserve-embed){position:static!important;padding:0!important;height:auto!important}.fe-block .preserve-embed{position:absolute!important;inset:0;height:auto!important;max-height:none!important}</style>
+<div class="preserve-embed" style="position:relative;width:100%;height:600px;max-height:90vh">
 <iframe title="Interactive website preview" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px" loading="eager" referrerpolicy="no-referrer"></iframe>
 <script>(function(f){f.src='https://preserve-view.pages.dev/c/COPY_ID/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>
 </div>
