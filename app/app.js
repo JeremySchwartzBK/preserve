@@ -317,7 +317,7 @@ const pinList = (c, tab, opts = {}) => {
   if (!list.length) return `<p class="sub">${opts.empty}</p>`;
   return `<ol class="pins ${tab === 'tour' ? 'tour' : ''}">${list.map((p) => `<li>${p.meta?.title ? `<b>${esc(p.meta.title)}</b>` : ''}<span class="pbody">${esc(p.body)}</span>
     <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
-    ${tab === 'check' && p.meta?.round_result ? roundResult(p) : ''}
+    ${tab === 'check' && p.meta?.round_result ? roundResult(p) + aiNote(p) : ''}
     ${tab === 'tour' && view.missing.includes(p.blockId) ? '<small class="warn">This stop no longer lands on the page. Move it to the right spot.</small>' : ''}
     <span class="row"><button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
 };
@@ -326,6 +326,25 @@ const pinList = (c, tab, opts = {}) => {
 const roundResult = (p) => p.meta.round_result === 'looks-fixed' ? '<small class="ok">Looks fixed in the latest refinement. Remove the pin if you agree.</small>'
   : p.meta.round_result === 'still-different' ? '<small class="warn">Still different from your site after the latest refinement. It will be included in the next one.</small>'
   : '<small class="warn">We couldn’t find this spot after the latest refinement. Check it, and pin it again if it’s still wrong.</small>';
+
+// What the refinement made of the pin's note, when AI read it (harness/ai-pins.mjs). Fixed wording per pick; the
+// model's own words are never shown.
+const BY_DESIGN_TEXT = {
+  'contact-details': 'Preserves replace email addresses, phone numbers and street addresses with placeholders, so a Preserve never stands in for your real site.',
+  'pop-ups': 'Preserves leave out pop-ups, announcement bars, cookie banners and promo tabs.',
+  'video-still': 'Preserves show a still frame for YouTube and Vimeo videos.',
+  'looping-video': 'Preserves clip looping background video to a short loop.',
+  'shopping-forms': 'In a Preserve, buttons that buy, book or send a form show a note that it’s a replica.',
+};
+const aiNote = (p) => {
+  const m = p.meta || {};
+  const t = m.ai_action === 'fonts' ? 'This looks like a font difference. You can choose the font in the Fonts step.'
+    : m.ai_action === 'by-design' && BY_DESIGN_TEXT[m.ai_by_design] ? BY_DESIGN_TEXT[m.ai_by_design] + ' This stays as it is.'
+    : m.ai_action === 'live-same' ? 'Your live site shows the same thing here, so a refinement can’t change it.'
+    : m.ai_action === 'still' ? 'This part now shows a picture of your live site, so it looks right but doesn’t respond to clicks.'
+    : '';
+  return t ? `<small>${esc(t)}</small>` : '';
+};
 
 function panel(c, review) {
   const id = c.id, P = $('#panel');

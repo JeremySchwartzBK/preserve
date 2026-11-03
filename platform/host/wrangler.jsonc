@@ -1,7 +1,8 @@
 // Hosts the copy runner on Cloudflare Containers (decided 2026-10-18). Deploy from this folder:
 //   npx wrangler@4.151.1 deploy
 // Secrets (npx wrangler secret put <NAME>): DATABASE_URL (the runner's database role), CLOUDFLARE_API_TOKEN (R2 read and
-// write for copies and captures), WAKE_SECRET (shared with the database trigger that wakes the runner).
+// write for copies and captures), WAKE_SECRET (shared with the database trigger that wakes the runner). Optional, for AI in
+// refinements (harness/ai-pins.mjs): ANTHROPIC_API_KEY, and PRESERVE_AI set to "on" (the switch; any other value or none is off).
 {
   "name": "preserve-runner",
   "main": "src/index.js",

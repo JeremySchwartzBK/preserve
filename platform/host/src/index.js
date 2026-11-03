@@ -14,6 +14,8 @@ export class Runner extends Container {
   constructor(ctx, env) {
     super(ctx, env);
     this.envVars = { DATABASE_URL: env.DATABASE_URL, CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN };
+    // AI for refinements (harness/ai-pins.mjs): off until both are set; PRESERVE_AI=on is the switch.
+    if (env.ANTHROPIC_API_KEY && env.PRESERVE_AI) Object.assign(this.envVars, { ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, PRESERVE_AI: env.PRESERVE_AI });
   }
 
   async onActivityExpired() {

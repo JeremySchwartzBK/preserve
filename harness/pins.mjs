@@ -28,9 +28,20 @@ export async function focusPins(page, prof, pins = loadPins(), wait = 3000) {
   let found = 0;
   for (const p of forLayout(pins, prof)) {
     const ok = await page.evaluate(([find, id]) => { const el = eval(`(${find})`)(id); if (!el) return false; el.scrollIntoView({ block: 'center' }); return true; }, [FIND.toString(), p.block_id]).catch(() => false);
-    if (ok) { found++; await sleep(wait); }
+    // The pin's AI pick (ai-pins.mjs) can ask for much more time: something caught before it finished.
+    if (ok) { found++; await sleep(p.ai?.action === 'wait-longer' ? Math.max(wait, 9000) : wait); }
   }
   return found;
+}
+
+// Pins whose AI pick is "still": mark the block so capture photographs it on the live site and the export shows that
+// picture in its place (the same path as widgets that draw in a shadow root, capture.mjs shadowStills).
+export async function markPinStills(page, prof, pins = loadPins()) {
+  let n = 0;
+  for (const p of forLayout(pins, prof).filter((p) => p.ai?.action === 'still')) {
+    if (await page.evaluate(([find, id]) => { const el = eval(`(${find})`)(id); if (!el) return false; el.setAttribute('data-preserve-pin-still', ''); return true; }, [FIND.toString(), p.block_id]).catch(() => false)) n++;
+  }
+  return n;
 }
 
 // A picture of each pinned block on this page (live or copy), at most 1500 px tall.
@@ -51,7 +62,7 @@ export async function comparePins(dir, limitPct, self = {}, pins = loadPins()) {
   for (const [i, p] of pins.entries()) {
     const prof = p.layout || 'desktop';
     const live = path.join(dir, `live-pin${i}-${prof}.png`), copy = path.join(dir, `copy-pin${i}-${prof}.png`);
-    const base = { block_id: p.block_id, layout: prof, at: p.at, from: p.from || 'person' };
+    const base = { block_id: p.block_id, layout: prof, at: p.at, from: p.from || 'person', ...(p.ai ? { ai: p.ai } : {}) };
     if (!fs.existsSync(copy)) { out.push({ ...base, result: 'not-found' }); continue; }
     if (!fs.existsSync(live)) { out.push({ ...base, result: 'no-live-block' }); continue; }
     const diff = (await diffPct(live, copy, null, [], 1, null, { shift: 40 }))?.pct ?? null;
