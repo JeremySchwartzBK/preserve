@@ -265,7 +265,11 @@ for (const layout of ['desktop', 'mobile']) {
     const name = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12) + '.webp';
     if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), buf); bytes += buf.length; }
     const w = Math.round(meta.width / dpr), h = Math.round(meta.height / dpr);
-    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" class="preserve-embed-still" style="display:block;width:100%;max-width:${w}px;height:auto;aspect-ratio:${w}/${h};cursor:pointer;margin:0 auto" data-preserve-replica="1">`);
+    const pic = `<img src="a/${name}" alt="" decoding="async" class="preserve-embed-still" style="display:block;width:100%;max-width:${w}px;height:auto;aspect-ratio:${w}/${h};cursor:pointer;margin:0 auto" data-preserve-replica="1">`;
+    // A block a refinement's AI pick asked to show as a picture (pins.mjs markPinStills) keeps its own box, so it stays
+    // where the layout puts it and pins, tour stops and credits still find it; only what's inside is replaced.
+    if ($(el).is('[data-preserve-pin-still]')) { $(el).removeAttr('data-preserve-still').removeAttr('data-preserve-pin-still').empty().append(pic); stills.push({ layout, src: 'pinned block', replaced: true }); continue; }
+    $(el).replaceWith(pic);
     stills.push({ layout, src: 'web component', replaced: true });
   }
   // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):
