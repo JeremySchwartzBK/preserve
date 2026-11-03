@@ -318,11 +318,13 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)}
 // The width is the layout viewport's (clientWidth), not innerWidth: on a phone, anything wider than the screen makes
 // the browser zoom out and innerWidth grow past the breakpoint, which flipped a phone page to desktop and back
 // forever (Dreamsake, Borrachito, 2026-10-22). A switch back within a few seconds of the last one is also refused.
+// Inside a frame the page never switches: the embed code picks the layout and scales it (Jeremy, 2026-11-03), and a
+// page switching on its own raced it and left the wrong layout showing.
 const BREAKPOINT = 768;
 const LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <script>location.replace(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
 <body><noscript><a href="desktop.html">Open the preview</a></noscript></body></html>`;
-const widthScript = (layout) => `<script id="preserve-width">(function(){var m=${layout === 'mobile' ? 'true' : 'false'},t;
+const widthScript = (layout) => `<script id="preserve-width">(function(){if(window.top!==window)return;var m=${layout === 'mobile' ? 'true' : 'false'},t;
 function w(){return document.documentElement.clientWidth||innerWidth}
 addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((w()<${BREAKPOINT})===m)return;
 var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}
