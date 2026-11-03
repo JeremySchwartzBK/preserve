@@ -339,3 +339,20 @@ Re-run on an existing job: `node gate.mjs <work>/<id> <work>/_stage/<id> <url>`.
 
 `publish.mjs <readyRoot> <pagesProject>`: writes the hosting extras, deploys with wrangler, deletes older deployments.
 Interim single-project hosting; the account review's R2 + Worker layout would replace only this file.
+
+## AI for refinements (Option B, 2026-11-03; off until switched on)
+
+`ai-pins.mjs`: before a refinement, a model reads each of the person's pins and picks ONE fix from a fixed menu; it
+never writes code. Evidence per pin: four frames, a second apart, of the pinned block on the live site (top row) and on
+the version under review (bottom row) in one picture, plus measurements (size, font, images not showing, embeds,
+canvases, animations, how much the spot changes over time). The menu: `wait-longer` (capture waits 9 s at the spot),
+`still` (capture photographs the block on the live site and the export shows that picture in its place; only with
+medium or high confidence), `fonts`, `by-design`, `live-same`, `try-again`. Each pin also gets a kind of problem. The
+pick rides on the pins file (`pin.ai`), so capture (`pins.mjs`) and the pin check read it, and the runner stores it on
+the pin (`copy_pin.meta.ai_*`) so we can count which kinds come up; the app shows fixed wording for `fonts`,
+`by-design`, `live-same` and `still`. At most six pins per round; the rest, and any pin whose look-up fails, get the
+usual careful re-capture.
+
+On only when `PRESERVE_AI=on` and `ANTHROPIC_API_KEY` are set (runner secrets, `platform/host/wrangler.jsonc`) and the
+runner passes `PRESERVE_VIEW_BASE`. Try it by hand without calling the model:
+`node ai-pins.mjs <liveUrl> https://preserve-view.pages.dev/c/<id> <pins.json> <outDir> --dry`.

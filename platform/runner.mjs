@@ -33,6 +33,8 @@ async function main() {
   const REF = process.env.SUPABASE_PROJECT || 'uzgprpbhhrctklzumikn';
   const HARNESS = process.env.HARNESS || new URL('../harness', import.meta.url).pathname;
   const RUN = process.env.RUN_DIR || '/root/runs';
+  // Where review pages are served; AI for refinements (harness/ai-pins.mjs) looks at the version under review there.
+  const VIEW_BASE = process.env.PRESERVE_VIEW_URL || 'https://preserve-view.pages.dev';
   const once = process.argv.includes('--once');
   const store = cloudflareStore({ account: '1dcf2dbf05caa4963ed872ff035bc9db', bucket: 'preserve-copies', kvNamespace: 'c67307a470e44d529efa87933c42942f' });
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -166,7 +168,7 @@ async function main() {
     }, 30e3);
     const code = await new Promise((res) => {
       // Own process group, so stopping the job also stops the browsers and servers it started.
-      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}` } });
       ctl.child = p;
       const jl = fs.createWriteStream(path.join(work, `${j.copy_id}.a${j.attempt}.log`), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
@@ -209,7 +211,9 @@ async function main() {
       const a = answered.find((x) => x.code === p.code && x.block_id === p.blockId && x.layout === p.layout);
       if (a) p.verdict = a.verdict;
     }
-    // How each of the person's pins came out this round (pins.mjs): shown on the pin in review.
+    // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
+    // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
+    const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
     const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
@@ -222,7 +226,7 @@ async function main() {
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
         values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
-      ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next }))}::jsonb
+      ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
     log('ready for review', j.copy_id, 'v' + next, v.result, up.files, 'files');

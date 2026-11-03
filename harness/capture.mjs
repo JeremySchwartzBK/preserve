@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
-import { loadPins, focusPins } from './pins.mjs';
+import { loadPins, focusPins, markPinStills } from './pins.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -199,7 +199,9 @@ async function shadowStills(page, outDir, prof, info) {
     for (const el of document.querySelectorAll('*')) {
       // Custom elements whose drawing lives in a shadow root (open or closed): defined, sized, and no light-DOM content.
       const tag = el.tagName.toLowerCase();
-      if (!tag.includes('-') || /^(sqs-|preserve-)/.test(tag) || !(el.shadowRoot || (customElements.get(tag) && !el.textContent.trim() && !el.children.length))) continue;
+      // ...and any block a refinement's AI pick asked to show as a picture (pins.mjs markPinStills).
+      const pinned = el.hasAttribute('data-preserve-pin-still');
+      if (!pinned && (!tag.includes('-') || /^(sqs-|preserve-)/.test(tag) || !(el.shadowRoot || (customElements.get(tag) && !el.textContent.trim() && !el.children.length)))) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 8 || r.height < 8 || getComputedStyle(el).visibility === 'hidden') continue;
       el.setAttribute('data-preserve-still', `${i++}`);
@@ -327,6 +329,7 @@ export async function capture(url, outDir) {
     (info.galleries ||= {})[prof] = await recordGalleries(page);
     await page.evaluate((y) => scrollTo(0, y), y0); await sleep(500);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
     await shadowStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it

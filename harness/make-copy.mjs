@@ -8,6 +8,7 @@
 //   --out      where finished copies are written, one folder per copy (default ./ready)
 //   --publish  after a pass or ship-with-note, deploy <out> to this Cloudflare Pages project
 //   --notes    a refinement's open pins (JSON from the runner): the capture takes care there, the check compares them
+//              (with PRESERVE_AI=on, ANTHROPIC_API_KEY and PRESERVE_VIEW_BASE set, a model first picks a fix for each: ai-pins.mjs)
 //   --reuse-capture  build from the capture already in --work (same input, new code; for the test corpus)
 //   --no-own-css  (or PRESERVE_OWN_CSS=0) keep Squarespace's stylesheets instead of our own (own-css.mjs). Our own is
 //              the default for new copies since Jeremy's go-ahead 2026-10-19; turning it off is the rollback.
@@ -17,6 +18,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runGate } from './gate.mjs';
+import { loadPins } from './pins.mjs';
+import { aiEnabled, triagePins } from './ai-pins.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -110,6 +113,15 @@ function mergeVerdicts(vs) {
 let verdict;
 try {
   for (const p of pages) { verdict = await checkUrl(p); if (verdict) break; }
+  // A refinement with AI turned on: a model picks a fix for each of the person's pins first (ai-pins.mjs); capture and
+  // the quality check then read the picks from the same pins file.
+  if (!verdict && aiEnabled() && process.env.PRESERVE_VIEW_BASE && loadPins().length) {
+    const picked = await step('read-pins', () => triagePins(loadPins(), { liveUrl: url, preserveBase: process.env.PRESERVE_VIEW_BASE, dir: path.join(siteDir, 'pin-evidence') }));
+    const f = path.join(siteDir, 'pins-picked.json');
+    fs.writeFileSync(f, JSON.stringify(picked, null, 1));
+    process.env.PRESERVE_PINS = f;
+    job.pinPicks = picked.filter((p) => p.ai).map((p) => ({ block_id: p.block_id, ...p.ai }));
+  }
   if (!verdict) {
     for (const p of pages) await pageTask(p);
     verdict = await finish();
