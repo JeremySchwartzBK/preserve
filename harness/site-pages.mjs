@@ -15,8 +15,8 @@ fs.writeFileSync(path.join(outRoot, '_headers'), `/*\n  X-Robots-Tag: ${ROBOTS}\
 // training crawlers and archives are asked to stay out entirely.
 fs.writeFileSync(path.join(outRoot, 'robots.txt'), ['GPTBot', 'ChatGPT-User', 'CCBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'Applebot-Extended', 'PerplexityBot', 'Bytespider', 'Amazonbot', 'meta-externalagent', 'cohere-ai', 'Diffbot', 'ia_archiver', 'archive.org_bot'].map((b) => `User-agent: ${b}\nDisallow: /\n`).join('\n') + '\nUser-agent: *\nAllow: /\n');
 // The snippet picks the layout from the frame's own width before loading it, so the frame needs no extra round trip.
-export const snippet = (s) => `<div class="preserve-embed" style="position:relative;width:100%;aspect-ratio:16/10;max-height:90vh">
-<style>@media (max-width:767px){.preserve-embed{aspect-ratio:auto!important;height:78vh}}</style>
+export const snippet = (s) => `<style>.fe-block .sqs-block:has(.preserve-embed){position:relative}.fe-block .sqs-block:has(.preserve-embed) :has(.preserve-embed){position:static!important;padding:0!important;height:auto!important}.fe-block .preserve-embed{position:absolute!important;inset:0;height:auto!important;max-height:none!important}</style>
+<div class="preserve-embed" style="position:relative;width:100%;height:600px;max-height:90vh">
 <iframe title="Interactive preview of the ${NAMES[s] || s} website" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.15);background:#fff" loading="eager" referrerpolicy="no-referrer"></iframe>
 <script>(function(f){f.src='${pub}/${s}/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>
 </div>`;

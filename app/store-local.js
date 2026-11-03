@@ -71,8 +71,10 @@ export const store = {
   liveCount() { return db.copies.filter((c) => ['ready', 'paused'].includes(c.status)).length; },
   inUse() { return db.copies.filter((c) => !['archived', 'deleted', 'failed'].includes(c.status)).length; },
   link(c) { return `${VIEW}/${db.studio.slug}/${c.name}/`; },
+  // Fills the block it's pasted into on Squarespace (Fluid Engine rows grow but never shrink, so a box sized from its
+  // width left empty space); anywhere else, full width and 600 px tall. Tested on Jeremy's Squarespace page 2026-11-03.
   embed(c) {
-    return `<div style="position:relative;width:100%;aspect-ratio:16/10;max-height:90vh">\n<iframe title="Interactive preview of ${c.title}" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px" loading="eager" referrerpolicy="no-referrer"></iframe>\n<script>(function(f){f.src='${VIEW}/c/${c.id}/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>\n</div>`;
+    return `<style>.fe-block .sqs-block:has(.preserve-embed){position:relative}.fe-block .sqs-block:has(.preserve-embed) :has(.preserve-embed){position:static!important;padding:0!important;height:auto!important}.fe-block .preserve-embed{position:absolute!important;inset:0;height:auto!important;max-height:none!important}</style>\n<div class="preserve-embed" style="position:relative;width:100%;height:600px;max-height:90vh">\n<iframe title="Interactive preview of ${c.title}" style="position:absolute;inset:0;width:100%;height:100%;border:0;border-radius:10px" loading="eager" referrerpolicy="no-referrer"></iframe>\n<script>(function(f){f.src='${VIEW}/c/${c.id}/'+(f.parentNode.offsetWidth<768?'mobile':'desktop')})(document.currentScript.previousElementSibling)</script>\n</div>`;
   },
   rename(id, name) {
     name = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
