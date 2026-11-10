@@ -22,6 +22,7 @@
 # Runs after capture; the raw capture is left untouched. Usage: python3 google-fonts.py <siteDir>
 import sys, os, re, json, glob, hashlib, urllib.request, urllib.parse, urllib.error
 from fontTools.ttLib import TTFont
+from font_style import style_of, style_distance
 
 LIBRARY = re.compile(r'/fonts/libraries/sqsp/')
 ADOBE = re.compile(r'^https?://use\.typekit\.net/af/')
@@ -178,6 +179,9 @@ def kind_of(path, family):
         if f['post'].isFixedPitch or p.bProportion == 9: return 'mono'
         if p.bFamilyType == 3: return 'script'
         if p.bFamilyType == 2 and 2 <= p.bSerifStyle <= 10: return 'serif'
+        # No clue in the name, the styles or the file's classification: look at its letters (an I with feet has serifs).
+        st = style_of(f)
+        if st.get('serif') and st['serif'] > 1.4: return 'serif'
     except Exception: pass
     return 'sans'
 
@@ -226,7 +230,7 @@ def shape_of(f):
         if ord(c) not in cm: return 0
         p = BoundsPen(gs); gs[cm[ord(c)]].draw(p)
         return p.bounds[3] / upem if p.bounds else 0
-    return {'adv': {c: hm[cm[ord(c)]][0] / upem for c in list(FREQ) + list(UPPER) if ord(c) in cm}, 'xh': top('x'), 'ch': top('H')}
+    return {'adv': {c: hm[cm[ord(c)]][0] / upem for c in list(FREQ) + list(UPPER) if ord(c) in cm}, 'xh': top('x'), 'ch': top('H'), 'style': style_of(f)}
 
 def run_ratio(a, b, chars, weights=None):
     # How much longer a line of these letters is in a than in b, over the letters both have (Adobe files are subsets).
@@ -243,7 +247,7 @@ def caps_only(s):
 PICKED = {}  # family -> lookalike family, so every weight of a family gets the same lookalike
 
 def pick_family(kind, orig, used_weights=()):
-    # Closest in letter widths (lowercase in text proportions, then capitals) and heights; a family missing weights the
+    # Closest in letter widths (lowercase in text proportions, then capitals), heights and look; a family missing weights the
     # site uses loses points for each step it would have to fall back by.
     best = None
     for fam, p in POOL.items():
@@ -255,6 +259,8 @@ def pick_family(kind, orig, used_weights=()):
         if orig['xh'] and p['xh'] and not caps: d += 0.5 * ln(orig['xh'] / p['xh'])
         if orig['ch'] and p['ch']: d += 0.3 * ln(orig['ch'] / p['ch'])
         d += sum(0.03 * min(abs(w - a) for a in p['weights']) / 100 for w in used_weights if p.get('weights'))
+        # And how it looks: serifs, stroke contrast, heaviness (font_style.py), so a high-contrast display face gets one.
+        d += 0.35 * style_distance(orig.get('style') or {}, p.get('style') or {})
         if not best or d < best[0]: best = (d, fam)
     return best and best[1]
 
@@ -315,7 +321,9 @@ def stand_in(gfam, weight, style, f):
     # The face at the asked weight, else the nearest weight Google has, upright if it has no italic.
     w0 = int(float(weight.split()[0]))
     tries = [(w, st) for st in dict.fromkeys([style, 'normal']) for w in sorted(range(100, 1000, 100), key=lambda w: (abs(w - w0), w))]
-    for w, st in tries[:4] + tries[9:13]:
+    # Nearest weights first in the asked style, then upright; then any weight at all, so a lookalike family that only
+    # comes in one weight (DM Serif Display for myrtle-green's bold Blazeface, 2026-11-10) still stands in.
+    for w, st in tries[:4] + tries[9:13] + tries[4:9] + tries[13:]:
         rec = take(gfam, load(gfam, {(1 if st == 'italic' else 0, str(w))}), f, str(w), st)
         if rec: return rec
     return None

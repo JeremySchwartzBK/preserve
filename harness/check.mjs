@@ -333,6 +333,13 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const stuckList = await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => {
     // Hidden on purpose by an ancestor (closed menus, inactive slides) is not an animation that failed.
     for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; }
+    // Nor is a carousel's next slide, sticking out past the edge its carousel cuts at: Squarespace keeps those faded
+    // out live too until they slide in (colorize's summary carousels, 2026-11-10).
+    window.__pvOutside = window.__pvOutside || ((el) => { const r = el.getBoundingClientRect();
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const s = getComputedStyle(a);
+        if (/hidden|clip/.test(s.overflowX)) { const ar = a.getBoundingClientRect(); if (r.left < ar.left - 1 || r.right > ar.right + 1) return true; } }
+      return false; });
+    if (window.__pvOutside(e)) return false;
     let o = 1; for (let a = e; a; a = a.parentElement) o *= +getComputedStyle(a).opacity;
     return o < 0.1;
   }).map((e) => (e.className.toString() || e.tagName).slice(0, 60)));
@@ -342,7 +349,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   // review lists only fonts a visitor sees.
   out.fontsUsed = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => ({ family: f.family.replace(/^["']|["']$/g, ''), weight: f.weight, style: f.style })));
   // Positions are taken at the top of the page; block-relative positions don't depend on the scroll.
-  if (stuck) spot('blocks-stay-invisible', await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => { let o = 1; for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; o *= +s.opacity; } return o < 0.1; }).slice(0, 3).map((e) => window.__preserveAnchor(e))));
+  if (stuck) spot('blocks-stay-invisible', await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => { if (window.__pvOutside && window.__pvOutside(e)) return false; let o = 1; for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; o *= +s.opacity; } return o < 0.1; }).slice(0, 3).map((e) => window.__preserveAnchor(e))));
   spot('broken-images', await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').slice(0, 3).map((i) => window.__preserveAnchor(i))));
   // Blocks with their page positions, to place picture differences (measured later, after the browser closes).
   out.pageSize = await page.evaluate(() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight }));
