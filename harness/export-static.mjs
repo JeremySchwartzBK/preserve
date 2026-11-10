@@ -175,7 +175,10 @@ async function firstScreenBudget($, layout) {
     const webp = fs.readFileSync(path.join(outRoot, site, src));
     let size = webp.length;
     try {
-      const out = await sharp(webp, { animated: true }).avif({ quality: 60, effort: 3 }).toBuffer();
+      // Animated pictures stay WebP: AVIF here keeps no motion and writes every frame one under another as one tall
+      // picture, which showed as all of the frames stacked (potted plant's animated letters, 2026-11-10).
+      if (((await sharp(webp).metadata()).pages || 1) > 1) throw new Error('animated');
+      const out = await sharp(webp).avif({ quality: 60, effort: 3 }).toBuffer();
       if (out.length < webp.length * 0.9) {
         const name = crypto.createHash('sha1').update(out).digest('hex').slice(0, 12) + '.avif';
         if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), out); bytes += out.length; }
@@ -326,9 +329,11 @@ for (const layout of ['desktop', 'mobile']) {
     if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), buf); bytes += buf.length; }
     const style = ($(el).attr('style') || '').replace(/display\s*:\s*none;?/g, '');
     const cls = $(el).attr('class');
+    const follow = $(el).attr('data-preserve-follow');
+    const fx = $(el).attr('data-preserve-fx');
     // Laid over its section (the usual background effect): fill it at any width, not the capture width's pixels.
     const fill = /position\s*:\s*absolute/.test(style) ? ';left:0;top:0;width:100%;height:100%' : '';
-    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1">`);
+    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);
     stills.push({ layout, src: 'canvas', replaced: true });
   }
   // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):

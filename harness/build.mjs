@@ -219,6 +219,17 @@ function slide(d){clearTimeout(sub);var i=cur;if(d>0){do{i=(i+1)%n}while(!major(
 go(i);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j);more()},Math.min(wait(j),900))}})()}
 function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();slide(d);restart()},true)})}
 bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
+// Drag or swipe: Squarespace lets visitors slide carousels and slideshows with the mouse held down or a finger, so a
+// sideways drag of more than 40 pixels plays one step, like the arrow on that side. A drag doesn't count as a click.
+var sx=null,sy=0,moved=false;
+g.addEventListener('pointerdown',function(e){if(e.button)return;sx=e.clientX;sy=e.clientY;moved=false},true);
+g.addEventListener('pointermove',function(e){if(sx!==null&&Math.abs(e.clientX-sx)>8)moved=true},true);
+g.addEventListener('pointerup',function(e){if(sx===null)return;var dx=e.clientX-sx,dy=e.clientY-sy;sx=null;
+if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){slide(dx<0?1:-1);restart()}},true);
+g.addEventListener('pointercancel',function(){sx=null},true);
+g.addEventListener('click',function(e){if(moved){e.preventDefault();e.stopImmediatePropagation();moved=false}},true);
+g.addEventListener('dragstart',function(e){e.preventDefault()},true);
+if(!g.style.touchAction)g.style.touchAction='pan-y';
 var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(function(){if(cur)draw(cur,false)},60)});
 restart();
 });
@@ -275,6 +286,47 @@ items.forEach(function(it,k){it.addEventListener('mouseenter',function(){show(k)
 var list=root.querySelector('.portfolio-hover-items')||root;list.addEventListener('mouseleave',function(){show(-1)});
 if(follow){var host=box.parentElement||root;root.addEventListener('mousemove',function(e){var r=host.getBoundingClientRect();box.style.transform='translate3d('+(e.clientX-r.left-box.offsetWidth/2)+'px,'+(e.clientY-r.top-box.offsetHeight/2)+'px,0)'})}
 show(-1)});
+})();</script>`;
+
+// Squarespace's radial gradient background set to follow the pointer (backbipoc's orange glow, 2026-11-10): capture
+// keeps a still of the glow where it sat and its settings (capture.mjs canvasStills, data-pv-follow). Ours lays a CSS
+// gradient over the still the first time the pointer moves in the section, drawn to match it (the same colours, a
+// radius of the setting's percent of the section's shorter side, a smooth fall-off, the position measured from the
+// bottom left as Squarespace does), then eases the glow to the pointer. Until then the still shows, as it looked.
+const FOLLOW_SCRIPT = `<script id="preserve-follow">(function(){
+var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+document.querySelectorAll('img[data-pv-follow]').forEach(function(im){
+var c;try{c=JSON.parse(im.getAttribute('data-pv-follow'))}catch(e){return}
+function rgb(s){var m=String(s).match(/[\\d.]+/g)||[];return[+m[0]||0,+m[1]||0,+m[2]||0,m[3]==null?1:+m[3]]}
+var a=rgb(c.c0),b=rgb(c.c1);if(c.inv){var t=a;a=b;b=t}
+function mix(t){t=t*t*(3-2*t);return'rgba('+[0,1,2].map(function(k){return Math.round(a[k]+(b[k]-a[k])*t)}).join(',')+','+(a[3]+(b[3]-a[3])*t).toFixed(3)+')'}
+var stops=[];for(var i=0;i<=8;i++)stops.push(mix(i/8)+' '+(i*12.5)+'%');stops=stops.join(',');
+var d=document.createElement('div');if(im.className)d.className=im.className;d.setAttribute('style',im.getAttribute('style')||'');d.setAttribute('aria-hidden','true');
+d.style.opacity='0';d.style.pointerEvents='none';im.parentNode.insertBefore(d,im.nextSibling);
+var host=im.closest('section')||im.parentNode,px=(c.x||0)/100,py=1-(c.y||0)/100,tx=px,ty=py,on=false,raf=0,k=reduce?1:Math.min(1,0.04+0.16*(c.s==null?100:c.s)/100);
+function paint(){var r=d.getBoundingClientRect(),R=Math.max(1,Math.min(r.width,r.height)*(c.r||30)/100);
+d.style.background='radial-gradient(circle '+R.toFixed(1)+'px at '+(px*r.width).toFixed(1)+'px '+(py*r.height).toFixed(1)+'px,'+stops+')'}
+function step(){raf=0;px+=(tx-px)*k;py+=(ty-py)*k;if(Math.abs(tx-px)<0.0005&&Math.abs(ty-py)<0.0005){px=tx;py=ty}paint();if(px!==tx||py!==ty)raf=requestAnimationFrame(step)}
+host.addEventListener('pointermove',function(e){var r=d.getBoundingClientRect();if(!r.width||!r.height)return;
+tx=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));ty=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+if(!on){on=true;paint();d.style.opacity='1';im.style.visibility='hidden'}if(!raf)raf=requestAnimationFrame(step)});
+addEventListener('resize',function(){if(on)paint()})});
+})();</script>`;
+
+// Squarespace's "film grain" image effect (field theory, 2026-11-10): the picture under a fine noise that flickers. The
+// capture keeps the picture with one frame of grain in it (data-pv-fx="film-grain"); ours lays a few frames of our own
+// noise over it (made here from a fixed seed, so every visit is the same) and steps through them, so it flickers as
+// live. Still for visitors who ask for less motion and while our checks compare pictures.
+const GRAIN_SCRIPT = `<script id="preserve-grain">(function(){
+var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches,S=160,N=6,seed=7,urls=[];
+function rnd(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff}
+for(var f=0;f<N;f++){var cv=document.createElement('canvas');cv.width=cv.height=S;var x=cv.getContext('2d');if(!x)return;var im=x.createImageData(S,S);
+for(var i=0;i<im.data.length;i+=4){var v=rnd()*255|0;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255}x.putImageData(im,0,0);urls.push(cv.toDataURL())}
+var layers=[];document.querySelectorAll('img[data-pv-fx="film-grain"]').forEach(function(im){var d=document.createElement('div');if(im.className)d.className=im.className;
+d.setAttribute('style',im.getAttribute('style')||'');d.setAttribute('aria-hidden','true');d.style.pointerEvents='none';d.style.objectFit='';
+d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S/2+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.08';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
+if(!layers.length||reduce)return;var k=0;
+setInterval(function(){if(window.__pvStill||document.hidden)return;k=(k+1)%N;layers.forEach(function(d){d.style.backgroundImage='url('+urls[k]+')'})},90);
 })();</script>`;
 
 // Width and height capture added to images that had none (capture.mjs: so a lazy image has its shape before it loads).
@@ -417,7 +469,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -485,6 +537,8 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if (outName !== 'index.html' && padded.length) { padded.forEach((x) => x.attr('data-pv-hpad', '')); $('body').append(HEADER_PAD_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width)); }
       if (outName !== 'index.html' && $('[style*="--image-component-container-height"]').length) $('body').append(FLUID_IMAGE_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
       if ($('img[data-pv-dims]').length) $('body').append(DIMS_SCRIPT);
+      if ($('canvas[data-preserve-follow], img[data-pv-follow]').length) $('body').append(FOLLOW_SCRIPT);
+      if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
     }

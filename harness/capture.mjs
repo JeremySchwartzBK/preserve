@@ -244,6 +244,29 @@ async function canvasStills(page, outDir, prof, info) {
       if (!url || url.length < 200) continue;
       c.setAttribute('data-preserve-canvas', String(out.length));
       out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
+      // Squarespace's radial gradient background that follows the pointer: its settings, with colours resolved, so
+      // our stand-in (build.mjs FOLLOW_SCRIPT) can move the glow the way the site does.
+      try {
+        const sec = c.closest('[data-current-styles]');
+        const g = sec && JSON.parse(sec.getAttribute('data-current-styles')).generative;
+        if (g && g.gradientType === 'radial' && g.radialGradientFollowCursor) {
+          const col = (v) => {
+            if (!v) return null;
+            const a = v.sitePaletteColor ? v.sitePaletteColor.alpha : (v.alpha ?? 1);
+            let hsl = null;
+            if (v.sitePaletteColor) hsl = getComputedStyle(sec).getPropertyValue(`--${v.sitePaletteColor.id}-hsl`).trim();
+            else if (v.customColor || v.hsl) { const h = v.customColor || v.hsl; hsl = `${h.hue},${h.saturation}%,${h.lightness}%`; }
+            if (!hsl) return null;
+            const t = document.createElement('i'); t.style.color = `hsla(${hsl},${a})`; document.body.appendChild(t);
+            const rgb = getComputedStyle(t).color; t.remove(); return rgb;
+          };
+          const c0 = col(g.startColor), c1 = col(g.endColor);
+          if (c0 && c1) c.setAttribute('data-preserve-follow', JSON.stringify({ c0, c1, r: g.radialGradientRadius ?? 30, x: g.radialGradientPositionX ?? 50, y: g.radialGradientPositionY ?? 50, s: g.radialGradientFollowSpeed ?? 100, inv: !!g.invertColors }));
+        }
+      } catch {}
+      // Squarespace's image effects (film grain, liquid, refracted...): the effect's name, for a stand-in where we have one.
+      const fx = c.closest('[data-controller^="BackgroundImageFX"]');
+      if (fx) c.setAttribute('data-preserve-fx', fx.getAttribute('data-controller').replace('BackgroundImageFX', '').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase());
     }
     return out;
   });
