@@ -65,6 +65,11 @@ P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'
 
 // Visitors' Tour and Credits: the copy's notes (KV tour:<id>, written by the runner from the app's database) plus the
 // small tour script (R2 platform/tour.js). Not added in the app's frame, which draws its own pins.
+// Embeds shrink a Preserve to fit (a desktop layout on a phone is about a quarter size). The embed code tells the page
+// its scale ({type:'preserve-scale',scale}); this grows our own small UI back to normal size: the "preview copy" toast
+// (baked into each page by harness/build.mjs, found by its role and z-index) and the tour's pill, panel and cards. Uses
+// the separate `scale` property so the toast's own transforms still work. Visitor pages only; the captured page is untouched.
+const FRAME_SCALE = `<style id="preserve-frame-scale-css">.preserve-scaled .preserve-toast{scale:var(--preserve-k);transform-origin:0 100%;box-sizing:border-box;bottom:calc(24px * var(--preserve-k))!important;max-width:calc(90vw / var(--preserve-k))!important}.preserve-scaled .pt-pill{scale:var(--preserve-k);transform-origin:0 100%}.preserve-scaled .pt-panel{scale:var(--preserve-k);transform-origin:0 100%;bottom:calc(12px + 50px * var(--preserve-k));max-height:calc((100vh - 24px) / var(--preserve-k) - 62px)}.preserve-scaled .pt-card{scale:var(--preserve-k);transform-origin:0 0;max-width:calc((100vw - 24px) / var(--preserve-k))}</style><script id="preserve-frame-scale">(function(){if(window.top===window)return;var d=document.documentElement;function mark(n){if(n.nodeType===1&&n.getAttribute('role')==='status'&&n.style.zIndex==='2147483647')n.classList.add('preserve-toast')}addEventListener('message',function(e){var m=e.data;if(e.source!==parent||!m||m.type!=='preserve-scale')return;var k=1/Math.min(1,Math.max(.1,+m.scale||1));d.style.setProperty('--preserve-k',k);d.classList.toggle('preserve-scaled',k>1.01)});[].forEach.call(document.body.children,mark);new MutationObserver(function(r){r.forEach(function(x){[].forEach.call(x.addedNodes,mark)})}).observe(document.body,{childList:true})})()</script>`;
 const tourTags = (data) => `<script id="preserve-tour-data" type="application/json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script><script src="/_p/tour.js" defer></script>`;
 
 // Font choices from review (KV fonts:<id>, written by the runner, schema-fonts.sql): the lookalike or the person's
@@ -142,8 +147,8 @@ async function serveCopy(req, env, ctx, id, rest) {
     // Tour stops belong to a page (credits are for the whole copy): show only this page's stops.
     if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
     const hasTour = tour && ((tour.spots || []).length || (tour.credits || []).length);
-    if (hasTour || fontCss) {
-      const html = text.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + '</body>');
+    if (file.endsWith('.html') || hasTour || fontCss) {
+      const html = text.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + (file.endsWith('.html') ? FRAME_SCALE : '') + '</body>');
       return new Response(html, { headers: h });
     }
   }
