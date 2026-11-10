@@ -20,6 +20,10 @@ const srv = await startServer(siteDir, 0, serverVariants());
 const port = srv.port;
 const base = `http://127.0.0.1:${port}`;
 const assetDir = path.join(outRoot, site, 'a');
+// The live site's address, for files the page uses that the capture never fetched: Squarespace serves files an owner
+// uploads ("Link to file") at site-relative addresses like /s/logo.svg, which only redirect to its file storage.
+let sourceOrigin = null;
+try { sourceOrigin = new URL(JSON.parse(fs.readFileSync(path.join(siteDir, 'capture-info.json'), 'utf8')).finalUrl).origin; } catch {}
 fs.mkdirSync(assetDir, { recursive: true });
 
 const EXT = { 'image/webp': 'webp', 'image/avif': 'avif', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/svg+xml': 'svg', 'text/css': 'css', 'font/woff2': 'woff2', 'font/woff': 'woff', 'font/ttf': 'ttf', 'font/otf': 'otf', 'video/mp4': 'mp4', 'video/webm': 'webm', 'application/javascript': 'js', 'text/javascript': 'js', 'image/x-icon': 'ico', 'image/vnd.microsoft.icon': 'ico' };
@@ -31,8 +35,17 @@ let bytes = 0;
 function asset(abs) {
   abs = abs.split('#')[0];
   if (!memo.has(abs)) memo.set(abs, (async () => {
-    const r = await fetch(abs, { headers: { accept: 'image/webp,image/*,*/*;q=0.8', 'accept-encoding': 'identity' } }).catch(() => null);
-    if (!r || !r.ok) { misses.push(abs.replace(base, '')); return null; }
+    const get = (u) => fetch(u, { headers: { accept: 'image/webp,image/*,*/*;q=0.8', 'accept-encoding': 'identity' } }).catch(() => null);
+    let r = await get(abs);
+    // Not in the capture: a same-site file (an owner upload such as /s/stamp.svg). Fetch it from the live site, but
+    // only files a page displays (images, fonts, video, stylesheets); a linked document is not part of the look.
+    const local = abs.slice(base.length);
+    if ((!r || !r.ok) && sourceOrigin && !local.startsWith(`/${VARIANT}/`)) {
+      const live = await get(sourceOrigin + local);
+      const lct = live?.ok ? (live.headers.get('content-type') || '') : '';
+      if (/^(image|font|video)\/|css/.test(lct)) r = live;
+    }
+    if (!r || !r.ok) { misses.push(local); return null; }
     const ct = (r.headers.get('content-type') || '').split(';')[0].trim();
     let buf = Buffer.from(await r.arrayBuffer());
     if (/css/.test(ct)) buf = Buffer.from(await localizeCss(buf.toString('utf8'), abs, '')); // stylesheets sit in a/ beside what they use
@@ -55,7 +68,10 @@ async function ref(u, from, pfx = 'a/') {
   if (!abs.startsWith(base + '/')) return u;
   const hash = abs.includes('#') ? abs.slice(abs.indexOf('#')) : '';
   const p = await asset(abs);
-  return p ? pfx + p + hash : u;
+  if (p) return pfx + p + hash;
+  // Never leave the capture server's address in a copy: a file we couldn't get becomes an empty one (the element keeps
+  // its size), and a site-relative link stays site-relative.
+  return u.trim().startsWith(base) ? (/\.(css|js)$/i.test(new URL(abs).pathname) ? '' : 'data:,') : u;
 }
 
 async function localizeCss(css, from, pfx = 'a/') {
@@ -96,13 +112,17 @@ async function embedStills(layout, pageUrl) {
   const frames = await page.$$('iframe');
   for (const f of frames) {
     const src = (await f.getAttribute('src')) || '';
-    let ext = false; try { ext = new URL(src, pageUrl).origin !== base; } catch {}
+    // A frame from another site: either its own address, or our capture's copy of it (/frozen-opt/x/<host>/...).
+    let ext = false; try { const fu = new URL(src, pageUrl); ext = fu.origin !== base || fu.pathname.startsWith(`/${VARIANT}/x/`); } catch {}
     if (!ext) { out.push(null); continue; }
     await f.scrollIntoViewIfNeeded().catch(() => {}); await sleep(4000);
     // Fixed headers and badges would otherwise land in the photo.
     await page.evaluate(() => { for (const el of document.querySelectorAll('body *')) if (getComputedStyle(el).position === 'fixed') el.style.visibility = 'hidden'; });
     const box = await f.boundingBox();
-    const shot = box && box.width > 2 && box.height > 2 ? await f.screenshot({ timeout: 15000 }).catch(() => null) : null;
+    // A bot check instead of the widget (our capture browser was stopped) is not what visitors saw: keep the box empty.
+    const text = await (await f.contentFrame().catch(() => null))?.evaluate(() => document.body?.innerText || '').catch(() => '') || '';
+    const blocked = /verifying (?:you are human|your browser)|checking your browser|security checkpoint|are you (?:a )?(?:robot|human)|just a moment\.\.\.|captcha/i.test(text.slice(0, 2000));
+    const shot = !blocked && box && box.width > 2 && box.height > 2 ? await f.screenshot({ timeout: 15000 }).catch(() => null) : null;
     // A widget that didn't draw (bot checks often stop it in our capture browser) keeps its space as an empty box.
     const st = shot && (await sharp(shot).greyscale().stats()).channels[0];
     if (!shot || st.max - st.min < 12) { out.push({ src, file: null, w: Math.round(box?.width || 0), h: Math.round(box?.height || 0) }); continue; }
@@ -157,7 +177,10 @@ async function firstScreenBudget($, layout) {
 // visitor scrolls near them. A video the browser can't autoplay stays on its poster, as it would on the live site.
 const MEDIA_SCRIPT = `<script id="preserve-media">(function(){
 var vs=[].slice.call(document.querySelectorAll('video[data-pv-defer]'));
-function go(v){if(v.__pv)return;v.__pv=1;[].forEach.call(v.querySelectorAll('source[data-pv-src]'),function(s){s.src=s.getAttribute('data-pv-src');s.removeAttribute('data-pv-src')});v.preload='auto';v.load();if(v.hasAttribute('autoplay')){var p=v.play();if(p&&p.catch)p.catch(function(){})}}
+// Some players lay a still over the video and hide it once the video plays (Squarespace's own script did that); hide
+// any image covering the video when it really starts, so the still never sits on top of a playing video.
+function cover(v){var r=v.getBoundingClientRect(),c=v.parentElement;for(var i=0;i<4&&c&&c.parentElement;i++)c=c.parentElement;if(!c||!r.width)return;[].forEach.call(c.querySelectorAll('img'),function(im){var b=im.getBoundingClientRect(),w=Math.min(b.right,r.right)-Math.max(b.left,r.left),h=Math.min(b.bottom,r.bottom)-Math.max(b.top,r.top);if(w>0&&h>0&&w*h>=0.8*r.width*r.height&&!im.contains(v))im.style.visibility='hidden'})}
+function go(v){if(v.__pv)return;v.__pv=1;v.addEventListener('playing',function(){cover(v)},{once:true});[].forEach.call(v.querySelectorAll('source[data-pv-src]'),function(s){s.src=s.getAttribute('data-pv-src');s.removeAttribute('data-pv-src')});v.preload='auto';v.load();if(v.hasAttribute('autoplay')){var p=v.play();if(p&&p.catch)p.catch(function(){})}}
 function start(){var io='IntersectionObserver' in window?new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){io.unobserve(e.target);go(e.target)}})},{rootMargin:'50% 0px'}):null;vs.forEach(function(v){io?io.observe(v):go(v)})}
 function later(){setTimeout(start,0)}
 if(document.readyState==='complete')later();else addEventListener('load',later);
@@ -288,6 +311,7 @@ for (const layout of ['desktop', 'mobile']) {
     for (const [a, v] of Object.entries(el.attribs || {})) {
       if (a === 'srcset' || a === 'imagesrcset') $(el).attr(a, await srcset(v, pageUrl));
       else if (a === 'style' && v.includes('url(')) $(el).attr(a, await localizeCss(v, pageUrl));
+      else if (a === 'src' && el.tagName === 'iframe') continue; // frames are photographed above, never saved as files
       else if (a === 'src' || a === 'poster' || a === 'data-pv-src' || ((a === 'href' || a === 'xlink:href') && (el.tagName === 'link' || el.tagName === 'use' || el.tagName === 'image'))) $(el).attr(a, await ref(v, pageUrl));
       // Leftover pointers for Squarespace's loaders (data-src, data-image...) do nothing without its scripts.
       else if (/^data-/.test(a) && v.includes(`/${VARIANT}/x/`)) $(el).attr(a, '');
