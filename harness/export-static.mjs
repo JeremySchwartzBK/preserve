@@ -36,6 +36,13 @@ function asset(abs) {
   abs = abs.split('#')[0];
   if (!memo.has(abs)) memo.set(abs, (async () => {
     const get = (u) => fetch(u, { headers: { accept: 'image/webp,image/*,*/*;q=0.8', 'accept-encoding': 'identity' } }).catch(() => null);
+    // An owner upload named by the site's own Squarespace address (https://<site>.squarespace.com/s/logo.svg, littleripper
+    // 2026-11-10): fetched from there now, displayable files only, like a same-site file the capture missed below.
+    if (OWNER_UPLOAD.test(abs)) {
+      const live = await get(abs);
+      const lct = live?.ok ? (live.headers.get('content-type') || '') : '';
+      return /^(image|font|video)\//.test(lct) ? keep(abs, live) : (misses.push(abs), null);
+    }
     let r = await get(abs);
     // Not in the capture: a same-site file (an owner upload such as /s/stamp.svg). Fetch it from the live site, but
     // only files a page displays (images, fonts, video, stylesheets); a linked document is not part of the look.
@@ -46,6 +53,13 @@ function asset(abs) {
       if (/^(image|font|video)\/|css/.test(lct)) r = live;
     }
     if (!r || !r.ok) { misses.push(local); return null; }
+    return keep(abs, r);
+  })());
+  return memo.get(abs);
+}
+const OWNER_UPLOAD = /^https:\/\/(?!static|images|assets|www\.)[\w-]+\.squarespace\.com\/s\/[^?#]+\.(?:svg|png|jpe?g|gif|webp|avif|woff2?|ttf|otf|mp4|webm)(?:\?|$)/i;
+async function keep(abs, r) {
+  {
     const ct = (r.headers.get('content-type') || '').split(';')[0].trim();
     let buf = Buffer.from(await r.arrayBuffer());
     if (/css/.test(ct)) buf = Buffer.from(await localizeCss(buf.toString('utf8'), abs, '')); // stylesheets sit in a/ beside what they use
@@ -55,8 +69,7 @@ function asset(abs) {
     const p = path.join(assetDir, name);
     if (!fs.existsSync(p)) { fs.writeFileSync(p, buf); bytes += buf.length; }
     return name;
-  })());
-  return memo.get(abs);
+  }
 }
 
 // A reference found in the page or a stylesheet -> its path relative to where it is used (pages: a/<file>; stylesheets,
@@ -65,6 +78,7 @@ function asset(abs) {
 async function ref(u, from, pfx = 'a/') {
   if (!u || /^(data:|#|about:|javascript:|mailto:|tel:)/i.test(u.trim())) return u;
   let abs; try { abs = new URL(u.trim(), from).href; } catch { return u; }
+  if (OWNER_UPLOAD.test(abs)) { const p = await asset(abs); return p ? pfx + p : u; }
   if (!abs.startsWith(base + '/')) return u;
   const hash = abs.includes('#') ? abs.slice(abs.indexOf('#')) : '';
   const p = await asset(abs);
