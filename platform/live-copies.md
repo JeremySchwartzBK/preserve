@@ -18,7 +18,7 @@ scaled to fit, never reflowed: desktop at 1440 px when the box is 1024 px or wid
 confirmed v5 on his Squarespace page, 2026-11-03; thread "Fix embed height on Squarespace").
 
 ```html
-<style>.fe-block .sqs-block:has(.preserve-embed){position:relative}.fe-block .sqs-block:has(.preserve-embed) :has(.preserve-embed){position:static!important;padding:0!important;height:auto!important}.fe-block .preserve-embed{position:absolute!important;inset:0;height:auto!important;max-height:none!important}.preserve-embed-min{display:none}@media (max-width:767px){.fe-block .preserve-embed-min{display:block;height:70vh}}</style>
+<style>.fe-block .sqs-block:has(.preserve-embed){position:relative}.fe-block .sqs-block:has(.preserve-embed) :has(.preserve-embed){position:static!important;padding:0!important;height:auto!important}.fe-block .preserve-embed{position:absolute!important;inset:0;height:auto!important;max-height:none!important}.preserve-embed-min{display:none}@media (max-width:767px){.fe-block .preserve-embed-min{display:block;height:70svh}.preserve-embed,.fe-block .preserve-embed{max-height:85svh!important}}</style>
 <div class="preserve-embed-min"></div>
 <div class="preserve-embed" style="position:relative;width:100%;height:600px;max-height:90vh;overflow:hidden;border-radius:10px">
 <iframe title="Interactive website preview" style="position:absolute;top:0;left:0;border:0;transform-origin:0 0" loading="eager" referrerpolicy="no-referrer"></iframe>

@@ -49,6 +49,17 @@ function confirmCard({ title, body, ok, cancel = 'Cancel', danger }) {
     dlg.showModal();
   });
 }
+// "Copy embed code": three codes. Desktop and Phone always show that layout (a case-study page can show both); Auto
+// picks by the frame's width.
+function embedCard(c) {
+  const dlg = $('#cdlg');
+  dlg.innerHTML = `<form method="dialog"><h2>Copy embed code</h2><p class="sub">Paste it where you want the Preserve to appear. Desktop and Phone always show that layout, scaled to fit, whatever the visitor’s screen. Auto shows desktop in wide spaces and phone in narrow ones.</p>
+    <div class="row" style="flex-wrap:wrap"><button class="btn small" value="desktop">Desktop embed</button><button class="btn small" value="phone">Phone embed</button><button class="btn small secondary" value="auto">Auto embed</button></div>
+    <div class="row end"><button class="btn secondary" value="">Cancel</button></div></form>`;
+  dlg.returnValue = '';
+  dlg.onclose = () => { const l = dlg.returnValue; if (l) copyText(store.embed(c, l), `${l[0].toUpperCase()}${l.slice(1)} embed code`); if (routeWaiting) { routeWaiting = false; setTimeout(route); } };
+  dlg.showModal();
+}
 const confirmDelete = () => confirmCard({ title: 'Confirm Deletion', body: 'Once a Preserve is deleted it can’t be recovered and its links and embed codes will stop working.', ok: 'Delete', danger: true });
 
 // 1. Sign in ---------------------------------------------------------------------------------------------------
@@ -104,7 +115,7 @@ function drawList() {
   $('#pager').innerHTML = pages > 1 ? `<button class="btn small secondary" data-pg="-1" ${dash.page ? '' : 'disabled'}>← Newer</button><span class="sub">Page ${dash.page + 1} of ${pages}</span><button class="btn small secondary" data-pg="1" ${dash.page < pages - 1 ? '' : 'disabled'}>Older →</button>` : '';
   app.querySelectorAll('[data-pg]').forEach((b) => (b.onclick = () => { dash.page += +b.dataset.pg; drawList(); scrollTo(0, 0); }));
   app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
-  app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => copyText(store.embed(store.copy(b.dataset.embed)), 'Embed code')));
+  app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => embedCard(store.copy(b.dataset.embed))));
   app.querySelectorAll('[data-live]').forEach((b) => (b.onchange = async () => {
     const err = await store.setStatus(b.dataset.live, b.checked ? 'ready' : 'archived');
     if (err) { b.checked = !b.checked; toast(err); } else toast(b.checked ? 'Live again' : 'Archived. Its link now shows “preview paused”.');
@@ -449,7 +460,7 @@ function panel(c, review) {
   on('#refine', () => store.refine(id));
   on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
-  on('#ce', () => copyText(store.embed(c), 'Embed code'));
+  on('#ce', () => embedCard(c));
   on('#addcr', () => { const row = document.createElement('div'); row.innerHTML = credRow(null); $('#crl').appendChild(row.firstElementChild); wireCred(id); row.remove(); $('#crl').lastElementChild.querySelector('input').focus(); });
   wireCred(id);
   const nm = $('#nm');
