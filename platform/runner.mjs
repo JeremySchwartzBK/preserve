@@ -17,7 +17,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { cloudflareStore, uploadPages, setCopy, setNames } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 
@@ -266,6 +267,7 @@ async function main() {
         coalesce((select jsonb_agg(jsonb_build_object('role', coalesce(p.meta->>'role', ''), 'name', p.body, 'url', p.meta->>'url') order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'credit'), '[]') as credits
       from copy c join studio s on s.id = c.studio_id ${ids ? `where c.id in (${ids.map(lit).join(',')})` : ''}`);
+    let stills = 0;
     for (const r of rows) {
       if (!r.latest) continue;
       const status = r.status === 'ready' ? 'live' : ['paused', 'archived'].includes(r.status) && r.live_version ? 'paused' : 'review';
@@ -277,9 +279,12 @@ async function main() {
       const sv = r.stored?.[v] || {};
       const layout = sv.fmt === 2 ? { fmt: 2, pages: Object.fromEntries((sv.pages || []).map((p) => [p.path, p.page_id])) } : {};
       const swaps = fontSwaps(sv.fonts, r.font_choices, r.studio_fonts);
-      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null };
+      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null, still: r.served?.still };
       const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((m, kk) => ((m[kk] = v[kk]), m), {}) : v));  // key order differs once stored as jsonb
-      if (canon(want) === canon(r.served)) continue;
+      // A live Preserve needs its desktop still (what the Desktop embed shows on phones). Made once per version, a few
+      // per pass, so the hourly sweep also fills in Preserves made before stills existed.
+      const needStill = status === 'live' && want.still !== v && stills < 10;
+      if (canon(want) === canon(r.served) && !needStill) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
       if (canon(want.tour) !== canon(r.served?.tour ?? null)) await (want.tour ? store.kvPut(`tour:${r.id}`, want.tour) : store.kvDel(`tour:${r.id}`).catch(() => {}));
@@ -291,6 +296,17 @@ async function main() {
           if (row?.b64) await store.put(`copies/${r.id}/a/${row.asset}`, Buffer.from(row.b64, 'base64'), 'font/woff2');
         }
         await (want.fonts ? store.kvPut(`fonts:${r.id}`, want.fonts.map(({ studioFont, ...x }) => x)) : store.kvDel(`fonts:${r.id}`).catch(() => {}));
+      }
+      if (needStill) {
+        stills++;
+        try {
+          const tmp = path.join(os.tmpdir(), `still-${r.id}.webp`);
+          if (layout.fmt === 2 && !layout.pages['']) throw new Error('no entry page');
+          await promisify(execFile)('node', ['desktop-still.mjs', `${VIEW_BASE}/c/${r.id}/desktop`, tmp], { cwd: HARNESS, timeout: 120e3 });
+          await store.put(layout.fmt === 2 ? `copies/${r.id}/v${v}/p/${layout.pages['']}/desktop-still.webp` : `copies/${r.id}/v${v}/desktop-still.webp`, fs.readFileSync(tmp), 'image/webp');
+          fs.rmSync(tmp, { force: true });
+          want.still = v;
+        } catch (e) { log('still-failed', r.id, String(e.message).slice(0, 200)); }
       }
       await sql(`update copy set served = ${lit(JSON.stringify(want))}::jsonb where id = ${lit(r.id)}`);
       log('served', r.id, status, 'v' + want.v, r.name || '');

@@ -94,6 +94,14 @@ async function serveCopy(req, env, ctx, id, rest) {
   const inReview = rec.status === 'review' && (asset || url(req).searchParams.has('review'));
   if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
 
+  // The desktop still (desktop-still.mjs, made by the runner when a Preserve goes live): what the Desktop embed shows
+  // on phones and tablets, which can't run a live 1440-wide page in a frame.
+  if (rest === 'desktop-still.webp') {
+    const sk = rec.fmt === 2 ? `copies/${id}/v${rec.v}/p/${(rec.pages || {})['']}/desktop-still.webp` : `copies/${id}/v${rec.v}/desktop-still.webp`;
+    const so = await env.COPIES.get(sk);
+    if (!so) return new Response(null, { status: 404 });
+    return new Response(so.body, { headers: { 'content-type': 'image/webp', 'cache-control': 'public, max-age=3600', 'x-robots-tag': ROBOTS, 'access-control-allow-origin': '*' } });
+  }
   let key, vary = false, pageId = null;
   if (rec.fmt === 2) {
     if (sharedFile) key = `copies/${id}/a/${sharedFile[1]}`;
@@ -142,17 +150,24 @@ async function serveCopy(req, env, ctx, id, rest) {
     const html = text.replace(/<\/body>/i, fontCss + REVIEW_BRIDGE + '</body>');
     return new Response(html, { headers: h });
   }
+  // ?full=1 on a desktop page (opened from the Desktop embed on a phone): lay it out 1440 wide whatever the screen, so
+  // a phone shows the real desktop layout shrunk to fit. Only the viewport tag changes; the page stays as captured.
+  let body = text;
+  if (!asset && /\/desktop\.html$/.test(key) && url(req).searchParams.get('full') === '1') {
+    const vp = '<meta name="viewport" content="width=1440">';
+    body = /<meta[^>]+name=["']?viewport["']?[^>]*>/i.test(body) ? body.replace(/<meta[^>]+name=["']?viewport["']?[^>]*>/i, vp) : body.replace(/<head[^>]*>/i, (m) => m + vp);
+  }
   if (!asset) {
     const tour = await lookup(env, `tour:${id}`);
     // Tour stops belong to a page (credits are for the whole copy): show only this page's stops.
     if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
     const hasTour = tour && ((tour.spots || []).length || (tour.credits || []).length);
     if (file.endsWith('.html') || hasTour || fontCss) {
-      const html = text.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + (file.endsWith('.html') ? FRAME_SCALE : '') + '</body>');
+      const html = body.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + (file.endsWith('.html') ? FRAME_SCALE : '') + '</body>');
       return new Response(html, { headers: h });
     }
   }
-  const res = new Response(asset ? obj.body : text, { headers: h });
+  const res = new Response(asset ? obj.body : body, { headers: h });
   if (asset) { ctx.waitUntil(cache.put(cacheKey, res.clone())); }
   return withRange(req, res);
 }
