@@ -1,4 +1,4 @@
-// The desktop still: a picture of the top of a Preserve's desktop layout (1440 wide, about two screens), as WebP.
+// The desktop still: a picture of the top of a Preserve's desktop layout (1440 wide, about three screens), as WebP.
 // The Desktop embed shows it on phones and tablets, which can't run a live 1440-wide page in a frame; tapping it opens
 // the full-screen desktop view. The runner makes it from the served page when a Preserve goes live (fonts as chosen
 // at review, no tour), so it shows what visitors see.
@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import sharp from 'sharp';
 import fs from 'node:fs';
 
-const W = 1440, H = 900, SCREENS = 2;
+const W = 1440, H = 900, SCREENS = 3;  // three screens: tall enough to fill a phone-shaped embed at full width
 
 export async function desktopStill(url, out) {
   const browser = await chromium.launch();
