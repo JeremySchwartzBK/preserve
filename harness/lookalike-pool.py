@@ -1,9 +1,10 @@
 # Builds lookalike-pool.json: the open Google Fonts families google-fonts.py may pick as a lookalike, with each one's
-# per-letter widths, x-height and cap height at weight 400 (per em). google-fonts.py measures the font being replaced
+# per-letter widths, x-height and cap height at weight 400 (per em), and its style measures (font_style.py). google-fonts.py measures the font being replaced
 # the same way and picks the family whose letters run closest in width and height, so a condensed face gets a condensed
 # lookalike, a wide one a wide one, a serif a serif. Re-run after editing POOL: python3 lookalike-pool.py
 import io, json, re, urllib.request
 from fontTools.ttLib import TTFont
+from font_style import style_of
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36'
 CHARS = ' abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 POOL = {
@@ -28,7 +29,7 @@ def measure(f):
         if ord(c) not in cm: return 0
         p = BoundsPen(gs); gs[cm[ord(c)]].draw(p)
         return round(p.bounds[3] / upem, 4) if p.bounds else 0
-    return {'adv': adv, 'xh': top('x'), 'ch': top('H')}
+    return {'adv': adv, 'xh': top('x'), 'ch': top('H'), 'style': style_of(f)}
 
 def weights(fam):
     # The upright weights Google has for the family, so a site using Light and Bold gets a family that has both.
