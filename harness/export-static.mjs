@@ -295,6 +295,21 @@ for (const layout of ['desktop', 'mobile']) {
     $(el).replaceWith(pic);
     stills.push({ layout, src: 'web component', replaced: true });
   }
+  // Canvas drawings photographed during capture (capture.mjs canvasStills): a picture with the canvas's own place and
+  // size (its style and classes carried over), so a section background effect shows as it looked.
+  for (const el of $('canvas[data-preserve-canvas]').toArray()) {
+    const f = path.join(siteDir, 'stills', $(el).attr('data-preserve-canvas'));
+    if (!fs.existsSync(f)) { $(el).removeAttr('data-preserve-canvas'); continue; }
+    const buf = await sharp(fs.readFileSync(f)).webp({ quality: 82, alphaQuality: 90 }).toBuffer();
+    const name = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12) + '.webp';
+    if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), buf); bytes += buf.length; }
+    const style = ($(el).attr('style') || '').replace(/display\s*:\s*none;?/g, '');
+    const cls = $(el).attr('class');
+    // Laid over its section (the usual background effect): fill it at any width, not the capture width's pixels.
+    const fill = /position\s*:\s*absolute/.test(style) ? ';left:0;top:0;width:100%;height:100%' : '';
+    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1">`);
+    stills.push({ layout, src: 'canvas', replaced: true });
+  }
   // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):
   // show the captured picture the data-src points at, and drop the hidden look the loader gives unloaded images.
   for (const el of $('img:not([src]):not([srcset])').toArray()) {
