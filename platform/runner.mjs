@@ -79,6 +79,7 @@ async function main() {
     'phone-menu-broken': 'The phone menu doesn’t open.',
     'replica-notice-missing': 'Shopping or form buttons don’t show the “this is a preview” note.',
     'squarespace-addresses-left': 'Some parts still load from Squarespace.',
+    'capture-addresses-left': 'Some parts point at our capture machine instead of the Preserve.',
     'unhandled-address': 'There may be contact details we couldn’t replace.',
     'no-reference': 'We couldn’t compare it with the live site.',
   };

@@ -208,13 +208,137 @@ def take(family, gfaces, f, weight, style):
     return {'family': family, 'weight': weight, 'style': style, 'subset': pick['label'], 'file': name, 'ct': 'font/' + name.rsplit('.', 1)[-1], 'source': src,
             'lacks': len(f['cmap'] - cmap(os.path.join(OUT, name)))}  # characters Squarespace's file had and Google's doesn't
 
+# Fitting a lookalike to the font it replaces (review batch 1, 2026-11-10: condensed, wide and serif faces all came
+# back as Inter, so headings rewrapped and pages changed length). When we have the original file, the lookalike is the
+# family in lookalike-pool.json (open Google Fonts, built by lookalike-pool.py) whose letters run closest in width and
+# height, then that face is adjusted to match: scaled so its letters stand as tall, widened or narrowed a little so a
+# line takes the same room, and given the original's line spacing. Capped at 10% either way so it never looks stretched.
+POOL = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lookalike-pool.json')))
+FREQ = dict(zip(' etaoinshrdlcumwfgypbvkjxqz', (18, 12.7, 9.1, 8.2, 7.5, 7.0, 6.7, 6.3, 6.1, 6.0, 4.3, 4.0, 2.8, 2.8, 2.4,
+                                                 2.4, 2.2, 2.0, 2.0, 1.9, 1.5, 1.0, 0.8, 0.15, 0.15, 0.1, 0.07)))
+UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+def shape_of(f):
+    # Per-em letter widths and drawn x and H heights, the same measures lookalike-pool.json keeps.
+    from fontTools.pens.boundsPen import BoundsPen
+    cm, hm, upem, gs = f.getBestCmap(), f['hmtx'], f['head'].unitsPerEm, f.getGlyphSet()
+    def top(c):
+        if ord(c) not in cm: return 0
+        p = BoundsPen(gs); gs[cm[ord(c)]].draw(p)
+        return p.bounds[3] / upem if p.bounds else 0
+    return {'adv': {c: hm[cm[ord(c)]][0] / upem for c in list(FREQ) + list(UPPER) if ord(c) in cm}, 'xh': top('x'), 'ch': top('H')}
+
+def run_ratio(a, b, chars, weights=None):
+    # How much longer a line of these letters is in a than in b, over the letters both have (Adobe files are subsets).
+    both = [c for c in chars if c in a['adv'] and c in b['adv'] and a['adv'][c] and b['adv'][c]]
+    if len(both) < 4: return None
+    w = weights or {}
+    return sum(a['adv'][c] * w.get(c, 1) for c in both) / sum(b['adv'][c] * w.get(c, 1) for c in both)
+
+def ln(x): import math; return abs(math.log(x)) if x and x > 0 else 0
+
+def caps_only(s):
+    return bool(s['xh'] and s['ch'] and s['xh'] > 0.95 * s['ch'] and all(abs(s['adv'].get(c, 0) - s['adv'].get(c.upper(), 9)) < 0.01 for c in 'aeo'))
+
+PICKED = {}  # family -> lookalike family, so every weight of a family gets the same lookalike
+
+def pick_family(kind, orig, used_weights=()):
+    # Closest in letter widths (lowercase in text proportions, then capitals) and heights; a family missing weights the
+    # site uses loses points for each step it would have to fall back by.
+    best = None
+    for fam, p in POOL.items():
+        if p['kind'] != kind: continue
+        caps = caps_only(orig)
+        lo, up = (None if caps else run_ratio(orig, p, FREQ, FREQ)), run_ratio(orig, p, UPPER)
+        if lo is None and up is None: continue
+        d = 1.0 * ln(lo or up) + 0.5 * ln(up or lo)
+        if orig['xh'] and p['xh'] and not caps: d += 0.5 * ln(orig['xh'] / p['xh'])
+        if orig['ch'] and p['ch']: d += 0.3 * ln(orig['ch'] / p['ch'])
+        d += sum(0.03 * min(abs(w - a) for a in p['weights']) / 100 for w in used_weights if p.get('weights'))
+        if not best or d < best[0]: best = (d, fam)
+    return best and best[1]
+
+def clamp(x, lo=0.9, hi=1.1): return min(hi, max(lo, x))
+
+def fit(rec, orig_path):
+    # Rewrites the lookalike's file so it takes the original's room; returns rec pointing at the new file.
+    try:
+        o, g = TTFont(orig_path), TTFont(os.path.join(OUT, rec['file']))
+        so = shape_of(o)
+        if caps_only(so):
+            # A capitals-only face (lowercase draws capitals): the lookalike's lowercase letters show its capitals too.
+            for t in g['cmap'].tables:
+                if t.isUnicode():
+                    for c in 'abcdefghijklmnopqrstuvwxyz':
+                        if ord(c.upper()) in t.cmap: t.cmap[ord(c)] = t.cmap[ord(c.upper())]
+            rec['caps_only'] = True
+        sg = shape_of(g)
+        hts = [so[h] / sg[h] for h in ('xh', 'ch') if so[h] and sg[h]]
+        s = clamp((hts[0] * hts[-1]) ** 0.5) if hts else 1.0  # scale both ways so letters stand as tall
+        ratio = run_ratio(so, sg, FREQ, FREQ) or run_ratio(so, sg, UPPER)
+        r = clamp(ratio / s) if ratio else 1.0  # then only across, so lines run as long
+        upem_g, upem_o = g['head'].unitsPerEm, o['head'].unitsPerEm
+        new_upem = max(16, min(16384, round(upem_g / s)))
+        if abs(r - 1) > 0.005 and 'glyf' in g and 'gvar' not in g:
+            glyf, hm = g['glyf'], g['hmtx']
+            for name in g.getGlyphOrder():
+                gl = glyf[name]
+                if gl.isComposite():
+                    for c in gl.components: c.x = round(c.x * r)
+                elif gl.numberOfContours > 0:
+                    coords = gl.coordinates
+                    for i in range(len(coords)): coords[i] = (round(coords[i][0] * r), coords[i][1])
+                gl.recalcBounds(glyf)
+                adv, _ = hm[name]
+                hm[name] = (round(adv * r), getattr(gl, 'xMin', 0) if gl.numberOfContours else 0)
+            if 'hdmx' in g: del g['hdmx']
+            if 'LTSH' in g: del g['LTSH']
+        else: r = 1.0
+        g['head'].unitsPerEm = new_upem
+        # Line spacing as the original's, in the new units, in all three places browsers read it from.
+        m = lambda v: round(v * new_upem / upem_o)
+        hh, oh, gh, go = o['hhea'], o['OS/2'], g['hhea'], g['OS/2']
+        gh.ascent, gh.descent, gh.lineGap = m(hh.ascent), m(hh.descent), m(hh.lineGap)
+        go.sTypoAscender, go.sTypoDescender, go.sTypoLineGap = m(oh.sTypoAscender), m(oh.sTypoDescender), m(oh.sTypoLineGap)
+        go.usWinAscent, go.usWinDescent = m(oh.usWinAscent), m(oh.usWinDescent)
+        go.fsSelection = (go.fsSelection & ~(1 << 7)) | (oh.fsSelection & (1 << 7))
+        g.flavor = 'woff2'
+        buf = __import__('io').BytesIO(); g.save(buf); body = buf.getvalue()
+        name = hashlib.sha1(body).hexdigest()[:12] + '.woff2'
+        open(os.path.join(OUT, name), 'wb').write(body)
+        rec.update(file=name, ct='font/woff2', fit={'scale': round(s, 3), 'width': round(r, 3)})
+    except Exception as ex:
+        print('FIT', rec.get('family'), ex)
+    return rec
+
+def stand_in(gfam, weight, style, f):
+    # The face at the asked weight, else the nearest weight Google has, upright if it has no italic.
+    w0 = int(float(weight.split()[0]))
+    tries = [(w, st) for st in dict.fromkeys([style, 'normal']) for w in sorted(range(100, 1000, 100), key=lambda w: (abs(w - w0), w))]
+    for w, st in tries[:4] + tries[9:13]:
+        rec = take(gfam, load(gfam, {(1 if st == 'italic' else 0, str(w))}), f, str(w), st)
+        if rec: return rec
+    return None
+
 def lookalike(u, f, path=None):
-    kind = kind_of(os.path.join(site, 'raw', wanted[u]['file']) if u else path, f['family'])
+    path = os.path.join(site, 'raw', wanted[u]['file']) if u else path
+    kind = kind_of(path, f['family'])
     fam, (lo, hi), italic = LOOKALIKES[kind]
-    w = str(min(hi, max(lo, round(float(f['weight'].split()[0]) / 100) * 100)))
-    style = f['style'] if italic else 'normal'
-    rec = take(fam, load(fam, {(1 if style == 'italic' else 0, w)}), f, w, style)
-    if rec: rec.update(lookalike_for=f['family'], kind=kind)
+    orig = None
+    if path and kind in ('sans', 'serif'):
+        try: orig = shape_of(TTFont(path))
+        except Exception: orig = None
+    if orig:
+        if f['family'] not in PICKED: PICKED[f['family']] = pick_family(kind, orig, [int(float(f['weight'].split()[0]))])
+        fam = PICKED[f['family']] or fam
+    rec = stand_in(fam, f['weight'], f['style'], f) if orig else None
+    if not rec:
+        w = str(min(hi, max(lo, round(float(f['weight'].split()[0]) / 100) * 100)))
+        style = f['style'] if italic else 'normal'
+        rec = take(fam, load(fam, {(1 if style == 'italic' else 0, w)}), f, w, style)
+    if rec:
+        rec.update(lookalike_for=f['family'], kind=kind)
+        if orig: fit(rec, path)
     return rec
 
 os.makedirs(OUT, exist_ok=True)
@@ -246,15 +370,6 @@ ADOBE_LOOKALIKES = {
 }
 title = lambda slug: ' '.join(w if w.isdigit() else w.capitalize() for w in re.split(r'[-_ ]+', slug or '') if w)
 
-def stand_in(gfam, weight, style, f):
-    # The face at the asked weight, else the nearest weight Google has, upright if it has no italic.
-    w0 = int(float(weight.split()[0]))
-    tries = [(w, st) for st in dict.fromkeys([style, 'normal']) for w in sorted(range(100, 1000, 100), key=lambda w: (abs(w - w0), w))]
-    for w, st in tries[:4] + tries[9:13]:
-        rec = take(gfam, load(gfam, {(1 if st == 'italic' else 0, str(w))}), f, str(w), st)
-        if rec: return rec
-    return None
-
 _open = {}
 def open_family(family):
     # In Google's open catalog (its license is in github.com/google/fonts). Google Fonts also answers for some families
@@ -270,8 +385,20 @@ def open_family(family):
 by_family = {}
 for (family, weight, style), urls in adobe_faces.items():
     by_family.setdefault(family, []).append((weight, style, urls))
+def nearest_regular(faces_):
+    # The loaded face closest to upright 400 stands for the family when picking its lookalike.
+    got = [(abs(int(float(w.split()[0])) - 400) + (50 if st == 'italic' else 0), manifest[u]['file'], w)
+           for w, st, urls in faces_ for u in urls if u in manifest and manifest[u].get('file')]
+    return min(got)[1] if got else None
+
 for family, faces_ in by_family.items():
     if family is None: family = 'unnamed Adobe font'
+    if family not in ADOBE_LOOKALIKES:
+        rep = nearest_regular(faces_)
+        try:
+            p = os.path.join(site, 'raw', rep); kind = kind_of(p, family)
+            if kind in ('sans', 'serif'): PICKED[family] = pick_family(kind, shape_of(TTFont(p)), [int(float(w.split()[0])) for w, _, _ in faces_])
+        except Exception as ex: print('PICK', family, ex)
     for weight, style, urls in faces_:
         loaded = next((manifest[u] for u in urls if u in manifest and manifest[u].get('file')), None)
         path = os.path.join(site, 'raw', loaded['file']) if loaded else None
@@ -283,6 +410,7 @@ for family, faces_ in by_family.items():
             if rec: action = 'open-equivalent'  # an open font Adobe also serves (Bebas Neue): the same family from Google
             elif ADOBE_LOOKALIKES.get(family):
                 rec = stand_in(ADOBE_LOOKALIKES[family], weight, style, f); action = 'lookalike'
+                if rec and path: fit(rec, path)
             if not rec:
                 rec = lookalike(None, f, path); action = 'lookalike'
         except Exception as ex:

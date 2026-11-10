@@ -53,7 +53,8 @@ def make(domain):
     def email(m):
         if IMG_EXT.match(m.group(4)) or re.match(r'^\d+x$', m.group(3).split('.')[0]): return m.group(0)
         found.append(('email', m.group(0)))
-        return EMAIL_TO
+        # Keep the owner's capitals: an address typed in capitals stays in capitals.
+        return EMAIL_TO.upper() if m.group(0).isupper() else EMAIL_TO
     def phone(m):
         found.append(('phone', m.group(0)))
         # Keep the original punctuation; swap the digits for the reserved fictional 555-0100 number.

@@ -144,6 +144,13 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     const t = fs.readFileSync(path.join(copyDir, f), 'utf8');
     for (const m of t.matchAll(/[\w.-]*(squarespace(-cdn)?\.com|sqspcdn\.com|typekit\.net|googleapis\.com|gstatic\.com)/gi)) left.push(`${f}: ${m[0]}`);
   }
+  // Our own capture machine's addresses must never reach a copy (they point at nothing for visitors).
+  const ours = [];
+  for (const f of fs.readdirSync(copyDir, { recursive: true })) {
+    if (!/\.(html|css|js|svg)$/.test(f)) continue;
+    for (const m of fs.readFileSync(path.join(copyDir, f), 'utf8').matchAll(/(?:https?:)?\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?[^\s"')]*/g)) ours.push(`${f}: ${m[0].slice(0, 80)}`);
+  }
+  if (ours.length) fail('capture-addresses-left', [...new Set(ours)].slice(0, 5).join('; '));
   if (left.length) fail('squarespace-addresses-left', [...new Set(left)].slice(0, 5).join('; '));
   // With our own stylesheet (own-css.mjs): none of Squarespace's stylesheet code or naming is left in the copy, and the
   // copy looks the same as before the swap, at rest, with the phone menu open and at other widths the layout serves.
