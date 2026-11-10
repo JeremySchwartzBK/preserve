@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import sharp from 'sharp';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills } from './pins.mjs';
@@ -227,6 +228,38 @@ async function shadowStills(page, outDir, prof, info) {
   await page.evaluate(() => scrollTo(0, 0)); await sleep(500);
 }
 
+// Drawings on a <canvas> (Squarespace's section background effects: animated gradients, blobs, liquid; owner
+// graphics) live only in the canvas's pixels, which a DOM snapshot can't keep, so the copy showed an empty section
+// (backbipoc, 2026-11-10). Photograph each visible canvas on its own (everything else hidden, transparent around it) and
+// mark it so the export puts the picture in its place, at the canvas's own size and position.
+async function canvasStills(page, outDir, prof, info) {
+  // The canvas's own pixels (not a screenshot of the spot, which would take in text laid over it).
+  const shots = await page.evaluate(() => {
+    const out = [];
+    for (const c of document.querySelectorAll('canvas')) {
+      const r = c.getBoundingClientRect(), cs = getComputedStyle(c);
+      if (r.width < 40 || r.height < 40 || cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+      if (c.closest('[data-preserve-still]')) continue;
+      let url = null; try { url = c.toDataURL('image/png'); } catch {}  // a canvas drawn from another site can't be read
+      if (!url || url.length < 200) continue;
+      c.setAttribute('data-preserve-canvas', String(out.length));
+      out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return out;
+  });
+  if (!shots.length) return;
+  fs.mkdirSync(path.join(outDir, 'stills'), { recursive: true });
+  info.canvasStills = info.canvasStills || {};
+  for (let i = 0; i < shots.length; i++) {
+    const buf = Buffer.from(shots[i].url.split(',')[1], 'base64');
+    // A canvas that drew nothing (or one flat colour) is left as it is.
+    let ok = false; try { const st = await sharp(buf).stats(); ok = st.channels.some((c) => c.max - c.min > 6); } catch {}
+    const file = `${prof}-canvas-${i}.png`;
+    if (ok) { fs.writeFileSync(path.join(outDir, 'stills', file), buf); info.canvasStills[file] = { w: shots[i].w, h: shots[i].h }; }
+    await page.evaluate(([i, f]) => { const c = document.querySelector(`[data-preserve-canvas="${i}"]`); if (!c) return; if (f) c.setAttribute('data-preserve-canvas', f); else c.removeAttribute('data-preserve-canvas'); }, [i, ok ? file : null]);
+  }
+}
+
 // A picture of each font as the live site draws it, in the page's own words, for the review's Fonts step (Adobe files
 // can't be shipped; pictures can). For each font face the page loaded: the first visible text drawn in it, photographed
 // tight around the words, and the block it sits in (for "Show on page").
@@ -305,6 +338,15 @@ export async function capture(url, outDir) {
 
   for (const prof of ['desktop', 'mobile']) {
     const ctx = await browser.newContext({ ...PROFILES[prof].context, ignoreHTTPSErrors: true });
+    // WebGL canvases clear their pixels after each frame unless asked to keep them; keep them so canvasStills can read
+    // what the canvas shows (only drawing is affected, not what the visitor sees).
+    await ctx.addInitScript(() => {
+      const get = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (type, opts) {
+        if (/webgl/i.test(String(type))) opts = { ...(opts || {}), preserveDrawingBuffer: true };
+        return get.call(this, type, opts);
+      };
+    });
     const page = await ctx.newPage();
     record(page);
     page.on('pageerror', (e) => info.errors.push(`${prof}: ${e.message.slice(0, 200)}`));
@@ -331,6 +373,7 @@ export async function capture(url, outDir) {
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
     await shadowStills(page, outDir, prof, info);
+    await canvasStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it
     // saw. The copy redoes that sum at other widths (build.mjs HEADER_PAD_SCRIPT), so it needs the header's height that
