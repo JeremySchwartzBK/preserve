@@ -82,7 +82,18 @@ async function main() {
     'capture-addresses-left': 'Some parts point at our capture machine instead of the Preserve.',
     'unhandled-address': 'There may be contact details we couldn’t replace.',
     'no-reference': 'We couldn’t compare it with the live site.',
+    // Says which screen sizes, so the person can resize their window to that width and look (Jeremy, 2026-11-10: a bare
+    // "differs at other widths" isn't clear or actionable).
+    'differs-at-other-widths': (d) => {
+      const at = [...new Set([...String(d).matchAll(/(desktop|mobile) at (\d+)px/g)].map((m) => `${m[2]} pixels wide (${m[1] === 'mobile' ? 'a phone' : 'a smaller computer screen'})`))].slice(0, 2);
+      return `At ${at.length ? 'some screen sizes, such as ' + at.join(' and ') : 'some screen sizes'}, parts of the page sit or size differently from the live site. To check, make your browser window that width and compare both.`;
+    },
+    'breaks-on-resize': 'When the browser window is resized, parts of the page don’t adjust the way they do when the page is opened at that size.',
+    'own-stylesheet-mismatch': 'Some text or spacing looks slightly different from the live site.',
+    'squarespace-styles-left': 'Some parts may still depend on Squarespace’s styling and could look slightly off.',
+    'copy-did-not-load': 'The Preserve didn’t finish loading when we checked it.',
   };
+  const plain = (r) => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '') : p) || 'Something looks different from the live site.'; };
   const FAILED = {
     'not-squarespace': 'This page isn’t on Squarespace. For now we can only copy Squarespace sites.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
@@ -197,12 +208,12 @@ async function main() {
     // Page layout (storage format 2): shared files are uploaded once per copy, so a refinement only adds what changed.
     const up = await uploadPages(store, { id: j.copy_id, version: next, pages: [{ page_id: j.page_id, path: '', dir }] });
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(fs.readFileSync(path.join(dir, 'desktop.html'), 'utf8'))?.[1] || '').trim().replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s*·\s*Preview copy$/i, '').split(/\s+[|–—-]\s+/)[0].replace(/\s*®\s*$/, '').slice(0, 120) || null;
-    const findings = (v.reasons || []).map((r) => ({ code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.', pinned: !!r.spots?.length }))
+    const findings = (v.reasons || []).map((r) => ({ code: r.code, text: plain(r), pinned: !!r.spots?.length }))
       .filter((f, i, a) => a.findIndex((x) => x.text === f.text) === i);
     // Findings the check could place on the page become pins the person can mark (schema-findings.sql); the rest stay
     // a list. They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
-    const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: PLAIN[r.code] || 'Something looks different from the live site.' })))
+    const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: plain(r) })))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
     // never asks again about something already answered (Jeremy, 2026-10-27).

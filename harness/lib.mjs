@@ -39,7 +39,9 @@ export async function launch() {
   const proxy = process.env.HTTPS_PROXY
     ? { server: process.env.HTTPS_PROXY, bypass: '<-loopback>,localhost,127.0.0.1' }
     : undefined;
-  return chromium.launch({ proxy, args: ['--disable-features=HttpsUpgrades'] });
+  // Software WebGL: the runner has no GPU, and Chromium no longer falls back to software on its own, so canvas effects
+  // (Squarespace's section backgrounds) never drew there and capture had nothing to keep (backbipoc, 2026-11-10).
+  return chromium.launch({ proxy, args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 }
 
 export async function applyThrottle(page, profile) {

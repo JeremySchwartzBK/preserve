@@ -260,13 +260,46 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(place,60
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);addEventListener('load',place);place();
 })();</script>`;
 
+// Squarespace's portfolio "hover" layouts (a list of titles; hovering one shows its picture, in "follow" mode trailing the
+// pointer): its script is dropped, so the pictures never showed (backbipoc, 2026-11-10). Ours shows the hovered title's
+// picture with a short fade, and in follow mode moves the picture box to the pointer as Squarespace does. A tap on a
+// phone has no hover, as live.
+const HOVER_SCRIPT = `<script id="preserve-hover">(function(){
+document.querySelectorAll('.portfolio-hover').forEach(function(root){
+var items=[].slice.call(root.querySelectorAll('.portfolio-hover-item')),bgs=[].slice.call(root.querySelectorAll('.portfolio-hover-bg')),box=root.querySelector('.portfolio-hover-backgrounds');
+if(!items.length||!bgs.length||!box)return;
+var follow=/translate3d/.test(box.getAttribute('style')||'')||/hover-follow/.test(document.body.className)&&!/hover-static/.test(root.className);
+bgs.forEach(function(b){var w=b.querySelector('.portfolio-hover-bg-img'),i=b.querySelector('img');if(i){i.style.display='block';if(!i.getAttribute('src')&&i.dataset.src)i.src=i.dataset.src;i.loading='eager'}if(w){w.style.transition='opacity .3s,visibility .3s,transform .3s'}});
+function show(k){box.setAttribute('data-active',k<0?'false':'true');box.style.opacity=k<0?'0':'1';bgs.forEach(function(b,j){var on=j===k,w=b.querySelector('.portfolio-hover-bg-img');b.setAttribute('data-active',on?'true':'false');if(w){w.style.opacity=on?'1':'0';w.style.visibility=on?'visible':'hidden';w.style.transform=on?'none':''}})}
+items.forEach(function(it,k){it.addEventListener('mouseenter',function(){show(k)});it.addEventListener('focus',function(){show(k)})});
+var list=root.querySelector('.portfolio-hover-items')||root;list.addEventListener('mouseleave',function(){show(-1)});
+if(follow){var host=box.parentElement||root;root.addEventListener('mousemove',function(e){var r=host.getBoundingClientRect();box.style.transform='translate3d('+(e.clientX-r.left-box.offsetWidth/2)+'px,'+(e.clientY-r.top-box.offsetHeight/2)+'px,0)'})}
+show(-1)});
+})();</script>`;
+
+// Width and height capture added to images that had none (capture.mjs: so a lazy image has its shape before it loads).
+// Once the picture is in, they go again: the site's own rules size it from the picture, as live. Otherwise a rule that
+// sets only the width at a narrower window (backbipoc's rotating badge, 170px) met our fixed height and the circle
+// became an oval (2026-11-10).
+const DIMS_SCRIPT = `<script id="preserve-dims">(function(){
+function free(i){i.removeAttribute('width');i.removeAttribute('height');i.removeAttribute('data-pv-dims')}
+function each(){document.querySelectorAll('img[data-pv-dims]').forEach(function(i){if(i.complete&&i.naturalWidth)free(i);else i.addEventListener('load',function(){free(i)},{once:true})})}
+each();addEventListener('DOMContentLoaded',each);
+})();</script>`;
+
 // Text Squarespace scales to fill its box ("sqsrte-scaled-text", renamed later by scrub; a heading set to fit the width): its script writes a
 // pixel font size for the width it saw. At the capture width that size is kept as is; at any other width the text is
 // scaled so it fills its box again (Myrtle Village Green's title, 2026-10-22, found by the size check).
 const fitScript = (captureWidth) => `<script id="preserve-fit">(function(){
+// Lines stay as the owner broke them (only their own line breaks): a size within a hair of the box edge must never wrap
+// the last letter onto a line of its own (backbipoc's footer wordmark, 2026-11-10). At the capture width the size shrinks
+// only if the line no longer fits; at other widths it is scaled so the widest line fills the box.
+var st=document.createElement('style');st.textContent='[class*="rte-scaled-text"]:not([class*="container"]),[class*="rte-scaled-text"]:not([class*="container"]) *{white-space:nowrap!important}';document.head.appendChild(st);
 function fit(){var cw=document.documentElement.clientWidth;document.querySelectorAll('[class*="rte-scaled-text"]').forEach(function(s){if(/scaled-text-container/.test(s.className))return;var box=s.parentElement;if(!box)return;
 var f0=+s.dataset.pvF0||parseFloat(s.style.fontSize)||parseFloat(getComputedStyle(s).fontSize);s.dataset.pvF0=f0;s.style.fontSize=f0+'px';
-if(Math.abs(cw-${captureWidth})<2||!s.offsetWidth||!box.clientWidth)return;s.style.fontSize=(f0*box.clientWidth/s.offsetWidth)+'px'})}
+var w=s.scrollWidth||s.offsetWidth,b=box.clientWidth;if(!w||!b)return;
+if(Math.abs(cw-${captureWidth})<2){if(w>b+0.5)s.style.fontSize=(f0*b/w)+'px';return}
+s.style.fontSize=(f0*b/w)+'px'})}
 var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);addEventListener('load',fit);fit();
 })();</script>`;
@@ -451,6 +484,8 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       const padded = [$('.header-menu').filter(pxPad).first(), $('section.page-section').first().filter(pxPad)].filter((x) => x.length);
       if (outName !== 'index.html' && padded.length) { padded.forEach((x) => x.attr('data-pv-hpad', '')); $('body').append(HEADER_PAD_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width)); }
       if (outName !== 'index.html' && $('[style*="--image-component-container-height"]').length) $('body').append(FLUID_IMAGE_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
+      if ($('img[data-pv-dims]').length) $('body').append(DIMS_SCRIPT);
+      if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
     }
     $('body').append(REPLICA_SCRIPT);
