@@ -135,7 +135,14 @@ async function embedStills(layout, pageUrl) {
     const box = await f.boundingBox();
     // A bot check instead of the widget (our capture browser was stopped) is not what visitors saw: keep the box empty.
     const text = await (await f.contentFrame().catch(() => null))?.evaluate(() => document.body?.innerText || '').catch(() => '') || '';
-    const blocked = /verifying (?:you are human|your browser)|checking your browser|security checkpoint|are you (?:a )?(?:robot|human)|just a moment\.\.\.|captcha/i.test(text.slice(0, 2000));
+    // A frame whose own stylesheets didn't load in our copy of it shows bare browser defaults (colorizemusic's sign-up
+    // form, 2026-11-10): not what visitors saw either, so it gets the same empty box.
+    const unstyled = await (await f.contentFrame().catch(() => null))?.evaluate(() => {
+      const links = [...document.querySelectorAll('link[rel~="stylesheet"]')];
+      const ok = (l) => { try { return !!l.sheet && l.sheet.cssRules.length > 0; } catch { return true; } };
+      return links.length > 0 && !links.some(ok) && ![...document.querySelectorAll('style')].some((st) => (st.textContent || '').length > 200);
+    }).catch(() => false);
+    const blocked = unstyled || /verifying (?:you are human|your browser)|checking your browser|security checkpoint|are you (?:a )?(?:robot|human)|just a moment\.\.\.|captcha/i.test(text.slice(0, 2000));
     const shot = !blocked && box && box.width > 2 && box.height > 2 ? await f.screenshot({ timeout: 15000 }).catch(() => null) : null;
     // A widget that didn't draw (bot checks often stop it in our capture browser) keeps its space as an empty box.
     const st = shot && (await sharp(shot).greyscale().stats()).channels[0];
