@@ -1,0 +1,12 @@
+# The database files, in the order they are applied (db.mjs and test-db.sh read this list). Add new files at the end.
+schema.sql
+schema-actions.sql
+schema-findings.sql
+schema-pages-captures.sql
+schema-page-serving.sql
+schema-runner.sql
+schema-review-flow.sql
+schema-fonts.sql
+schema-wake.sql
+schema-guards.sql
+schema-review-links.sql

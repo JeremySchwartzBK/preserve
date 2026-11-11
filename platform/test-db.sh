@@ -5,7 +5,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ "$(id -u)" = 0 ]; then  # Postgres won't run as root
-  T="$(mktemp -d)"; cp "$HERE"/schema*.sql "$HERE"/test-db*.sql "$HERE"/test-db.sh "$T"/; chmod -R a+rX "$T"
+  T="$(mktemp -d)"; cp "$HERE"/schema*.sql "$HERE"/schema-order.txt "$HERE"/test-db*.sql "$HERE"/test-db.sh "$HERE"/db.mjs "$HERE"/test-db-record.mjs "$T"/; chmod -R a+rX "$T"
   exec runuser -u postgres -- bash "$T/test-db.sh"
 fi
 BIN="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)"; [ -n "$BIN" ] && PATH="$BIN:$PATH"
@@ -16,7 +16,13 @@ export PGOPTIONS="-c client_min_messages=warning"
 P=(psql -h "$D" -U postgres -v ON_ERROR_STOP=1 -q -X -o /dev/null)
 "${P[@]}" -f "$HERE/test-db-stub.sql" >/dev/null
 # schema-wake.sql is left out: it needs Supabase's pg_net and Vault, and only sends a wake-up call.
-for f in schema.sql schema-actions.sql schema-findings.sql schema-pages-captures.sql schema-page-serving.sql schema-runner.sql schema-review-flow.sql schema-fonts.sql schema-guards.sql schema-guards.sql schema-review-links.sql schema-review-links.sql; do
+for f in $(grep -v '^#' "$HERE/schema-order.txt" | grep -v '^schema-wake.sql$'); do
+  "${P[@]}" -f "$HERE/$f" >/dev/null
+done
+# Files from schema-guards.sql on say they are safe to run again; run them again to hold them to it.
+for f in $(grep -v '^#' "$HERE/schema-order.txt" | sed -n '/^schema-guards.sql$/,$p'); do
   "${P[@]}" -f "$HERE/$f" >/dev/null
 done
 "${P[@]}" -f "$HERE/test-db.sql"
+# The record of what is loaded (db.mjs), on the same database.
+PGHOST="$D" PGUSER=postgres PGDATABASE=postgres node "$HERE/test-db-record.mjs"
