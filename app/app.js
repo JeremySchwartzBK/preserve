@@ -194,6 +194,12 @@ function copyPage(id) {
     : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
+  // A Preserve in review opens only with a signed link from the database, good for 12 hours; ask again after six.
+  if (review && store.reviewToken && !(view.reviewToken?.id === id && Date.now() - view.reviewToken.at < 6 * 3600e3)) {
+    const rt = view.reviewToken = { id, at: Date.now(), t: view.reviewToken?.id === id ? view.reviewToken.t : null };
+    store.reviewToken(id).catch(() => null).then((t) => { rt.t = t || rt.t; if (view.id === id) copyPage(id); });
+    return;  // the frame is drawn once the link is here, so it never opens with a link the viewer would turn down
+  }
   if (view.frameKey !== key || !$('#fr')) {
     view.frameKey = key;
     // Title, link and the preview controls share one row so the preview starts high and gets the height.
@@ -202,7 +208,7 @@ function copyPage(id) {
             <button class="btn small secondary" id="expand"></button></div></div>
       <div class="split ${view.wide ? 'wide' : ''}">
         <div class="stage">
-          <div class="frame ${view.layout}" id="fw"><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=1" title="Preserve preview"></iframe></div>
+          <div class="frame ${view.layout}" id="fw"><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=${encodeURIComponent(view.reviewToken?.t || 1)}" title="Preserve preview"></iframe></div>
         </div>
         <aside class="side"><nav class="tabs" id="tabs"></nav><div id="panel"></div></aside>
       </div>

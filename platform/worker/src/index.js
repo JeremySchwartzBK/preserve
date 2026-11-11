@@ -85,13 +85,31 @@ function isPhone(req) {
   return req.headers.get('sec-ch-ua-mobile') === '?1' || /iPhone|iPod|Android.*Mobile|Mobile.*Firefox|Windows Phone|Mobi/i.test(req.headers.get('user-agent') || '');
 }
 
+// Review links. A token is "<expiry in seconds>.<signature>", the signature being HMAC-SHA256 of "<copyId>.<expiry>"
+// in hex. The app gets one from the database (review_link, schema-review-links.sql); the runner and the team make
+// their own with the same secret (platform/review-token.mjs). A token opens one Preserve until it expires.
+export async function reviewTokenOk(secret, id, token, now = Date.now()) {
+  const m = /^(\d{9,11})\.([0-9a-f]{64})$/.exec(token || '');
+  if (!m || Number(m[1]) * 1000 < now) return false;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+  return crypto.subtle.verify('HMAC', key, Uint8Array.from(m[2].match(/../g), (b) => parseInt(b, 16)), enc.encode(`${id}.${m[1]}`));
+}
+
 async function serveCopy(req, env, ctx, id, rest) {
   const rec = await lookup(env, `copy:${id}`);
   if (!rec || rec.status === 'deleted') return rec ? page(410, 'Preview removed', 'This preview has been removed.') : notFound();
   // A copy waiting for its owner's approval is shown only in the app's review frame (and its files, by hashed name).
   const sharedFile = rec.fmt === 2 ? /(?:^|\/)a\/([\w.-]+)$/.exec(rest) : null;
   const asset = rec.fmt === 2 ? !!sharedFile : rest.startsWith('a/');
-  const inReview = rec.status === 'review' && (asset || url(req).searchParams.has('review'));
+  // With REVIEW_SECRET set, the page itself needs a signed, time-limited link (reviewTokenOk below); knowing the
+  // address is not enough. Without the secret (before it is switched on) the bare parameter still works.
+  const asked = url(req).searchParams.get('review');
+  const signed = asked !== null && (!env.REVIEW_SECRET || await reviewTokenOk(env.REVIEW_SECRET, id, asked));
+  if (rec.status === 'review' && !asset && asked !== null && !signed) {
+    return page(403, 'Review link expired', 'This review link has expired. Open the Preserve from your dashboard to review it.');
+  }
+  const inReview = rec.status === 'review' && (asset || signed);
   if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
 
   // The desktop still (desktop-still.mjs, made by the runner when a Preserve goes live): what the Desktop embed shows
@@ -142,7 +160,6 @@ async function serveCopy(req, env, ctx, id, rest) {
   if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
   else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
-  // Later this requires a signed token from the app; for now the parameter alone turns it on.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
   const fontCss = fonts?.length ? fontTags(fonts) : '';
   if (!asset && url(req).searchParams.has('review')) {

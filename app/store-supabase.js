@@ -121,6 +121,8 @@ export const store = {
   rename(id, name) { return rpc('rename_copy', { cid: id, new_name: name }).then(() => null, say); },
   setStatus: (id, status) => rpc('set_copy_status', { cid: id, new_status: status }).then(() => null, say),
   remove: (id) => act('delete_copy', { cid: id }),
+  // Signed review link for the preview frame (schema-review-links.sql); null until private review links are switched on.
+  reviewToken: async (id) => { const { data } = await sb.rpc('review_link', { cid: id }); return data || null; },
   notifications: () => notes,
   async markRead() { await sb.from('notification').update({ read_at: new Date().toISOString() }).is('read_at', null); refresh(); },
   async addPin(id, p) {

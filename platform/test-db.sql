@@ -71,4 +71,25 @@ select t.fails(format('select approve_copy(%L, 1)', (select id from copy where s
 select t.fails(format('select refine_copy(%L)', (select id from copy where source_url like '%first%')), 'not-in-review');
 select t.fails(format($$update copy set live_version = 1 where id = %L$$, (select id from copy where source_url like '%first%')), 'permission denied');
 reset role;
+-- Private review links (schema-review-links.sql). No secret yet: nothing to sign with, so no token.
+set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.is(review_link((select id from copy where source_url like '%second%')), null::text, 'no token before the secret is set');
+reset role;
+create schema vault; create table vault.decrypted_secrets (name text, decrypted_secret text);
+insert into vault.decrypted_secrets values ('review_link_secret', 'test-secret');
+-- The signing matches the viewer's and the runner's (the same fixed example is in test-review-links.mjs).
+select t.is(encode(hmac(convert_to('abcd1234.2000000000', 'utf8'), convert_to('test-secret', 'utf8'), 'sha256'), 'hex'),
+  '86861552fd66e66dcb51ea4e4a8dea4ac86c7be192fe65d8104b1670929e29ff', 'fixed example');
+set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.is(tok ~ '^\d{10}\.[0-9a-f]{64}$' and split_part(tok, '.', 1)::bigint between extract(epoch from now())::bigint + 11 * 3600 and extract(epoch from now())::bigint + 13 * 3600,
+  true, 'a signed token good for about 12 hours') from (select review_link((select id from copy where source_url like '%second%')) tok) x;
+select t.fails($$select decrypted_secret from vault.decrypted_secrets$$, 'permission denied');
+select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.fails(format('select review_link(%L)', (select id from copy where source_url like '%bob%') || 'x'), 'not-found');
+reset role;
+select t.fails(format($$set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000b'); select review_link(%L)$$, (select id from copy where source_url like '%second%')), 'not-found');
+reset role;
+set role anon;
+select t.fails($$select review_link('abcd1234')$$, 'permission denied');
+reset role;
 \echo database rules: all checks pass

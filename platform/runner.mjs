@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
+import { mintReviewToken } from './review-token.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -206,7 +207,7 @@ async function main() {
     }
     const code = refused ? 1 : await new Promise((res) => {
       // Own process group, so stopping the job also stops the browsers and servers it started.
-      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...jobEnv(), PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}` } });  // the job gets none of the runner's keys
+      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...jobEnv(), PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}`, ...(process.env.REVIEW_SECRET ? { PRESERVE_REVIEW_TOKEN: mintReviewToken(process.env.REVIEW_SECRET, j.copy_id, 6 * 3600) } : {}) } });  // the job gets none of the runner's keys
       ctl.child = p;
       const jl = fs.createWriteStream(jobLogFile(work, j), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
