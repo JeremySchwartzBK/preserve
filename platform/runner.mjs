@@ -21,6 +21,7 @@ import { spawn, execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cloudflareStore, uploadPages, setCopy, setNames } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
+import { refuseAddress, jobEnv } from './address-guard.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -196,9 +197,16 @@ async function main() {
         if (!r?.ok) { ctl.lost = true; stopChild(ctl); }
       } catch (e) { log('lease renewal failed', j.copy_id, e.message); }
     }, 30e3);
-    const code = await new Promise((res) => {
+    // An address that points back at this machine or its private network is never opened (address-guard.mjs).
+    const refused = await refuseAddress(j.url);
+    if (refused) {
+      fs.mkdirSync(path.dirname(jobFile), { recursive: true });
+      fs.writeFileSync(jobFile, JSON.stringify({ state: 'failed', steps: [], verdict: { result: 'fail', reasons: [{ code: 'page-unreachable', detail: `refused: ${refused}` }] } }));
+      log('refused', j.copy_id, refused);
+    }
+    const code = refused ? 1 : await new Promise((res) => {
       // Own process group, so stopping the job also stops the browsers and servers it started.
-      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}` } });
+      const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...jobEnv(), PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}` } });  // the job gets none of the runner's keys
       ctl.child = p;
       const jl = fs.createWriteStream(jobLogFile(work, j), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
@@ -334,7 +342,7 @@ async function main() {
         try {
           const tmp = path.join(os.tmpdir(), `still-${r.id}.webp`);
           if (layout.fmt === 2 && !layout.pages['']) throw new Error('no entry page');
-          await promisify(execFile)('node', ['desktop-still.mjs', `${VIEW_BASE}/c/${r.id}/desktop`, tmp], { cwd: HARNESS, timeout: 120e3 });
+          await promisify(execFile)('node', ['desktop-still.mjs', `${VIEW_BASE}/c/${r.id}/desktop`, tmp], { cwd: HARNESS, timeout: 120e3, env: jobEnv() });
           await store.put(layout.fmt === 2 ? `copies/${r.id}/v${v}/p/${layout.pages['']}/desktop-still.webp` : `copies/${r.id}/v${v}/desktop-still.webp`, fs.readFileSync(tmp), 'image/webp');
           fs.rmSync(tmp, { force: true });
           want.still = v;

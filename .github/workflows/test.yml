@@ -14,6 +14,11 @@ jobs:
       - name: Stored captures
         working-directory: platform
         run: node test-captures.mjs
+      - name: Database rules
+        run: bash platform/test-db.sh
+      - name: Addresses the runner refuses
+        working-directory: platform
+        run: node test-address-guard.mjs
       - name: Alerts
         working-directory: platform/host
         run: node test-alerts.mjs
