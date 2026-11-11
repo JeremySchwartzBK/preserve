@@ -64,20 +64,32 @@ async function main() {
   }
 
   // What the review screen says for each thing the quality check can find.
+  // ", most around “Our story…” and “Visit us…”": the text of the blocks where the check found the most change.
+  const near = (r) => {
+    const labels = [...new Set((r?.spots || []).map((p) => (p.label || '').trim()).filter(Boolean))].slice(0, 2)
+      .map((t) => `“${t.length > 40 ? t.slice(0, 40).replace(/\s+\S*$/, '') + '…' : t}”`);
+    return labels.length ? `, most around ${labels.join(' and ')}` : '';
+  };
   const PLAIN = {
     'blank-images': 'Some images stay blank (for example, a gallery or slideshow with empty frames).',
     'blocks-stay-invisible': 'Some parts of the page stay hidden that show on the live site.',
     'broken-images': 'Some images didn’t load.',
     'dropdown-broken': 'A dropdown menu doesn’t open.',
     'font-not-on-google-fonts': 'A font on the live site isn’t available to us, so some text shows in a plain stand-in font.',
-    'first-screen-differs': 'The first screen looks noticeably different from the live site.',
+    // Where, when the check could place it (Jeremy, 2026-11-11: a bare "page differs from live" isn't helpful).
+    'first-screen-differs': (d, r) => `The first screen looks noticeably different from the live site${near(r)}.`,
     'gallery-does-not-advance': 'A slideshow or carousel doesn’t move.',
     'gallery-does-not-autoplay': 'A slideshow that plays by itself on your site stays still.',
     'gallery-blank-slide': 'A slideshow or carousel shows an empty frame.',
     'widget-frozen': 'Something that moves by itself on your site stays still in the Preserve.',
+    'animation-flattened': 'A moving picture (such as an animated GIF) on your site shows as a still in the Preserve.',
+    'video-hidden': 'A video plays behind a still picture, so visitors only see the picture.',
+    'hover-effect-lost': 'Something on your site that reacts when the mouse moves over it doesn’t react in the Preserve.',
+    'drag-lost': 'Something on your site that can be dragged or swiped doesn’t move in the Preserve.',
+    'scroll-effect-lost': 'An effect that plays as you scroll your site doesn’t play in the Preserve.',
     'outside-requests': 'The copy still reaches out to other websites.',
     'overlay-left': 'A popup or banner may still cover part of the page.',
-    'page-differs': 'Parts of the page look different from the live site.',
+    'page-differs': (d, r) => `Parts of the page look different from the live site${near(r)}.`,
     'page-length-differs': 'The page is a different length from the live site, so something may be missing or extra.',
     'phone-menu-broken': 'The phone menu doesn’t open.',
     'replica-notice-missing': 'Shopping or form buttons don’t show the “this is a preview” note.',
@@ -96,7 +108,7 @@ async function main() {
     'squarespace-styles-left': 'Some parts may still depend on Squarespace’s styling and could look slightly off.',
     'copy-did-not-load': 'The Preserve didn’t finish loading when we checked it.',
   };
-  const plain = (r) => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '') : p) || 'Something looks different from the live site.'; };
+  const plain = (r) => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '', r) : p) || 'Something looks different from the live site.'; };
   const FAILED = {
     'not-squarespace': 'This page isn’t on Squarespace. For now we can only copy Squarespace sites.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',

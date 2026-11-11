@@ -11,6 +11,7 @@ import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
+import { probeBehavior, compareBehavior } from './behavior.mjs';
 import { policyHeaders } from './policy.mjs';
 
 // Thresholds, calibrated on the five hand-checked copies (see gate-calibration in the write-up).
@@ -28,6 +29,16 @@ export const LIMITS = {
 // How much the live page differs from itself between two visits (random sticker layouts, autoplaying slideshows,
 // clocks, video frames). The copy is held to the same pixel limits plus that amount, so a page that is never the same
 // twice isn't failed for it, while a still page keeps the strict limits.
+// Behavior check (behavior.mjs): moving pictures, videos under a still, hover, drag and scroll effects. On by default;
+// PRESERVE_BEHAVIOR_CHECK=0 turns it off.
+const BEHAVIOR_CHECK = process.env.PRESERVE_BEHAVIOR_CHECK !== '0';
+const BEHAVIOR_TEXT = {
+  'animation-flattened': 'a moving picture on the live page shows one still frame',
+  'video-hidden': 'a video plays behind a still picture',
+  'hover-effect-lost': 'something that reacts to the mouse on the live page doesn\u2019t',
+  'drag-lost': 'something that can be dragged or swiped on the live page doesn\u2019t move',
+  'scroll-effect-lost': 'an effect that plays as you scroll on the live page doesn\u2019t',
+};
 const withBrowser = async (f) => { const b = await launch(); try { return await f(b); } finally { await b.close(); } };
 
 async function liveSelfDiff(url, siteDir) {
@@ -52,6 +63,7 @@ async function liveSelfDiff(url, siteDir) {
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
         out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
+        if (BEHAVIOR_CHECK) out[prof].behavior = await probeBehavior(browser, url, prof); // and what reacts to hover, drag, scroll
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
     }
@@ -67,7 +79,7 @@ const NOTE = {
   10: 'Embedded widgets (such as maps, feeds or signup forms) are shown as pictures.',
 };
 
-function serve(root) {
+export function serve(root) {
   const CT = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'application/javascript', webp: 'image/webp', avif: 'image/avif', jpg: 'image/jpeg', png: 'image/png', svg: 'image/svg+xml', gif: 'image/gif', mp4: 'video/mp4', webm: 'video/webm', woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf', ico: 'image/x-icon' };
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
@@ -239,6 +251,19 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
         const frozen = Object.entries(liveM).filter(([k, m]) => m?.moving && copyM[k] && !copyM[k].moving).map(([, m]) => m.at);
         if (frozen.length) { layoutSpots['widget-frozen'] = frozen.slice(0, 3); fail('widget-frozen', L(`${frozen.length} part(s) move by themselves on the live page but stay still: ${frozen.map((f) => f.blockId).slice(0, 3).join(', ')}`), 5); }
       }
+      // What the live page does when hovered, dragged or scrolled, the copy must do too (behavior.mjs).
+      if (BEHAVIOR_CHECK) {
+        const copyB = await withBrowser((b) => probeBehavior(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+        const liveB = info.liveSelfDiff[prof]?.behavior;
+        if (liveB?.error) warnings.push(L(`behavior check on the live page: ${liveB.error}`));
+        if (copyB.error) warnings.push(L(`behavior check on the copy: ${copyB.error}`));
+        info.behavior = { ...(info.behavior || {}), [prof]: { live: liveB, copy: copyB } };
+        for (const [code, list] of Object.entries(compareBehavior(liveB, copyB, prof))) {
+          if (!list.length) continue;
+          layoutSpots[code] = list.slice(0, 3).map((x) => x.at);
+          fail(code, L(`${list.length > 1 ? list.length + ' places: ' : ''}${BEHAVIOR_TEXT[code]} (${list.slice(0, 3).map((x) => x.detail).join('; ')})`));
+        }
+      }
       if (c.pageErrors) warnings.push(L(`${c.pageErrors} script errors: ${c.errorSamples.join(' | ').slice(0, 200)}`));
       const d1 = c.diffFirstScreen, d2 = c.diffFullPage, self = info.liveSelfDiff[prof] || {};
       const allow1 = LIMITS.firstScreenDiffPct + (self.firstScreen?.pct || 0), allow2 = LIMITS.fullPageDiffPct + (self.fullPage?.pct || 0);
@@ -329,7 +354,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(info.behavior ? { behavior: info.behavior } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }

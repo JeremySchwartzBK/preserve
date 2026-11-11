@@ -356,3 +356,34 @@ usual careful re-capture.
 On only when `PRESERVE_AI=on` and `ANTHROPIC_API_KEY` are set (runner secrets, `platform/host/wrangler.jsonc`) and the
 runner passes `PRESERVE_VIEW_BASE`. Try it by hand without calling the model:
 `node ai-pins.mjs <liveUrl> https://preserve-view.pages.dev/c/<id> <pins.json> <outDir> --dry`.
+
+## Behavior check and scoring against Jeremy's verdicts (2026-11-11)
+
+Plan: "A more robust Preserve quality check" (Jeremy approved steps 1 and 2 on 2026-11-11). Every miss in his spot-checks
+was behavior (something that moves, plays or reacts), so the check now does what a visitor does, on the live page and
+on the copy, and asks whether each block still reacts.
+
+- `behavior.mjs` (called from gate.mjs; `PRESERVE_BEHAVIOR_CHECK=0` turns it off). New findings:
+  `animation-flattened` (a GIF/WebP/AVIF with several frames on the live page has one in the copy, read from the files),
+  `video-hidden` (a copy video plays but nothing changes on screen where it is: a still sits over it),
+  `hover-effect-lost` (desktop: the mouse sweeps a grid over the first three screens), `drag-lost` (strips and carousels
+  dragged, or swiped on phones), `scroll-effect-lost` (each section pictured at two scroll positions, lined up on itself).
+  Thresholds are set from the cases below: a parallax that moved 14% of a section and a strip that moved 5% when dragged
+  were not things Jeremy noticed, so drag needs 10% and scroll 20%.
+- `check-cases.json`: his verdicts as test cases (copy id, ok or problem, what he saw and its kind, what the check said
+  then). Add each new spot-check batch.
+- `score-check.mjs`: misses (problem passed), false holds (fine but held), and whether a hold named the right kind.
+  `node score-check.mjs` scores the recorded verdicts; `--rerun` runs the current check on the exact copies he reviewed
+  (copy files and stored capture from R2; needs the Cloudflare token and, outside the runner, `NODE_USE_ENV_PROXY=1`);
+  `--rerun --add-behavior` runs only the behavior probes and adds them to the recorded findings (about 5 minutes a case).
+  `PRESERVE_CHROMIUM=<path>` points lib.mjs at another Chromium when Playwright's own isn't installed.
+
+Scores on the 37 cases (15 fine, 22 with problems), 2026-11-11:
+
+| | Misses | False holds | Holds that named the right kind |
+| --- | --- | --- | --- |
+| As recorded | 3 (Minaa B, Potted Plant, Sunnie) | 3 | 7 of 19 |
+| With the behavior check | 1 (Minaa B: a layout plugin, step 3) | 3 (unchanged) | 11 of 21 |
+
+Newly caught: Sunnie drag gallery, Potted Plant GIF letters, Gather and Colorize hero videos behind their still,
+Backbipoc mouse-follow pictures, State of Sage sideways scroll gallery.
