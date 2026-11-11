@@ -37,7 +37,7 @@ async function main() {
   const HARNESS = process.env.HARNESS || new URL('../harness', import.meta.url).pathname;
   const RUN = process.env.RUN_DIR || '/root/runs';
   // Where review pages are served; AI for refinements (harness/ai-pins.mjs) looks at the version under review there.
-  const VIEW_BASE = process.env.PRESERVE_VIEW_URL || 'https://preserve-view.pages.dev';
+  const VIEW_BASE = process.env.PRESERVE_VIEW_URL || 'https://view.preserve.studio';
   const once = process.argv.includes('--once');
   const store = cloudflareStore({ account: '1dcf2dbf05caa4963ed872ff035bc9db', bucket: 'preserve-copies', kvNamespace: 'c67307a470e44d529efa87933c42942f' });
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);

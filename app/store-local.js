@@ -2,7 +2,7 @@
 // real database is connected. Same shape as platform/schema.sql; store-supabase.js will replace it with no screen changes.
 // New copies are simulated here: the real copy job runs on a server, which this demo doesn't have.
 const KEY = 'preserve-demo-v5';
-const VIEW = 'https://preserve-view.pages.dev';
+const VIEW = 'https://view.preserve.studio';
 const now = () => new Date().toISOString();
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
 
