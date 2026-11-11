@@ -73,3 +73,20 @@ place it opens only through a signed, time-limited link. Nothing changes until t
 A link for the team (spot-check pages, a look by hand): `REVIEW_SECRET=... node review-token.mjs <copyId> [days] [layout]`.
 Files of a Preserve in review are still fetched by their hashed names without a token; the page that lists them is what the link protects.
 Tests: `node test-review-links.mjs` and the last part of `test-db.sql`.
+
+## Database changes, with a record
+
+The database files are listed in order in `schema-order.txt`. `db.mjs` runs them and writes each run down in the
+database itself (table `schema_applied`: file, fingerprint of its contents, when), so the database says what it has.
+
+```bash
+SUPABASE_PROJECT_REF=<ref> node db.mjs status                      # loaded / changed since it was loaded / no record
+SUPABASE_PROJECT_REF=<ref> node db.mjs apply schema-x.sql --yes    # run it and record it, in one transaction
+SUPABASE_PROJECT_REF=<ref> node db.mjs record schema.sql ... --yes # record only: for files loaded before this existed
+```
+
+- A new change is a new file added at the end of `schema-order.txt`, written so it is safe to run again, with checks in `test-db.sql`.
+- Changing the live database needs Jeremy's OK each time. Run `status` before and after.
+- A staging project gets the same files with the same tool (its own ref): apply there first, then live.
+- Outside the cloud workspace set `SUPABASE_ACCESS_TOKEN`; inside it, `NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt`.
+- `bash test-db.sh` checks the tool on a throwaway local Postgres (`test-db-record.mjs`).
