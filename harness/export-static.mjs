@@ -371,7 +371,12 @@ for (const layout of ['desktop', 'mobile']) {
   // the embed code picks the layout there.
   $('#preserve-width').text(`(function(){if(window.top!==window)return;var m=${layout === 'mobile'},t;function c(){if(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT})===m)return;var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+location.search+location.hash)}c();addEventListener('resize',function(){clearTimeout(t);t=setTimeout(c,250)})})();`);
   // Squarespace 7.1 fixed headers turn solid ("shrink") once the page scrolls; its script did that on the live site.
-  $('body').append(`<script id="preserve-header">(function(){if(!document.body.classList.contains('tweak-fixed-header'))return;var h=document.querySelector('header.header,#header');if(!h)return;function f(){h.classList.toggle('shrink',scrollY>0)}addEventListener('scroll',f,{passive:true});f()})();</script>`);
+  // Set to "scroll back", it also slides away while the page scrolls down and comes back on any scroll up
+  // (backbipoc, 2026-11-11); never while the menu is open.
+  $('body').append(`<script id="preserve-header">(function(){var b=document.body;if(!b.classList.contains('tweak-fixed-header'))return;var h=document.querySelector('header.header,#header');if(!h)return;
+var back=b.classList.contains('tweak-fixed-header-style-scroll-back'),y0=scrollY;if(back&&!h.style.transition)h.style.transition='transform .3s ease';
+function f(){var y=scrollY;h.classList.toggle('shrink',y>0);if(back){var hide=y>y0?true:y<y0?false:h.style.transform!=='';if(y<=h.offsetHeight||/menu-open/.test(b.className))hide=false;h.style.transform=hide?'translateY(-100%)':''}y0=y}
+addEventListener('scroll',f,{passive:true});f()})();</script>`);
   if (videosWired) $('body').append(MEDIA_SCRIPT);
   videoCount += videosWired;
   if (licenseFile) $('head').append(`<link rel="license" href="a/${licenseFile}">`);

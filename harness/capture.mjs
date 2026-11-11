@@ -31,6 +31,8 @@ function snapshotDom() {
     // so until it loads it is 0 wide, never on screen, and never loads. Width and height attributes give it its shape
     // up front: the size the page used here, else the one Squarespace recorded (emmagrinteriors, 2026-10-27).
     if (img.hasAttribute('width') || img.hasAttribute('height')) continue;
+    // The site sized it itself (style="height: 12px"): a width attribute next to that would fix the other side too.
+    if (img.style.width || img.style.height) continue;
     const d = /^(\d+)x(\d+)$/.exec(img.getAttribute('data-image-dimensions') || '');
     const [w, h] = img.naturalWidth ? [img.naturalWidth, img.naturalHeight] : d ? [+d[1], +d[2]] : [];
     if (w && h) { img.setAttribute('width', w); img.setAttribute('height', h); img.setAttribute('data-pv-dims', ''); }

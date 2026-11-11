@@ -180,7 +180,10 @@ addEventListener('load',function(){draw(false)});
 // Classes are the ones this copy gives to the classes the capture saw (renamed as our stylesheet renames them), learned
 // from the first step, where both the shown and the hidden slides' classes are present. Positions were measured at the
 // capture width; at any other width they are scaled by how much wider or narrower the gallery is. Squarespace moved
-// some galleries with its own animation code rather than CSS, so moving parts get a short transition of their own.
+// some galleries with its own animation code rather than CSS, so moving parts get a short slide of their own, played
+// as the visitor sees it (2026-11-11, backbipoc and sunnie): a slide waiting far off to the side comes in from the edge
+// the others move away from, one leaving goes the same way before it is parked, and one that wraps round from the
+// front of the line to the back comes in from the edge too, never sweeping back across the gallery.
 const GALLERY_SCRIPT = `<script id="preserve-gallery">(function(){
 var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 [].forEach.call(document.querySelectorAll('[data-pv-gal]'),function(g){
@@ -188,8 +191,8 @@ var cfg;try{cfg=JSON.parse(g.getAttribute('data-pv-gal'))}catch(e){return}
 var steps=cfg.steps||[],n=steps.length;if(n<2)return;
 var els=[];[].forEach.call(g.querySelectorAll('[data-pv-gi]'),function(e){els[+e.getAttribute('data-pv-gi')]=e});
 if(g.hasAttribute('data-pv-gi'))els[+g.getAttribute('data-pv-gi')]=g;
-var map={},base=[],own=[];
-els.forEach(function(e,j){if(!e)return;var c=steps[0][j][0];if(!(c in map))map[c]=e.getAttribute('class')||'';base[j]=e.getAttribute('style')||'';var t=getComputedStyle(e).transitionDuration;own[j]=t&&t.split(',').some(function(x){return parseFloat(x)>0})});
+var map={},base=[];
+els.forEach(function(e,j){if(!e)return;var c=steps[0][j][0];if(!(c in map))map[c]=e.getAttribute('class')||'';base[j]=e.getAttribute('style')||''});
 function cls(e,j,c){if(c in map)return e.setAttribute('class',map[c]);var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
 was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(x)});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(x)})}
 function scale(css){var k=g.getBoundingClientRect().width/(cfg.w||1);if(!k||Math.abs(k-1)<0.01)return css;
@@ -197,26 +200,42 @@ return css.replace(/(^|;)\\s*(left|right|transform|translate|margin-left|margin-
 var cur=0;
 function decl(css){var o={};(css||'').split(';').forEach(function(d){var k=d.indexOf(':');if(k>0)o[d.slice(0,k).trim().toLowerCase()]=d.slice(k+1).trim()});return o}
 var first=steps[0].map(function(s){return decl(s[1])});
-function draw(i,anim){steps[i].forEach(function(s,j){var e=els[j];if(!e)return;cls(e,j,s[0]);
+function put(i){steps[i].forEach(function(s,j){var e=els[j];if(!e)return;cls(e,j,s[0]);
 e.setAttribute('style',base[j]);if(!base[j])e.removeAttribute('style');
 if(i){var to=decl(scale(s[1]||''));for(var k in first[j])if(!(k in to))e.style.removeProperty(k);
 for(k in to){var v=to[k],imp=/!important$/.test(v);e.style.setProperty(k,v.replace(/\\s*!important$/,''),imp?'important':'')}}
 var a0=kv(steps[0][j][2]),a1=kv(s[2]);for(var a in a0)if(!(a in a1))e.removeAttribute(a);for(a in a1)e.setAttribute(a,a1[a]);
-if(anim&&!reduce&&!own[j])e.style.transition='left .6s ease,right .6s ease,transform .6s ease,opacity .6s ease,margin-left .6s ease'});
-order(i)}
+});order(i)}
+var E='.65s cubic-bezier(.215,.61,.355,1)',ends=[];
+function draw(i,anim,dir){ends.forEach(clearTimeout);ends=[];
+if(!anim||reduce){els.forEach(function(e){if(e){e.style.transition='none';e.style.translate=''}});put(i);return}
+var gl=g.getBoundingClientRect(),W=gl.width||1,x=function(e){return e?e.getBoundingClientRect().left-gl.left:0};
+var b4=els.map(function(e){if(e){e.style.transition='opacity '+E;e.style.translate=''}return x(e)});
+put(i);els.forEach(function(e){if(e)e.style.transition='opacity '+E});var af=els.map(x),near=function(v){return v>-2*W&&v<3*W};
+var ds=[];els.forEach(function(e,j){var d=af[j]-b4[j];if(e&&near(b4[j])&&near(af[j])&&Math.abs(d)>1&&Math.abs(d)<1.5*W)ds.push(d)});
+var sg=dir||(ds.length?(ds.filter(function(d){return d<0}).length>=ds.length/2?1:-1):1);ds=ds.filter(function(d){return (d<0)===(sg>0)});
+ds.sort(function(a,b){return Math.abs(a)-Math.abs(b)});var D=ds.length?ds[ds.length>>1]:-sg*W;
+els.forEach(function(e,j){if(!e)return;var a=af[j],b=b4[j],d=a-b,from=0,to=0,park=false;if(Math.abs(d)<1)return;
+if(near(a)&&near(b)&&(d<0)===(D<0)&&Math.abs(d)<1.5*W){from=-d}
+else if(near(a)){from=-D}
+else if(near(b)){from=-d;to=-d+D;park=true}
+else return;
+e.style.transition='opacity '+E;e.style.translate=from+'px 0';e.getBoundingClientRect();
+e.style.transition='translate '+E+',opacity '+E;e.style.translate=to?to+'px 0':'0px 0';
+if(park)ends.push(setTimeout(function(){e.style.transition='none';e.style.translate=''},700))})}
 function kv(t){var o={};(t||'').split('\u001f').forEach(function(x){var k=x.indexOf('=');if(k>0)o[x.slice(0,k)]=x.slice(k+1)});return o}
 function order(i){var ps=[];els.forEach(function(e){if(e&&e.parentElement&&ps.indexOf(e.parentElement)<0)ps.push(e.parentElement)});
 ps.forEach(function(p){var kids=[];els.forEach(function(e,j){if(e&&e.parentElement===p)kids.push(j)});if(kids.length<2)return;
 var moved=kids.some(function(j){return steps[i][j][3]!==steps[0][j][3]})||i===0;if(!moved)return;
 var anchor=null;kids.forEach(function(j){var nx=els[j].nextSibling;while(nx&&kids.some(function(k){return els[k]===nx}))nx=nx.nextSibling;if(!anchor||(nx&&anchor.compareDocumentPosition(nx)&4))anchor=nx});
 kids.sort(function(a,b){return steps[i][a][3]-steps[i][b][3]}).forEach(function(j){p.insertBefore(els[j],anchor)})})}
-function go(i){cur=((i%n)+n)%n;draw(cur,true)}
+function go(i,dir){cur=((i%n)+n)%n;draw(cur,true,dir)}
 // A recorded rhythm (dt: ms before each step) can split one slide change into quick steps; an arrow plays a whole one.
 var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}function major(i){return !dt||dt[i]>=900}
 var timer=null,sub=null;function restart(){clearTimeout(timer);if(!cfg.auto||reduce||window.__pvStill)return;
-timer=setTimeout(function tick(){if(!document.hidden)go(cur+1);timer=setTimeout(tick,wait((cur+1)%n))},wait((cur+1)%n))}
+timer=setTimeout(function tick(){if(!document.hidden)go(cur+1,1);timer=setTimeout(tick,wait((cur+1)%n))},wait((cur+1)%n))}
 function slide(d){clearTimeout(sub);var i=cur;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
-go(i);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j);more()},Math.min(wait(j),900))}})()}
+go(i,d);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j,d);more()},Math.min(wait(j),900))}})()}
 function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();slide(d);restart()},true)})}
 bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
 // Drag or swipe: Squarespace lets visitors slide carousels and slideshows with the mouse held down or a finger, so a
@@ -240,11 +259,14 @@ restart();
 // so this script places them again from where the highlighted text now falls, on load and on resize. Every shape is
 // handled: a marker's stroke is redrawn; a wave's pattern is repeated and cut to length; any other shape is stretched
 // from its drawn size. Shapes that ring the whole phrase (circle, box) cover the phrase, the rest go one per line.
+// Shapes are placed where the text sits once its entrance animation is over: an animation partway through (myrtle-green's headings rise
+// 18px into place) moves the text but not the shapes, which then sat a line-third low on every heading (2026-11-11).
 const SHAPES_SCRIPT = `<script id="preserve-shapes">(function(){
 var RING=/circle|oval|ellipse|box|rect|bracket|bubble|cloud/i;
 function lines(el,hr){var out=[];[].forEach.call(el.getClientRects(),function(q){if(q.width<1)return;var l=out[out.length-1];
 if(l&&Math.abs(l.top-(q.top-hr.top))<2){l.right=Math.max(l.right,q.right-hr.left);l.left=Math.min(l.left,q.left-hr.left)}
 else out.push({left:q.left-hr.left,right:q.right-hr.left,top:q.top-hr.top,height:q.height})});return out}
+function moved(el,host){var x=0,y=0;for(var e=el;e&&e!==host;e=e.parentElement){var t=getComputedStyle(e).transform;if(t&&t!=='none'&&window.DOMMatrix){var m=new DOMMatrix(t);x+=m.e;y+=m.f}}return{x:x,y:y}}
 function orig(n){var d=n.dataset;if(!d.pvW){d.pvW=parseFloat(n.style.width)||n.offsetWidth;d.pvH=parseFloat(n.style.height)||n.offsetHeight;var p=n.querySelector('path');if(p)d.pvD=p.getAttribute('d')||''}return{w:+d.pvW,h:+d.pvH,d:d.pvD||''}}
 function draw(n,shape,fs,w,h){var p=n.querySelector('path'),svg=n.querySelector('svg');if(!p||!svg)return;
 if(shape==='marker'){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w));return}
@@ -258,7 +280,7 @@ var spans=host.querySelectorAll('[class*="text-highlight"]');var nodes=[].filter
 var groups=[];nodes.forEach(function(n){if(n.getAttribute('data-index')==='0'||!groups.length)groups.push([]);groups[groups.length-1].push(n)});
 groups.forEach(function(grp,g){if(g>=spans.length)grp.forEach(function(n){n.style.display='none'})});
 [].forEach.call(spans,function(sp,g){var grp=groups[g];if(!grp||!grp.length)return;var shape=grp[0].getAttribute('data-shape')||'',fs=parseFloat(getComputedStyle(sp).fontSize)||16;
-var ls=lines(sp,hr);if(!ls.length)return;
+var ls=lines(sp,hr);if(!ls.length)return;var sh=moved(sp,host);ls.forEach(function(l){l.left-=sh.x;l.right-=sh.x;l.top-=sh.y});
 if(RING.test(shape)){var o=orig(grp[0]),L=Math.min.apply(null,ls.map(function(l){return l.left})),R=Math.max.apply(null,ls.map(function(l){return l.right})),T=ls[0].top,B=ls[ls.length-1].top+ls[ls.length-1].height;
 var px=Math.max(0,(o.w-(R-L))/2),py=Math.max(0,(o.h-(B-T))/2);if(ls.length>1||o.w<R-L){px=fs*0.3;py=fs*0.2}
 ls=[{left:L-px,right:R+px,top:T-py,height:B-T+2*py,ring:1}]}
@@ -317,6 +339,8 @@ addEventListener('resize',function(){if(on)paint()})});
 // capture keeps the picture with one frame of grain in it (data-pv-fx="film-grain"); ours lays a few frames of our own
 // noise over it (made here from a fixed seed, so every visit is the same) and steps through them, so it flickers as
 // live. Still for visitors who ask for less motion and while our checks compare pictures.
+// Strength and grain size are matched to the live effect (2026-11-11: frame-to-frame change ~4.6 levels, grains ~1.5 px);
+// the first version drew sub-pixel grains so faint they averaged out and no one could see the flicker.
 const GRAIN_SCRIPT = `<script id="preserve-grain">(function(){
 var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches,S=160,N=6,seed=7,urls=[];
 function rnd(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff}
@@ -324,7 +348,7 @@ for(var f=0;f<N;f++){var cv=document.createElement('canvas');cv.width=cv.height=
 for(var i=0;i<im.data.length;i+=4){var v=rnd()*255|0;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255}x.putImageData(im,0,0);urls.push(cv.toDataURL())}
 var layers=[];document.querySelectorAll('img[data-pv-fx="film-grain"]').forEach(function(im){var d=document.createElement('div');if(im.className)d.className=im.className;
 d.setAttribute('style',im.getAttribute('style')||'');d.setAttribute('aria-hidden','true');d.style.pointerEvents='none';d.style.objectFit='';
-d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S/2+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.08';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
+d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S*1.25+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.15';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
 if(!layers.length||reduce)return;var k=0;
 setInterval(function(){if(window.__pvStill||document.hidden)return;k=(k+1)%N;layers.forEach(function(d){d.style.backgroundImage='url('+urls[k]+')'})},90);
 })();</script>`;
@@ -333,9 +357,11 @@ setInterval(function(){if(window.__pvStill||document.hidden)return;k=(k+1)%N;lay
 // Once the picture is in, they go again: the site's own rules size it from the picture, as live. Otherwise a rule that
 // sets only the width at a narrower window (backbipoc's rotating badge, 170px) met our fixed height and the circle
 // became an oval (2026-11-10).
+// Freed as soon as the picture is in, even when it reports no pixel size: an SVG drawn from its viewBox alone does,
+// and waiting on it kept backbipoc's 12px-high footer wordmark 200px wide, pushing the footer off the side (2026-11-11).
 const DIMS_SCRIPT = `<script id="preserve-dims">(function(){
 function free(i){i.removeAttribute('width');i.removeAttribute('height');i.removeAttribute('data-pv-dims')}
-function each(){document.querySelectorAll('img[data-pv-dims]').forEach(function(i){if(i.complete&&i.naturalWidth)free(i);else i.addEventListener('load',function(){free(i)},{once:true})})}
+function each(){document.querySelectorAll('img[data-pv-dims]').forEach(function(i){if(i.complete)free(i);else i.addEventListener('load',function(){free(i)},{once:true})})}
 each();addEventListener('DOMContentLoaded',each);
 })();</script>`;
 
@@ -346,7 +372,9 @@ const fitScript = (captureWidth) => `<script id="preserve-fit">(function(){
 // Lines stay as the owner broke them (only their own line breaks): a size within a hair of the box edge must never wrap
 // the last letter onto a line of its own (backbipoc's footer wordmark, 2026-11-10). At the capture width the size shrinks
 // only if the line no longer fits; at other widths it is scaled so the widest line fills the box.
-var st=document.createElement('style');st.textContent='[class*="rte-scaled-text"]:not([class*="container"]),[class*="rte-scaled-text"]:not([class*="container"]) *{white-space:nowrap!important}';document.head.appendChild(st);
+// The box itself claims no width of its own (width 0, at least its parent's): an unbreakable line sized for a wider
+// window otherwise propped the whole section open, and backbipoc's footer ran off the right side below 1440 (2026-11-11).
+var st=document.createElement('style');st.textContent='[class*="rte-scaled-text"]:not([class*="container"]),[class*="rte-scaled-text"]:not([class*="container"]) *{white-space:nowrap!important}[class*="rte-scaled-text-container"]{width:0!important;min-width:100%}';document.head.appendChild(st);
 function fit(){var cw=document.documentElement.clientWidth;document.querySelectorAll('[class*="rte-scaled-text"]').forEach(function(s){if(/scaled-text-container/.test(s.className))return;var box=s.parentElement;if(!box)return;
 var f0=+s.dataset.pvF0||parseFloat(s.style.fontSize)||parseFloat(getComputedStyle(s).fontSize);s.dataset.pvF0=f0;s.style.fontSize=f0+'px';
 var w=s.scrollWidth||s.offsetWidth,b=box.clientWidth;if(!w||!b)return;
