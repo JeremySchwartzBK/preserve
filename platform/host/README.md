@@ -10,6 +10,15 @@ Decided 2026-10-18: Cloudflare Containers, sleeping when idle (no always-on mach
   - after 3 quiet minutes it asks the runner whether it's busy and stops it only if not. On SIGTERM the runner hands
     any running job back to the queue (`release_copy_job`).
 
+## Seeing failures (2026-11-11)
+- Each copy job's log is saved by the runner to R2 at `logs/<copy>/a<round>-t<try>.log` (what the job printed, then its
+  steps, timings and result). The viewer never serves `logs/`. `copy_job.verdict` carries `steps`, `minutes` and `log`.
+- The host's own logs are kept (`observability` in `wrangler.jsonc`).
+- Every 15 minutes the host emails an alert (`src/alerts.js`, through Resend) when a job failed on our side, a job has
+  waited more than 15 minutes, the runner won't start, or the database can't be reached. Off until all three secrets
+  are set: `RESEND_API_KEY`, `ALERT_TO` (comma-separated addresses), `ALERT_FROM` (an address on our sending domain).
+  Test: `node test-alerts.mjs`.
+
 ## Before the first deploy (Jeremy)
 1. Workers Paid plan on the Cloudflare account (Containers need it).
 2. A Cloudflare API token with Workers Scripts and Containers edit (for deploying), plus R2 read/write for the runner.

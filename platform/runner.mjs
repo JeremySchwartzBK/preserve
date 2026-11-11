@@ -155,6 +155,23 @@ async function main() {
   const IDLE_EXIT = +process.env.RUNNER_IDLE_EXIT || 0;
   let lastBusy = Date.now();
 
+  const jobLogFile = (work, j) => path.join(work, `${j.copy_id}.a${j.attempt}.log`);
+  // logs/<copy>/a<attempt>-t<try>.log: what the job printed (the last 2 MB if it ran long), then its steps and result.
+  async function saveJobLog(j, work, job, code) {
+    const MAX = 2 * 1024 * 1024;
+    let text = '';
+    try {
+      const f = jobLogFile(work, j), size = fs.statSync(f).size, fd = fs.openSync(f, 'r');
+      const buf = Buffer.alloc(Math.min(size, MAX));
+      fs.readSync(fd, buf, 0, buf.length, size - buf.length); fs.closeSync(fd);
+      text = (size > MAX ? `[first ${size - MAX} bytes left out]\n` : '') + buf.toString('utf8');
+    } catch {}
+    const tail = { copy: j.copy_id, job: j.id, attempt: j.attempt, try: j.tries, url: j.url, worker: WORKER, pipeline: PIPELINE, exit: code, state: job.state, minutes: job.minutes ?? null, steps: job.steps || [], result: job.verdict?.result ?? null, reasons: (job.verdict?.reasons || []).map((r) => ({ code: r.code, detail: r.detail })) };
+    const key = `logs/${j.copy_id}/a${j.attempt}-t${j.tries}.log`;
+    await store.put(key, `${text}\n--- job ---\n${JSON.stringify(tail, null, 1)}\n`, 'text/plain; charset=utf-8');
+    return key;
+  }
+
   async function runJob(j) {
     log('job', j.copy_id, 'attempt', j.attempt, j.url);
     const ctl = running.get(j.id);
@@ -183,15 +200,19 @@ async function main() {
       // Own process group, so stopping the job also stops the browsers and servers it started.
       const p = spawn('node', ['make-copy.mjs', j.url, '--id', j.copy_id, '--work', work, '--out', out, ...(fs.existsSync(notesFile) ? ['--notes', notesFile] : [])], { cwd: HARNESS, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, PRESERVE_VIEW_BASE: `${VIEW_BASE}/c/${j.copy_id}` } });
       ctl.child = p;
-      const jl = fs.createWriteStream(path.join(work, `${j.copy_id}.a${j.attempt}.log`), { flags: 'a' });
+      const jl = fs.createWriteStream(jobLogFile(work, j), { flags: 'a' });
       p.stdout.on('data', (d) => { process.stdout.write(d); jl.write(d); }); p.stderr.on('data', (d) => { process.stderr.write(d); jl.write(d); });
-      p.on('exit', res);  // not 'close': a leftover browser holding the output pipe must not stall the runner
+      p.on('exit', (c) => jl.end(() => res(c)));  // not 'close': a leftover browser holding the output pipe must not stall the runner
     });
     clearInterval(watch); clearInterval(beat);
-    if (ctl.lost || stopping) throw Object.assign(new Error(ctl.lost ? 'lease lost to another runner' : 'runner stopping'), { quiet: true });
     let job;
     try { job = JSON.parse(fs.readFileSync(jobFile, 'utf8')); } catch { job = { state: 'failed', verdict: { result: 'fail', reasons: [{ code: 'job-error', detail: `make-copy exited ${code} without a job file` }] } }; }
-    const v = job.verdict || { result: 'fail', reasons: [] };
+    // The job's own log is kept in storage (logs/, never served): the container's disk is wiped whenever the runner
+    // sleeps, and the log is how a failure gets explained afterwards. Losing it doesn't stop the copy.
+    const logKey = await saveJobLog(j, work, job, code).catch((e) => { log('job log not saved', j.copy_id, e.message); return null; });
+    if (ctl.lost || stopping) throw Object.assign(new Error(ctl.lost ? 'lease lost to another runner' : 'runner stopping'), { quiet: true });
+    // How long each step took and where the log is go with the verdict, so slow steps and failures can be looked up later.
+    const v = { ...(job.verdict || { result: 'fail', reasons: [] }), steps: job.steps || [], minutes: job.minutes ?? null, log: logKey };
 
     if (job.state === 'failed') {
       const r0 = (v.reasons || [])[0] || {};
