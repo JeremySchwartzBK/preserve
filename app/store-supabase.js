@@ -8,14 +8,14 @@ import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building the fast copy', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
 const STEP_KEYS = Object.keys(STEP_NAMES);
-const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
+const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
 
 let me = null, studio = null, copies = [], notes = [], studioFonts = [], ready = false, timer = null;
 // Font files uploaded in this browser, kept as data: addresses so the preview shows them while the file is checked.
 const justUploaded = {};
 const listeners = new Set();
 const emit = () => listeners.forEach((f) => f());
-const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'plan-limit' ? `Your ${planOf().name} plan’s Live Preserves are all in use. Archive a Live Preserve or upgrade your plan first.` : m); };
+const say = (e) => { const m = e?.message || String(e); return ERRORS[m] ?? (m === 'daily-limit' ? `Your studio has made ${studio?.daily_limit ?? 20} new Preserves in the last 24 hours, which is the limit. You can make more tomorrow. Refinements aren’t counted.` : m === 'plan-limit' ? `Your ${planOf().name} plan’s Live Preserves are all in use. Archive a Live Preserve or upgrade your plan first.` : m); };
 // The plan's name and price come from the plan list; the copy allowance is whatever the database says (it can be raised per studio).
 const planOf = () => { const p = PLANS.find((x) => x.id === studio?.plan) || (studio?.plan === 'unlimited' ? { id: 'unlimited', name: 'Unlimited', price: 0, blurb: 'Set by the Preserve team.' } : PLANS[0]); return { ...p, copies: studio?.copy_limit ?? p.copies }; };
 
