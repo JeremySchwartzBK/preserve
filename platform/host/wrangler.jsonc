@@ -3,11 +3,14 @@
 // Secrets (npx wrangler secret put <NAME>): DATABASE_URL (the runner's database role), CLOUDFLARE_API_TOKEN (R2 read and
 // write for copies and captures), WAKE_SECRET (shared with the database trigger that wakes the runner). Optional, for AI in
 // refinements (harness/ai-pins.mjs): ANTHROPIC_API_KEY, and PRESERVE_AI set to "on" (the switch; any other value or none is off).
+// Optional, for alert emails (src/alerts.js; all three or none): RESEND_API_KEY, ALERT_TO (comma-separated), ALERT_FROM.
 {
   "name": "preserve-runner",
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Keep the host's logs (wake-ups, the minute check, alerts) so a problem can be looked up afterwards.
+  "observability": { "enabled": true },
   "containers": [
     {
       "class_name": "Runner",
