@@ -19,7 +19,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { cloudflareStore, uploadPages, setCopy, setNames } from './worker/copy-store.mjs';
+import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from './worker/copy-store.mjs';
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 
@@ -355,8 +355,11 @@ async function main() {
     for (const t of gone) {
       await store.kvPut(`copy:${t.copy_id}`, { status: 'deleted' });
       for (const n of t.names || []) await store.kvDel(`name:${t.studio_slug}/${n}`).catch(() => {});
+      // Deleting is permanent: the link is off (above) and the files go too. If this is cut off, the tombstone stays
+      // uncleared and the next pass finishes the job.
+      const removed = await deleteCopyFiles(store, t.copy_id);
       await sql(`update copy_tombstone set cleared_at = now() where copy_id = ${lit(t.copy_id)}`);
-      log('deleted', t.copy_id);
+      log('deleted', t.copy_id, removed, 'files removed');
     }
   }
 

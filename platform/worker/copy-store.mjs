@@ -121,3 +121,21 @@ export async function setNames(store, { studio, id, current, old = [] }) {
   await store.kvPut(`name:${studio}/${current}`, { id, current });
   for (const n of old) await store.kvPut(`name:${studio}/${n}`, { id, current });
 }
+
+// A deleted Preserve leaves nothing behind: its pages and shared files, its job logs, and its tour and font records.
+// (Stored captures are removed by the runner's capture sweep, which records why.) Only ever called with a real copy
+// id, so a mistake can't turn into "delete everything under copies/". Safe to run again if it was cut off halfway.
+export async function deleteCopyFiles(store, id) {
+  if (!/^[a-z0-9]{8}$/.test(String(id))) throw new Error(`not a copy id: ${id}`);
+  let n = 0;
+  for (const prefix of [`copies/${id}/`, `logs/${id}/`]) {
+    const keys = await store.list(prefix);
+    for (const k of keys) {
+      if (!k.startsWith(prefix)) throw new Error(`listing ${prefix} returned ${k}`);
+      await store.del(k).catch((e) => { if (!/: 404 /.test(e.message)) throw e; });
+      n++;
+    }
+  }
+  for (const k of [`tour:${id}`, `fonts:${id}`]) await store.kvDel(k).catch(() => {});
+  return n;
+}

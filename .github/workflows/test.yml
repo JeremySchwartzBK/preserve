@@ -19,6 +19,9 @@ jobs:
       - name: Addresses the runner refuses
         working-directory: platform
         run: node test-address-guard.mjs
+      - name: Deleting a Preserve removes its files
+        working-directory: platform
+        run: node test-delete-files.mjs
       - name: Alerts
         working-directory: platform/host
         run: node test-alerts.mjs
