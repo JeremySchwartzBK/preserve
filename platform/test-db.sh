@@ -16,7 +16,7 @@ export PGOPTIONS="-c client_min_messages=warning"
 P=(psql -h "$D" -U postgres -v ON_ERROR_STOP=1 -q -X -o /dev/null)
 "${P[@]}" -f "$HERE/test-db-stub.sql" >/dev/null
 # schema-wake.sql is left out: it needs Supabase's pg_net and Vault, and only sends a wake-up call.
-for f in schema.sql schema-actions.sql schema-findings.sql schema-pages-captures.sql schema-page-serving.sql schema-runner.sql schema-review-flow.sql schema-fonts.sql schema-guards.sql schema-guards.sql; do
+for f in schema.sql schema-actions.sql schema-findings.sql schema-pages-captures.sql schema-page-serving.sql schema-runner.sql schema-review-flow.sql schema-fonts.sql schema-guards.sql schema-guards.sql schema-review-links.sql schema-review-links.sql; do
   "${P[@]}" -f "$HERE/$f" >/dev/null
 done
 "${P[@]}" -f "$HERE/test-db.sql"

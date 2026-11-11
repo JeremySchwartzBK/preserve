@@ -18,7 +18,7 @@ notes, publish, discard), live copy (share, rename with old links redirecting, a
   plain language, notifies, and keeps the KV lookup in step (review / live / paused / deleted, names and redirects).
   It currently runs inside a Claude cloud session, so copies only get made while that session is up. A permanent
   server for it is still to do.
-- Review frame: `preserve-view.pages.dev/c/<id>/<layout>?review=1`. A copy in review is served only with `?review`.
+- Review frame: `preserve-view.pages.dev/c/<id>/<layout>?review=1`. A copy in review is served only with `?review`; once private review links are switched on (platform/README.md), only with the signed value the app gets from `review_link`.
 - Sign-in is by email link (PKCE: open the link in the same browser). Supabase's built-in mail sends a few emails an
   hour and only to the Supabase team's addresses until a mail service (SMTP) is connected.
 - Test account `claude-test@example.com` (studio `claude-test`) exists for automated checks.

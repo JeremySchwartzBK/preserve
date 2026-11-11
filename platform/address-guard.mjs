@@ -36,5 +36,5 @@ export async function refuseAddress(url, lookup = dns.lookup) {
 }
 
 // Secrets the copy job never needs. The job runs site owners' pages in a browser; it gets none of our keys.
-export const RUNNER_ONLY_ENV = ['DATABASE_URL', 'CLOUDFLARE_API_TOKEN', 'WAKE_SECRET', 'RESEND_API_KEY'];
+export const RUNNER_ONLY_ENV = ['DATABASE_URL', 'CLOUDFLARE_API_TOKEN', 'WAKE_SECRET', 'RESEND_API_KEY', 'REVIEW_SECRET'];
 export const jobEnv = (env = process.env) => Object.fromEntries(Object.entries(env).filter(([k]) => !RUNNER_ONLY_ENV.includes(k)));

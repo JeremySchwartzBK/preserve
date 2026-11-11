@@ -174,7 +174,7 @@ export async function triagePins(pins, { liveUrl, preserveBase, dir, dry = false
       try {
         const prof = p.layout || 'desktop';
         const live = await frames(browser, liveUrl, p, pd, 'live');
-        const copy = await frames(browser, `${preserveBase.replace(/\/$/, '')}/${prof}?review`, p, pd, 'copy');
+        const copy = await frames(browser, `${preserveBase.replace(/\/$/, '')}/${prof}?review=${process.env.PRESERVE_REVIEW_TOKEN || 1}`, p, pd, 'copy');
         if (!live.files.length && !copy.files.length) { out.push({ ...p, ai: { error: 'spot not found on either side' } }); continue; }
         const picture = await sheet([live.files.length ? live.files : [], copy.files.length ? copy.files : []].filter((r) => r.length), path.join(pd, 'sheet.png'));
         const facts = { liveSite: live.facts, preserve: copy.facts };

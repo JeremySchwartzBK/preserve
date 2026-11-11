@@ -19,6 +19,7 @@ how it is addressed, and how visitors are served.
 | `schema-fonts.sql` | The review's Fonts step on real Preserves: `copy_version.fonts` (rows the runner writes), `copy_font` (the person's choice per font), `studio_font` (uploaded files, "Your fonts", checked by the runner), `copy_font_log` (every choice, upload and the confirmation at Accept Preserve, with who and when); `set_font_choice`, `upload_font`, `certify_fonts` work only during review. The viewer swaps fonts from KV `fonts:<id>` (runner `fontSwaps`) without rebuilding the Preserve | Not loaded yet |
 | `schema-wake.sql` | Instant runner wake-up: `pg_net` call to the host's `/wake` when a copy job is queued or `serving_outbox` gets a row, with the secret from Vault (`runner_wake_secret`); the one-minute check stays as backup | Not loaded yet |
 | `schema-guards.sql` | Misuse guards (2026-11-11): 20 new Preserves per studio per 24 hours (`studio.daily_limit`, deleting doesn't give it back), only ordinary public addresses, a fair queue across studios, accept only during review, limits on pins and font uploads, and functions callable only by signed-in people. Test: `bash test-db.sh` | Not loaded yet |
+| `schema-review-links.sql` | Private review links (2026-11-11): `review_link(copy)` gives the app a signed link to a Preserve in review, good for 12 hours. Returns nothing until the Vault secret `review_link_secret` exists. |
 | `address-guard.mjs` | The runner refuses addresses that point at itself or a private network, and passes none of its keys to the copy job. Test: `node test-address-guard.mjs` | In the runner from the next deploy |
 | `capture-store.mjs` | Packs a page's original capture into R2 `captures/<copy>/<page>/a<attempt>/` (tar.gz parts + index), restores and deletes it. Never served. Test: `node test-captures.mjs` | Used by the runner from 2026-10-18 |
 | `worker/wrangler.toml` | Config for deploying as a standalone Worker (needs Workers Scripts: Edit on the key, which it doesn't have) | Not used yet |
@@ -58,3 +59,17 @@ Copy files now use relative paths (`a/<file>`, `mobile`), so the same folder wor
 - **The app itself:** Supabase project, sign-in, dashboard, Stripe. The schema is ready for them.
 - **Migration:** the five test copies are on the new platform (re-exported from 2026-10-15 captures). The old Pages project stays until nothing links to it.
 - Open decisions from the review still stand: domain/brand, lapsed-subscription behavior (defaulting to "paused"), teams at launch (model allows it), Google + email link (default), reuse Supabase (default).
+
+## Private review links
+
+A Preserve in review used to open for anyone who had its address with `?review` on the end. With a shared secret in
+place it opens only through a signed, time-limited link. Nothing changes until the secret is set in all three places:
+
+1. Make a long random value (`openssl rand -hex 32`).
+2. Runner: secret `REVIEW_SECRET` on `preserve-runner` (it signs a link for each job's own look at the Preserve, `harness/ai-pins.mjs`).
+3. Database: load `schema-review-links.sql`, then `select vault.create_secret('<value>', 'review_link_secret');`. The app now gets signed links.
+4. Deploy the app, then, last, set `REVIEW_SECRET` on the viewer (`preserve-view`). From then on plain `?review` is turned down.
+
+A link for the team (spot-check pages, a look by hand): `REVIEW_SECRET=... node review-token.mjs <copyId> [days] [layout]`.
+Files of a Preserve in review are still fetched by their hashed names without a token; the page that lists them is what the link protects.
+Tests: `node test-review-links.mjs` and the last part of `test-db.sql`.
