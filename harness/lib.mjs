@@ -41,7 +41,8 @@ export async function launch() {
     : undefined;
   // Software WebGL: the runner has no GPU, and Chromium no longer falls back to software on its own, so canvas effects
   // (Squarespace's section backgrounds) never drew there and capture had nothing to keep (backbipoc, 2026-11-10).
-  return chromium.launch({ proxy, args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  // PRESERVE_CHROMIUM: a browser other than Playwright's own (a dev machine whose Playwright browsers differ).
+  return chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 }
 
 export async function applyThrottle(page, profile) {

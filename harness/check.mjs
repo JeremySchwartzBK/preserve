@@ -84,7 +84,7 @@ export async function diffPct(aPath, bPath, maxH, mask = [], dpr = 1, debugOut =
 
 // Where a finding is, in the same terms the app's review pins use (block id + position inside it), so the app can
 // show the finding as a pin. Keep in step with blk()/idOf() in platform/worker/src/index.js.
-const ANCHOR = () => {
+export const ANCHOR = () => {
   window.__preserveAnchor = (e, px, py) => {
     const b = (e && e.closest && (e.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || e.closest('header,footer'))) || document.body;
     const id = b === document.body ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
