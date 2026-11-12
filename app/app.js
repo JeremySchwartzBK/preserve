@@ -20,7 +20,30 @@ const num = (n) => (n >= 0 && n < 10 ? NUM[n] : String(n));
 const count = (n, one, many = one + 's') => `${num(n)} ${n === 1 ? one : many}`;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const planFull = () => { const n = store.plan().copies; return n === 1 ? 'Your plan provides for one Live Preserve, which is currently in use.' : `Your plan provides for ${count(n, 'Live Preserve')}, which are all currently in use.`; };
-const thumb = (c) => ['minaab', 'breathpod', 'kosa', 'designforward', 'xanadu'].find((s) => c.url.includes(s.replace('kosa', 'kosa.squarespace'))) || null;
+// Dashboard thumbnails. The demo has pictures of its five test sites. A real Preserve shows its desktop still (made by
+// the runner for each version, platform/runner.mjs): the version in review, or the accepted one. Only a Live one's
+// still is public; any other needs the owner's signed link, fetched after the cards are drawn (fillThumbs).
+const DEMO_THUMBS = ['minaab', 'breathpod', 'kosa', 'designforward', 'xanadu'];
+const thumbV = (c) => (c.status === 'review' || c.status === 'processing' ? c.versions.at(-1)?.v : c.live);
+const thumb = (c) => {
+  if (!store.real) { const t = DEMO_THUMBS.find((s) => c.url.includes(s.replace('kosa', 'kosa.squarespace'))); return t ? { src: `thumbs/${t}.webp` } : null; }
+  const v = thumbV(c);
+  if (!v || c.status === 'failed') return null;
+  const src = `${store.view}/c/${c.id}/desktop-still.webp?v=${v}`;
+  return c.status === 'ready' ? { src } : { src, signed: true };
+};
+const thumbTokens = {};  // copy id -> { t, at }: signed links last 12 hours; one is asked for again after six
+function fillThumbs(root) {
+  root.querySelectorAll('img[data-still]').forEach((img) => {
+    const id = img.dataset.still, have = thumbTokens[id];
+    const show = (t) => { if (img.isConnected) img.src = `${img.dataset.src}&review=${encodeURIComponent(t || 1)}`; };
+    if (have && Date.now() - have.at < 6 * 3600e3) return show(have.t);
+    (store.reviewToken ? store.reviewToken(id).catch(() => null) : Promise.resolve(null)).then((t) => { thumbTokens[id] = { t, at: Date.now() }; show(t); });
+  });
+}
+// A still that isn't made yet (a new Preserve, or one the runner hasn't reached) falls back to the name.
+const noShot = (img) => { const d = document.createElement('div'); d.className = 'noshot'; d.textContent = img.alt; img.replaceWith(d); };
+window.preserveNoShot = noShot;
 
 function shell(body, { back } = {}) {
   const unread = store.notifications().filter((n) => !n.read).length;
@@ -112,6 +135,7 @@ function drawList() {
   dash.page = Math.min(dash.page, pages - 1);
   $('#list').innerHTML = shown.slice(dash.page * PAGE, (dash.page + 1) * PAGE).map(card).join('')
     || `<p class="sub">${all.length ? 'No Preserves match.' : 'No Preserves yet. Make your first one.'}</p>`;
+  fillThumbs($('#list'));
   $('#pager').innerHTML = pages > 1 ? `<button class="btn small secondary" data-pg="-1" ${dash.page ? '' : 'disabled'}>← Newer</button><span class="sub">Page ${dash.page + 1} of ${pages}</span><button class="btn small secondary" data-pg="1" ${dash.page < pages - 1 ? '' : 'disabled'}>Older →</button>` : '';
   app.querySelectorAll('[data-pg]').forEach((b) => (b.onclick = () => { dash.page += +b.dataset.pg; drawList(); scrollTo(0, 0); }));
   app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
@@ -129,7 +153,7 @@ function card(c) {
   const accepted = ['ready', 'paused', 'archived'].includes(c.status);
   const del = `<button class="link danger" data-del="${c.id}">Delete</button>`;
   return `<article class="copy">
-    <a href="#/copy/${c.id}" class="shot">${t ? `<img src="thumbs/${t}.webp" alt="" loading="lazy">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
+    <a href="#/copy/${c.id}" class="shot">${t ? `<img ${t.signed ? `data-still="${c.id}" data-src="${esc(t.src)}"` : `src="${esc(t.src)}"`} alt="${esc(c.title)}" loading="lazy" onerror="preserveNoShot(this)">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
     <div class="meta"><a href="#/copy/${c.id}" class="title">${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
     <div class="sub">${esc(hostOf(c))} · ${day(c.created)}</div>
     ${accepted ? `<div class="actions"><button class="btn small" data-link="${c.id}">Copy link</button><button class="btn small secondary" data-embed="${c.id}">Copy embed code</button></div>

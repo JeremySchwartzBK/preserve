@@ -334,9 +334,12 @@ async function main() {
       const swaps = fontSwaps(sv.fonts, r.font_choices, r.studio_fonts);
       const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null, still: r.served?.still };
       const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((m, kk) => ((m[kk] = v[kk]), m), {}) : v));  // key order differs once stored as jsonb
-      // A live Preserve needs its desktop still (what the Desktop embed shows on phones). Made once per version, a few
-      // per pass, so the hourly sweep also fills in Preserves made before stills existed.
-      const needStill = status === 'live' && want.still !== v && stills < 10;
+      // A Preserve needs its desktop still: what the Desktop embed shows on phones, and the dashboard's thumbnail. Made
+      // once per version in review (so a refinement gets a new one) and again when it goes live (fonts as chosen), a few
+      // per pass, so the hourly sweep also fills in Preserves made before stills existed. Live keeps the bare version
+      // number, as stills made before review thumbnails existed recorded it.
+      const stillKey = status === 'live' ? v : status === 'review' ? `review-${v}` : null;
+      const needStill = stillKey !== null && want.still !== stillKey && stills < 10;
       if (canon(want) === canon(r.served) && !needStill) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
@@ -355,10 +358,11 @@ async function main() {
         try {
           const tmp = path.join(os.tmpdir(), `still-${r.id}.webp`);
           if (layout.fmt === 2 && !layout.pages['']) throw new Error('no entry page');
-          await promisify(execFile)('node', ['desktop-still.mjs', `${VIEW_BASE}/c/${r.id}/desktop`, tmp], { cwd: HARNESS, timeout: 120e3, env: jobEnv() });
+          const review = status === 'review' ? `?review=${process.env.REVIEW_SECRET ? mintReviewToken(process.env.REVIEW_SECRET, r.id, 600) : 1}` : '';
+          await promisify(execFile)('node', ['desktop-still.mjs', `${VIEW_BASE}/c/${r.id}/desktop${review}`, tmp], { cwd: HARNESS, timeout: 120e3, env: jobEnv() });
           await store.put(layout.fmt === 2 ? `copies/${r.id}/v${v}/p/${layout.pages['']}/desktop-still.webp` : `copies/${r.id}/v${v}/desktop-still.webp`, fs.readFileSync(tmp), 'image/webp');
           fs.rmSync(tmp, { force: true });
-          want.still = v;
+          want.still = stillKey;
         } catch (e) { log('still-failed', r.id, String(e.message).slice(0, 200)); }
       }
       await sql(`update copy set served = ${lit(JSON.stringify(want))}::jsonb where id = ${lit(r.id)}`);
