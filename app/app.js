@@ -25,7 +25,7 @@ const thumb = (c) => ['minaab', 'breathpod', 'kosa', 'designforward', 'xanadu'].
 function shell(body, { back } = {}) {
   const unread = store.notifications().filter((n) => !n.read).length;
   app.innerHTML = `<header class="top"><a href="#/" class="brand">Preserve</a>
-    <nav>${back ? `<a href="${back}" class="back">← Back</a>` : ''}<a href="#/plan">${esc(store.plan().name)} plan</a>
+    <nav>${back ? `<a href="${back}" class="back">← Back</a>` : ''}<a href="#/plan">${esc(store.plan().name)}<span class="wide-only"> plan</span></a>
     <button class="bell" id="bell" aria-label="Notifications">🔔${unread ? `<span>${unread}</span>` : ''}</button>
     <button class="link" id="out">Sign out</button></nav></header>
     <div id="notes" class="pop" hidden>${store.notifications().length ? store.notifications().slice(0, 8).map((n) => `<a href="#/copy/${n.copy}" class="${n.read ? '' : 'unread'}">${esc(n.text)}<small>${when(n.at)}</small></a>`).join('') : '<p>No notifications yet.</p>'}</div>
