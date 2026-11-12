@@ -110,16 +110,18 @@ async function serveCopy(req, env, ctx, id, rest) {
     return page(403, 'Review link expired', 'This review link has expired. Open the Preserve from your dashboard to review it.');
   }
   const inReview = rec.status === 'review' && (asset || signed);
-  if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
 
-  // The desktop still (desktop-still.mjs, made by the runner when a Preserve goes live): what the Desktop embed shows
-  // on phones and tablets, which can't run a live 1440-wide page in a frame.
+  // The desktop still (desktop-still.mjs, made by the runner in review and again when a Preserve goes live): what the
+  // Desktop embed shows on phones and tablets, which can't run a live 1440-wide page in a frame, and the app
+  // dashboard's thumbnail. Anyone may see a Live one's; otherwise it takes the owner's signed link, as the page does.
   if (rest === 'desktop-still.webp') {
+    if (rec.status !== 'live' && !signed) return new Response(null, { status: 404 });
     const sk = rec.fmt === 2 ? `copies/${id}/v${rec.v}/p/${(rec.pages || {})['']}/desktop-still.webp` : `copies/${id}/v${rec.v}/desktop-still.webp`;
     const so = await env.COPIES.get(sk);
     if (!so) return new Response(null, { status: 404 });
-    return new Response(so.body, { headers: { 'content-type': 'image/webp', 'cache-control': 'public, max-age=3600', 'x-robots-tag': ROBOTS, 'access-control-allow-origin': '*' } });
+    return new Response(so.body, { headers: { 'content-type': 'image/webp', 'cache-control': rec.status === 'live' ? 'public, max-age=3600' : 'private, max-age=3600', 'x-robots-tag': ROBOTS, 'access-control-allow-origin': '*' } });
   }
+  if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
   let key, vary = false, pageId = null;
   if (rec.fmt === 2) {
     if (sharedFile) key = `copies/${id}/a/${sharedFile[1]}`;
