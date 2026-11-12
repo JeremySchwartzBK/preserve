@@ -439,7 +439,14 @@ async function main() {
     let full = 0, swept = 0;
     while (!stopping) {
       try {
-        if (Date.now() - full > 60 * 60e3) { full = Date.now(); await syncServing(); await sql(`delete from serving_outbox where queued_at < now() - interval '10 seconds'`); }
+        // The full pass reads every Preserve once, then can spend minutes making stills; anything queued after that read
+        // (an accept, a rename) was not seen by it, so only entries queued before the pass started are cleared.
+        if (Date.now() - full > 60 * 60e3) {
+          full = Date.now();
+          const [{ t }] = await sql(`select now()::text as t`);
+          await syncServing();
+          await sql(`delete from serving_outbox where queued_at < ${lit(t)}::timestamptz`);
+        }
         await checkStudioFonts().catch((e) => log('font checks failed', e.message));
         const ids = (await sql(`delete from serving_outbox where copy_id in (select copy_id from serving_outbox order by queued_at limit 50 for update skip locked) returning copy_id`)).map((r) => r.copy_id);
         if (ids.length) lastBusy = Date.now();
