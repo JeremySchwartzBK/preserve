@@ -72,7 +72,8 @@ async function checkUrl(p) {
     return { status: r.status, finalUrl: r.url, squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html), passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
   });
   if (p.path === '') job.preflight = pre;
-  if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.status >= 400 ? 'page-unreachable' : pre.passwordPage ? 'password-protected' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
+  // A Squarespace lock screen answers HTTP 401 with the password form, so name the lock before the status code.
+  if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.passwordPage ? 'password-protected' : pre.status >= 400 ? 'page-unreachable' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
   return null;
 }
 
