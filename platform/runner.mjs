@@ -339,7 +339,9 @@ async function main() {
       // per pass, so the hourly sweep also fills in Preserves made before stills existed. Live keeps the bare version
       // number, as stills made before review thumbnails existed recorded it.
       const stillKey = status === 'live' ? v : status === 'review' ? `review-${v}` : null;
-      const needStill = stillKey !== null && want.still !== stillKey && stills < 10;
+      // Not while shutting down: an idle runner that has decided to exit must not hold on for minutes of stills, since
+      // jobs queued meanwhile wait for the next start.
+      const needStill = stillKey !== null && want.still !== stillKey && stills < 10 && !stopping;
       if (canon(want) === canon(r.served) && !needStill) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
@@ -364,6 +366,7 @@ async function main() {
           fs.rmSync(tmp, { force: true });
           want.still = stillKey;
         } catch (e) { log('still-failed', r.id, String(e.message).slice(0, 200)); }
+        lastBusy = Date.now();  // making stills is work: don't count it as idle time and exit in the middle of a pass
       }
       await sql(`update copy set served = ${lit(JSON.stringify(want))}::jsonb where id = ${lit(r.id)}`);
       log('served', r.id, status, 'v' + want.v, r.name || '');
