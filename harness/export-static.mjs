@@ -12,6 +12,7 @@ import { startServer } from './server.mjs';
 import { serverVariants } from './build.mjs';
 import { PROFILES, launch, sleep } from './lib.mjs';
 import sharp from 'sharp';
+import { frameDoc, PAGE_SCRIPT as FRAMES_SCRIPT } from './frames.mjs';
 
 const [siteDir, site, outRoot] = process.argv.slice(2);
 const VARIANT = 'frozen-opt';
@@ -126,6 +127,8 @@ async function embedStills(layout, pageUrl) {
   const frames = await page.$$('iframe');
   for (const f of frames) {
     const src = (await f.getAttribute('src')) || '';
+    // Saved as real content during capture (frames.mjs): no picture needed.
+    if (await f.getAttribute('data-preserve-frame')) { out.push(null); continue; }
     // A frame from another site: either its own address, or our capture's copy of it (/frozen-opt/x/<host>/...).
     let ext = false; try { const fu = new URL(src, pageUrl); ext = fu.origin !== base || fu.pathname.startsWith(`/${VARIANT}/x/`); } catch {}
     if (!ext) { out.push(null); continue; }
@@ -359,6 +362,22 @@ for (const layout of ['desktop', 'mobile']) {
     }
   }
   for (const el of $('style').toArray()) $(el).text(await localizeCss($(el).text(), pageUrl));
+  // Frames saved as real content during capture (frames.mjs): the saved document in place of the widget's address.
+  let framesSaved = 0;
+  const frameAsset = (name, file) => {
+    if (!fs.existsSync(file)) return null;
+    if (!fs.existsSync(path.join(assetDir, name))) { fs.copyFileSync(file, path.join(assetDir, name)); bytes += fs.statSync(file).size; }
+    return `a/${name}`;
+  };
+  for (const el of $('iframe[data-preserve-frame]').toArray()) {
+    const d = frameDoc(siteDir, $(el).attr('data-preserve-frame'), frameAsset);
+    if (!d) { $(el).removeAttr('data-preserve-frame'); continue; }
+    $(el).removeAttr('src').removeAttr('allow').attr('srcdoc', d.doc).attr('sandbox', 'allow-scripts');
+    if (d.autosize) $(el).attr('data-pv-autosize', '');
+    stills.push({ layout, src: 'saved frame', replaced: true, views: d.views });
+    framesSaved++;
+  }
+  if (framesSaved) $('body').append(FRAMES_SCRIPT);
   firstScreenBytes[layout] = await firstScreenBudget($, layout);
   for (const el of $('noscript').toArray()) {
     let t = $(el).html() || '';

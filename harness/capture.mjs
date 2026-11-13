@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills } from './pins.mjs';
+import { saveFrames } from './frames.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -399,6 +400,8 @@ export async function capture(url, outDir) {
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
     await shadowStills(page, outDir, prof, info);
     await canvasStills(page, outDir, prof, info);
+    // Widgets from other sites in frames, saved as real content with each of their views (frames.mjs).
+    await saveFrames(page, outDir, prof, info, manifest, ctx.request).catch((e) => info.errors.push(`${prof}: frames: ${String(e.message).split('\n')[0]}`));
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it
     // saw. The copy redoes that sum at other widths (build.mjs HEADER_PAD_SCRIPT), so it needs the header's height that

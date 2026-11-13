@@ -122,7 +122,8 @@ export function detect(siteDir, exportReport) {
   const ownerSrc = [...body.matchAll(/<script\b[^>]*src="([^"]+)"/gi)].map((m) => m[1]).filter((s) => /cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com|assets\.codepen\.io|githack|github\.io|squarewebsites|sqspthemes|squarespacewebsites|ghost-plugins|will-myers|willmyers|kerbco|schwartz-edmisten|spark-plugin|static1\.squarespace\.com\/static\/[0-9a-f]{24}\/t\/.*\.js|storage\.googleapis\.com\/squarestylist/i.test(s) && !/jquery[.-]?[0-9.]*(\.min)?\.js|recaptcha/i.test(s))
     .filter((s) => !/codepen\.io\/3198845|willmyer|willmyethewebsiteguy/i.test(s) || wmPlugins.length);
   if (owner.length || ownerSrc.length) found[5] = `owner code needing jQuery/Squarespace: ${owner.length} inline, ${ownerSrc.length} external (${ownerSrc.slice(0, 3).join(', ').slice(0, 160)})`;
-  const stills = (exportReport?.stills || []);
+  // Frames saved as real content (frames.mjs) are not pictures: no note for them.
+  const stills = (exportReport?.stills || []).filter((s) => s.src !== 'saved frame');
   if (stills.length) found[10] = `${stills.length} embed(s) shown as still: ` + [...new Set(stills.map((s) => (s.src || '').replace(/^https?:\/\//, '').split('/')[0] + (s.replaced ? '' : ' (blank)')))].join(', ');
   if (/sqs-block-map|data-block-type="4"|class="[^"]*map-block/i.test(body)) found[18] = 'map block';
   if (/position:\s*sticky|data-sticky|sticky-/i.test(body)) found[8] = 'sticky element';
