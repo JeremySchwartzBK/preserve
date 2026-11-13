@@ -38,7 +38,7 @@ async function run1(site, mode, device) {
   }
   const link = f.locator('.header-menu-nav-folder[data-folder=root] a[href]:not([data-folder-id])').first();
   const before = f.url();
-  if (await link.count()) { await link.tap(); await sleep(700); r.linkToast = await f.evaluate(() => [...document.querySelectorAll('[role=status]')].some((t) => /preview copy/.test(t.textContent) && +getComputedStyle(t).opacity > 0.5)); r.stayed = f.url() === before; }
+  if (await link.count()) { await link.tap(); await sleep(700); r.linkToast = await f.evaluate(() => [...document.querySelectorAll('[role=status]')].some((t) => /viewing a snapshot|preview copy/.test(t.textContent) && +getComputedStyle(t).opacity > 0.5)); r.stayed = f.url() === before; }
   await sleep(2800);
   await f.locator('.header-burger-btn:visible').first().tap(); await sleep(900);
   r.closed = await f.evaluate(() => !document.body.classList.contains('header--menu-open') && getComputedStyle(document.querySelector('.header-menu')).visibility === 'hidden');

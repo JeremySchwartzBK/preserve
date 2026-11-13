@@ -1,6 +1,6 @@
 // Links between the pages of a copy (design A4). When a copy has more than one page, a link on one page that points to
 // another captured page becomes a relative link to that page of the copy, marked data-pv-internal so the replica note
-// (build.mjs REPLICA_SCRIPT) lets it navigate. Every other link keeps showing "this is a preview copy". With one page
+// (build.mjs REPLICA_SCRIPT) lets it navigate. Every other link keeps showing the "snapshot" notice. With one page
 // (every copy so far) nothing is marked.
 //
 // pages: [{path, source_url, dir}] where path is the page's address inside the copy ('' = entry page, 'work/kosa') and

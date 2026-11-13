@@ -32,12 +32,12 @@ const DROP_SRC = [
 const DROP_INLINE = [/gtag\(|dataLayer|fbq\(|_gaq|ga\(\s*['"]create|hotjar|_hjSettings|clarity|klaviyo|pintrk|ttq\.|snaptr|_linkedin|twq\(/, /SQUARESPACE_LAUNCH_TIME|Static\.COOKIE_BANNER|SQS_RUM|RecordHit|census/];
 
 const REPLICA_SCRIPT = `<script id="preserve-replica">(function(){
-var t;function toast(){if(!t){t=document.createElement('div');t.setAttribute('role','status');t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:all .25s;z-index:2147483647;background:#111;color:#fff;font:500 14px/1.4 system-ui,sans-serif;padding:12px 18px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none;max-width:90vw;text-align:center';t.textContent='This is a preview copy of the site, so this action is turned off.';document.body.appendChild(t)}var bg=document.elementFromPoint(innerWidth/2,innerHeight-40),c='';for(;bg&&bg.nodeType===1;bg=bg.parentElement){c=getComputedStyle(bg).backgroundColor;if(c&&!/rgba\\(.*,\\s*0\\)|transparent/.test(c))break;c=''}var m=(c||'rgb(255,255,255)').match(/\\d+/g)||[255,255,255],dark=(+m[0]*299+ +m[1]*587+ +m[2]*114)/1000<128;t.style.background=dark?'#fff':'#111';t.style.color=dark?'#111':'#fff';requestAnimationFrame(function(){t.style.opacity=1;t.style.transform='translateX(-50%)'});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity=0;t.style.transform='translateX(-50%) translateY(20px)'},2600)}
+var t,LINK='You\\u2019re viewing a snapshot of how this page looks and feels. Links to other pages have been disabled.',FORM='You\\u2019re viewing a snapshot of how this page looks and feels. Forms and checkout have been disabled.';function toast(msg){if(!t){t=document.createElement('div');t.setAttribute('role','status');t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:all .25s;z-index:2147483647;background:#111;color:#fff;font:500 14px/1.4 system-ui,sans-serif;padding:12px 18px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none;max-width:90vw;text-align:center';document.body.appendChild(t)}t.textContent=msg||FORM;var bg=document.elementFromPoint(innerWidth/2,innerHeight-40),c='';for(;bg&&bg.nodeType===1;bg=bg.parentElement){c=getComputedStyle(bg).backgroundColor;if(c&&!/rgba\\(.*,\\s*0\\)|transparent/.test(c))break;c=''}var m=(c||'rgb(255,255,255)').match(/\\d+/g)||[255,255,255],dark=(+m[0]*299+ +m[1]*587+ +m[2]*114)/1000<128;t.style.background=dark?'#fff':'#111';t.style.color=dark?'#111':'#fff';requestAnimationFrame(function(){t.style.opacity=1;t.style.transform='translateX(-50%)'});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity=0;t.style.transform='translateX(-50%) translateY(20px)'},2600)}
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href],button[type=submit],input[type=submit],form button,[class*="klaviyo-form"] button,button[class*="form-button"],.sqs-add-to-cart-button,[data-add-to-cart],.sqs-block-button-element');if(!a)return;
 if(a.matches('[data-folder-id],[data-folder],.header-nav-folder-title,[data-action],[aria-controls]'))return;
 if(a.tagName==='A'){if(a.hasAttribute('data-pv-internal'))return;var h=a.getAttribute('href')||'';if(h===''||h[0]==='#'||/^javascript:/i.test(h))return;var u=new URL(h,location.href);if(u.origin===location.origin&&u.pathname===location.pathname&&u.hash)return}
-e.preventDefault();e.stopImmediatePropagation();toast()},true);
-document.addEventListener('submit',function(e){e.preventDefault();e.stopImmediatePropagation();toast()},true);
+e.preventDefault();e.stopImmediatePropagation();toast(a.tagName==='A'?LINK:FORM)},true);
+document.addEventListener('submit',function(e){e.preventDefault();e.stopImmediatePropagation();toast(FORM)},true);
 })();</script>`;
 
 // Squarespace look-and-feel motion, replayed without Squarespace's scripts (~2 KB instead of ~1.5 MB):
@@ -96,7 +96,7 @@ set(li,open)},true);
 // Header menus, replayed without Squarespace's scripts: the phone menu (burger button opens the full-screen menu,
 // folders slide in with a Back link) and folder dropdowns in the desktop bar on touch screens. Same classes and
 // attributes Squarespace's header script sets, so the site's own CSS draws and animates everything. Page links inside
-// the menu still get the "preview copy" notice; while open, the header takes the menu's colour theme as Squarespace does; links to a spot on this page close the menu first.
+// the menu still get the "snapshot" notice; while open, the header takes the menu's colour theme as Squarespace does; links to a spot on this page close the menu first.
 const MENU_SCRIPT = `<script id="preserve-menu">(function(){
 var b=document.body,mq=window.matchMedia;
 function btns(){return document.querySelectorAll('.header-burger-btn')}
