@@ -23,6 +23,10 @@
     '.pt-dot{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:2px solid #fff;background:#111;color:#fff;font:600 12px/22px system-ui,sans-serif;text-align:center;cursor:pointer;pointer-events:auto;box-shadow:0 2px 10px rgba(0,0,0,.35);padding:0;transition:opacity .2s}',
     '.pt-dot::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid #111;animation:pt-pulse 2s ease-out infinite;pointer-events:none}',
     '.pt-dot.pt-on{background:#fff;color:#111;border-color:#111}',
+    // On a dark part of the page the dot turns white (user testing, 2026-11-12), and dark again when open.
+    '.pt-dot.pt-light{background:#fff;color:#111;border-color:#111}',
+    '.pt-dot.pt-light::after{border-color:#fff}',
+    '.pt-dot.pt-light.pt-on{background:#111;color:#fff;border-color:#fff}',
     '.pt-dot.pt-on::after,.pt-quiet .pt-dot::after{animation:none;opacity:0}',
     '@keyframes pt-pulse{0%{transform:scale(1);opacity:.7}80%,100%{transform:scale(2.2);opacity:0}}',
     '@media (prefers-reduced-motion:reduce){.pt-dot::after{animation:none;opacity:0}}',
@@ -43,7 +47,6 @@
     '.pt-pill{position:fixed;left:12px;bottom:12px;pointer-events:auto;display:flex;align-items:center;gap:8px;background:#111;color:#fff;border:0;border-radius:999px;padding:9px 16px 9px 12px;font:500 14px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);cursor:pointer}',
     '.pt-pill i{width:10px;height:10px;border-radius:50%;background:#fff;display:inline-block;box-shadow:0 0 0 3px rgba(255,255,255,.3)}',
     '.pt-pill-off{opacity:.75}',
-    '.pt-pill b{font-weight:500;opacity:.55}',
     '.pt-panel{position:fixed;left:12px;bottom:62px;width:320px;max-width:calc(100vw - 24px);max-height:calc(100vh - 86px);overflow:auto;box-sizing:border-box;background:#fff;color:#111;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.28);padding:6px 16px 14px;pointer-events:auto;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s}',
     '.pt-panel.pt-show{opacity:1;transform:none}',
     '.pt-panel.pt-sheet{left:8px;right:8px;bottom:8px;width:auto;max-width:none;max-height:70vh;border-radius:18px}',
@@ -126,6 +129,44 @@
     }
     return false;
   }
+  // Is the page dark under this point? The nearest solid background colour decides; a picture or video is sampled
+  // at that spot (our own files, so the canvas can read them). Checked again only when the dot moves or a second
+  // has passed, so scrolling stays cheap.
+  var probe = null;
+  function lum(r, g, b) { return (r * 299 + g * 587 + b * 114) / 1000; }
+  function darkAt(x, y) {
+    var stack = document.elementsFromPoint(x, y);
+    for (var i = 0; i < stack.length; i++) {
+      var e = stack[i];
+      if (layer.contains(e)) continue;
+      if (e.tagName === 'IMG' || e.tagName === 'VIDEO') {
+        var w = e.naturalWidth || e.videoWidth, h = e.naturalHeight || e.videoHeight;
+        if (w && h) {
+          try {
+            var r = e.getBoundingClientRect();
+            probe = probe || document.createElement('canvas'); probe.width = probe.height = 1;
+            var cx = probe.getContext('2d', { willReadFrequently: true });
+            cx.drawImage(e, Math.max(0, Math.min(w - 1, (x - r.left) / r.width * w)), Math.max(0, Math.min(h - 1, (y - r.top) / r.height * h)), 1, 1, 0, 0, 1, 1);
+            var px = cx.getImageData(0, 0, 1, 1).data;
+            if (px[3] > 128) return lum(px[0], px[1], px[2]) < 110;
+          } catch (err) { /* unreadable picture: keep looking at what is behind it */ }
+        }
+      }
+      for (var a = e; a && a !== document.documentElement; a = a.parentElement) {
+        var c = getComputedStyle(a).backgroundColor, m = c && c.match(/[\d.]+/g);
+        if (m && (m.length < 4 || +m[3] > 0.5)) return lum(+m[0], +m[1], +m[2]) < 110;
+      }
+      return false;
+    }
+    return false;
+  }
+  function tone(d, p) {
+    var now = Date.now(), last = d._tone;
+    if (last && now - last.t < 1000 && Math.abs(last.x - p.x) < 24 && Math.abs(last.y - p.y) < 24) return;
+    d._tone = { t: now, x: p.x, y: p.y };
+    if (p.y < 0 || p.y > innerHeight || p.x < 0 || p.x > innerWidth) return;
+    d.classList.toggle('pt-light', darkAt(p.x, p.y));
+  }
   function place() {
     var gone = 0;
     tour.spots.forEach(function (s, i) {
@@ -134,6 +175,7 @@
       if (!p) { d.style.display = 'none'; gone++; return; }
       d.style.display = '';
       d.style.transform = 'translate(' + p.x + 'px,' + p.y + 'px)';
+      tone(d, p);
       d.style.visibility = (p.y < -20 || p.y > innerHeight + 20 || covered(s, p)) ? 'hidden' : '';
     });
     // The site's own menu is open: step out of the way entirely.
@@ -225,12 +267,8 @@
       pill.style.display = n || c ? '' : 'none';
       pill.innerHTML = '';
       pill.appendChild(el('i'));
-      if (hidden) pill.appendChild(document.createTextNode('Show tour'));
-      else {
-        if (n) pill.appendChild(document.createTextNode('Tour'));
-        if (n && c) pill.appendChild(el('b', '', '·'));
-        if (c) pill.appendChild(document.createTextNode('Credits'));
-      }
+      // One label, so it reads as one button that opens the panel (user testing, 2026-11-12).
+      pill.appendChild(document.createTextNode(hidden ? 'Show tour' : n && c ? 'Tour & Credits' : n ? 'Tour' : 'Credits'));
       pill.setAttribute('aria-expanded', panel ? 'true' : 'false');
       pill.classList.toggle('pt-pill-off', hidden);
     };

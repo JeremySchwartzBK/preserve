@@ -301,9 +301,10 @@ function sendPins(c, force) {
 // Findings for the layout on screen, top to bottom (lettered in that order, on the page and in the list).
 const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
-// The person's answer for each suspected issue (Jeremy, 2026-10-26). 'fine' is the older "Looks fine" answer.
-const VERDICTS = [['ignore', 'Ignore issue'], ['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
-const verdictOf = (p) => (p.meta.verdict === 'fine' ? 'not-a-problem' : p.meta.verdict);
+// The person's answer for each suspected issue: two answers since user testing (Jeremy, 2026-11-12). Older answers
+// stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
+const VERDICTS = [['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
+const verdictOf = (p) => (['fine', 'ignore'].includes(p.meta.verdict) ? 'not-a-problem' : p.meta.verdict);
 const pinsFor = (c, tab) => c.pins.filter((p) => tab === 'tour' ? p.kind === 'tour' : tab === 'credits' ? p.kind === 'credit'
   : p.kind === 'issue' && !p.meta?.report);
 
@@ -420,7 +421,8 @@ function panel(c, review) {
       ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
       <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
-      ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>` : ''}
+      ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>
+        <p class="fine">We’ll re-capture the page and focus on the spots you pinned. Check the rest once more before accepting.</p>` : ''}
       <button class="link" id="del">Delete this Preserve</button></div>`;
   } else if (view.tab === 'fonts') {
     loadLookalikes(c);
@@ -552,7 +554,7 @@ function loadLookalikes(c) {
 async function accept(id) {
   const fix = toFix(store.copy(id));
   const yes = await confirmCard({ title: 'Accept this Preserve?',
-    body: `Once a Preserve has been accepted, it cannot be refined.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
+    body: `After you accept, you won’t be able to change the content or structure of this Preserve, but you will still be able to edit its Tour, Credits, and custom link.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
     ok: 'Accept Preserve', cancel: 'Review Preserve' });
   if (!yes) { view.tab = 'check'; copyPage(id); return; }
   const kept = keptFonts(store.copy(id));
