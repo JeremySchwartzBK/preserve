@@ -37,6 +37,9 @@ jobs:
       - name: Pins apply on both layouts
         working-directory: harness
         run: node test-pins.mjs
+      - name: Widgets saved as real content
+        working-directory: harness
+        run: node test-frames.mjs
       - name: Viewer and quality check serve the same rules
         working-directory: harness
         run: node test-policy.mjs
