@@ -15,7 +15,7 @@ export async function desktopStill(url, out) {
     const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
     const res = await page.goto(url, { waitUntil: 'load', timeout: 60e3 });
     const title = await page.title();
-    if (!res?.ok() || /^(Preview paused|Not found|Preview removed)$/.test(title)) throw new Error(`not showing (${res?.status()} ${title})`);
+    if (!res?.ok() || /^(Preview paused|Preserve paused|Not found|Preview removed|Preserve removed)$/.test(title)) throw new Error(`not showing (${res?.status()} ${title})`);
     // Our own UI (tour, preview notice) isn't part of the site.
     await page.addStyleTag({ content: '.pt-layer,[role=status]{display:none!important}' });
     // Bring in anything that loads as it scrolls into view, then go back to the top.

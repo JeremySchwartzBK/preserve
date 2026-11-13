@@ -423,7 +423,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       out.replicaNotice = 'fail';
       for (let i = 0; i < 3 && page.url() === before; i++) {
         await page.locator('[data-preserve-probe]').click({ timeout: 3000, force: true }).catch(() => {}); await sleep(500);
-        if (page.url() === before && (await page.locator('text=preview copy of the site').count())) { out.replicaNotice = 'pass'; break; }
+        if (page.url() === before && (await page.locator('text=/viewing a snapshot of how this page|preview copy of the site/').count())) { out.replicaNotice = 'pass'; break; }
       }
       if (out.replicaNotice === 'fail' && page.url() === before) spot('replica-notice-missing', [await page.locator('[data-preserve-probe]').evaluate((e) => window.__preserveAnchor(e)).catch(() => null)].filter(Boolean));
     } else out.replicaNotice = 'n/a';

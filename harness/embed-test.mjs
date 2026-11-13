@@ -30,7 +30,7 @@ h1{font-size:28px;margin:0 0 8px}p{margin:0 0 16px}.spacer{height:${below ? '120
 .preserve-frame{width:100%;aspect-ratio:16/10;border:0;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.15);background:#fff;display:block}
 @media (max-width:767px){.preserve-frame{aspect-ratio:auto;height:78vh}}</style></head><body><main>
 <h1>Project: ${site}</h1><p>Website design and build, 2025. Scroll inside the preview to explore the live design.</p><div class="spacer"></div>
-<iframe class="preserve-frame" src="${copyUrl}" title="Interactive preview of the ${site} website" loading="${below ? 'lazy' : 'eager'}" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+<iframe class="preserve-frame" src="${copyUrl}" title="Interactive snapshot of the ${site} website" loading="${below ? 'lazy' : 'eager'}" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
 <p style="margin-top:16px">More about the project…</p></main></body></html>`;
 const host = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(embedCode(req.url.includes('below'))); }).listen(hostPort);
 const hostUrl = `http://localhost:${hostPort}/`;
@@ -72,7 +72,7 @@ for (const prof of ['mobile', 'desktop']) {
   const link = frame.locator('a[href]:not([href^="#"]):not([href=""])').filter({ visible: true }).first();
   if (await link.count()) {
     await link.click({ timeout: 3000 }).catch(() => {}); await sleep(600);
-    c.linkClick = page.url() === before[0] && frame.url() === before[1] && (await frame.locator('text=preview copy of the site').count()) ? 'notice shown, stayed put' : `page ${page.url()} frame ${frame.url()}`;
+    c.linkClick = page.url() === before[0] && frame.url() === before[1] && (await frame.locator('text=/viewing a snapshot of how this page|preview copy of the site/').count()) ? 'notice shown, stayed put' : `page ${page.url()} frame ${frame.url()}`;
   } else c.linkClick = 'no visible link';
   c.errors = [...new Set(errors)].slice(0, 3);
   await ctx.close();

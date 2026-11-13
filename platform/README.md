@@ -41,7 +41,7 @@ Copy files now use relative paths (`a/<file>`, `mobile`), so the same folder wor
   - `copy:<copyId>`: `{"v": 3, "status": "live" | "paused" | "deleted", "studio": "acme", "name": "minaab"}`
   - `name:<studio>/<name>`: `{"id": "k7f2qx9m", "current": "minaab"}` (current differs = old name, redirect)
 - The app writes these whenever the database changes something visitors see (approve, rename, pause, delete). The Worker never touches the database.
-- Paused copy: a neutral "This preview is paused for now." page, files hidden. Deleted: 410 "This preview has been removed."
+- Paused copy: a neutral "This Preserve is paused for now." page, files hidden. Deleted: 410 "This Preserve has been removed." (Visitors see "Preserve" only on these pages; elsewhere "snapshot". Jeremy, 2026-11-12.)
 - Every response carries `X-Robots-Tag: noindex...`; `/robots.txt` blocks AI-training crawlers. Files are cached at the edge for a year (content-hashed names); pages for a minute, so a pause or new version shows within about a minute. Byte-range requests work, which Safari needs for video.
 
 ## How the pieces connect (the user flows)

@@ -66,7 +66,7 @@ P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'
 // Visitors' Tour and Credits: the copy's notes (KV tour:<id>, written by the runner from the app's database) plus the
 // small tour script (R2 platform/tour.js). Not added in the app's frame, which draws its own pins.
 // Embeds shrink a Preserve to fit (a desktop layout on a phone is about a quarter size). The embed code tells the page
-// its scale ({type:'preserve-scale',scale}); this grows our own small UI back to normal size: the "preview copy" toast
+// its scale ({type:'preserve-scale',scale}); this grows our own small UI back to normal size: the "snapshot" toast
 // (baked into each page by harness/build.mjs, found by its role and z-index) and the tour's pill, panel and cards. Uses
 // the separate `scale` property so the toast's own transforms still work. Visitor pages only; the captured page is untouched.
 const FRAME_SCALE = `<style id="preserve-frame-scale-css">.preserve-scaled .preserve-toast{scale:var(--preserve-k);transform-origin:0 100%;box-sizing:border-box;bottom:calc(24px * var(--preserve-k))!important;max-width:calc(90vw / var(--preserve-k))!important}.preserve-scaled .pt-pill{scale:var(--preserve-k);transform-origin:0 100%}.preserve-scaled .pt-panel{scale:var(--preserve-k);transform-origin:0 100%;bottom:calc(12px + 50px * var(--preserve-k));max-height:calc((100vh - 24px) / var(--preserve-k) - 62px)}.preserve-scaled .pt-card{scale:var(--preserve-k);transform-origin:0 0;max-width:calc((100vw - 24px) / var(--preserve-k))}</style><script id="preserve-frame-scale">(function(){if(window.top===window)return;var d=document.documentElement;function mark(n){if(n.nodeType===1&&n.getAttribute('role')==='status'&&n.style.zIndex==='2147483647')n.classList.add('preserve-toast')}addEventListener('message',function(e){var m=e.data;if(e.source!==parent||!m||m.type!=='preserve-scale')return;var k=1/Math.min(1,Math.max(.1,+m.scale||1));d.style.setProperty('--preserve-k',k);d.classList.toggle('preserve-scaled',k>1.01)});[].forEach.call(document.body.children,mark);new MutationObserver(function(r){r.forEach(function(x){[].forEach.call(x.addedNodes,mark)})}).observe(document.body,{childList:true})})()</script>`;
@@ -79,7 +79,7 @@ const css = (s) => String(s).replace(/[\\"<>\n]/g, '');
 const fontTags = (list) => `<style id="preserve-fonts">${list.map((f) => `@font-face{font-family:"${css(f.family)}";font-weight:${css(f.weight)};font-style:${css(f.style)};font-display:swap;src:url(a/${css(f.src)})}`).join('')}</style>`;
 
 const page = (status, title, text) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="${ROBOTS}"><title>${title}</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif;color:#555;background:#f7f6f3;text-align:center;padding:0 24px}p{max-width:28em}</style></head><body><p>${text}</p></body></html>`, { status, headers: { 'content-type': TYPES.html, 'cache-control': 'no-store', 'x-robots-tag': ROBOTS } });
-const notFound = () => page(404, 'Not found', 'There is no preview at this address.');
+const notFound = () => page(404, 'Not found', 'There’s no Preserve at this address.');
 
 function isPhone(req) {
   return req.headers.get('sec-ch-ua-mobile') === '?1' || /iPhone|iPod|Android.*Mobile|Mobile.*Firefox|Windows Phone|Mobi/i.test(req.headers.get('user-agent') || '');
@@ -98,7 +98,7 @@ export async function reviewTokenOk(secret, id, token, now = Date.now()) {
 
 async function serveCopy(req, env, ctx, id, rest) {
   const rec = await lookup(env, `copy:${id}`);
-  if (!rec || rec.status === 'deleted') return rec ? page(410, 'Preview removed', 'This preview has been removed.') : notFound();
+  if (!rec || rec.status === 'deleted') return rec ? page(410, 'Preserve removed', 'This Preserve has been removed.') : notFound();
   // A copy waiting for its owner's approval is shown only in the app's review frame (and its files, by hashed name).
   const sharedFile = rec.fmt === 2 ? /(?:^|\/)a\/([\w.-]+)$/.exec(rest) : null;
   const asset = rec.fmt === 2 ? !!sharedFile : rest.startsWith('a/');
@@ -121,7 +121,7 @@ async function serveCopy(req, env, ctx, id, rest) {
     if (!so) return new Response(null, { status: 404 });
     return new Response(so.body, { headers: { 'content-type': 'image/webp', 'cache-control': rec.status === 'live' ? 'public, max-age=3600' : 'private, max-age=3600', 'x-robots-tag': ROBOTS, 'access-control-allow-origin': '*' } });
   }
-  if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preview paused', 'This preview is paused for now.');
+  if (rec.status !== 'live' && !inReview) return asset ? new Response(null, { status: 404 }) : page(200, 'Preserve paused', 'This Preserve is paused for now.');
   let key, vary = false, pageId = null;
   if (rec.fmt === 2) {
     if (sharedFile) key = `copies/${id}/a/${sharedFile[1]}`;
