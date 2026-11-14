@@ -255,7 +255,12 @@ they ran in, and a Preserve is shown at any width. Four families, each fixed by 
   looks like into the stylesheet, keyed on the whole of what changes on an element, so the player's class and
   attribute changes change what is seen. The player starts from the step that matches the page as saved.
 
-A row that had an end live (`cfg.fin`) stops at its ends instead of going round.
+- **Heights written in pixels** (7.0 slideshows): the script sets the slideshow's height from its shape and its
+  width at that moment. `snapshotDom()` marks the shape (`data-pv-ar`) and the build writes `aspect-ratio`.
+
+A row that had an end live (`cfg.fin`) stops at its ends instead of going round. A gallery that is
+not a strip answers a sideways swipe only where the live one did when the capture swiped it (`cfg.swipe`; ones that
+play on their own timer are not tested and keep answering).
 
 `node galcmp.mjs <liveUrl> <preserveUrl> <widths> [outDir]` measures every picture of every gallery on the live page
 and in the Preserve (at rest, after each arrow, during and after a drag) at each width and reports any more than 3
