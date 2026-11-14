@@ -261,6 +261,8 @@ restart();
 // from its drawn size. Shapes that ring the whole phrase (circle, box) cover the phrase, the rest go one per line.
 // Shapes are placed where the text sits once its entrance animation is over: an animation partway through (myrtle-green's headings rise
 // 18px into place) moves the text but not the shapes, which then sat a line-third low on every heading (2026-11-11).
+// Strokes may run past their box, as live (not crispy enough's scribbled underline lost its loops, 2026-11-13); only a
+// repeated wave is cut to length.
 const SHAPES_SCRIPT = `<script id="preserve-shapes">(function(){
 var RING=/circle|oval|ellipse|box|rect|bracket|bubble|cloud/i;
 function lines(el,hr){var out=[];[].forEach.call(el.getClientRects(),function(q){if(q.width<1)return;var l=out[out.length-1];
@@ -270,7 +272,7 @@ function moved(el,host){var x=0,y=0;for(var e=el;e&&e!==host;e=e.parentElement){
 function orig(n){var d=n.dataset;if(!d.pvW){d.pvW=parseFloat(n.style.width)||n.offsetWidth;d.pvH=parseFloat(n.style.height)||n.offsetHeight;var p=n.querySelector('path');if(p)d.pvD=p.getAttribute('d')||''}return{w:+d.pvW,h:+d.pvH,d:d.pvD||''}}
 function draw(n,shape,fs,w,h){var p=n.querySelector('path'),svg=n.querySelector('svg');if(!p||!svg)return;
 if(shape==='marker'){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w));return}
-var o=orig(n);svg.style.width=w+'px';svg.style.height=h+'px';svg.style.overflow='hidden';
+var o=orig(n);svg.style.width=w+'px';svg.style.height=h+'px';svg.style.overflow=/wave|zigzag/i.test(shape)?'hidden':'visible';
 if(/wave|zigzag/i.test(shape)){var sc=h/o.h||1,vw=w/sc,m=/^\\s*(M[^cCsSlLqQ]*)([\\s\\S]*)$/.exec(o.d),d=o.d;if(m&&o.w>0)for(var i=1;i*o.w<vw;i++)d+=' '+m[2];p.setAttribute('d',d);svg.setAttribute('viewBox','0 0 '+vw+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
 else{svg.setAttribute('viewBox','0 0 '+o.w+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
 p.removeAttribute('stroke-dasharray');p.removeAttribute('stroke-dashoffset');p.style.strokeDasharray='none';p.style.strokeDashoffset='0'}
@@ -335,6 +337,43 @@ if(!on){on=true;paint();d.style.opacity='1';im.style.visibility='hidden'}if(!raf
 addEventListener('resize',function(){if(on)paint()})});
 })();</script>`;
 
+// Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
+// data-pv-scrollshow: how far down they show, how they display, whether clicking goes back to the top).
+const SCROLL_SHOW_SCRIPT = `<script id="preserve-scroll-show">(function(){
+[].forEach.call(document.querySelectorAll('[data-pv-scrollshow]'),function(el){
+var c;try{c=JSON.parse(el.getAttribute('data-pv-scrollshow'))}catch(e){return}
+var y=Math.max(1,c.y||1)*0.75,on=null;
+function set(){var v=scrollY>=y;if(v===on)return;on=v;
+if(v){if(getComputedStyle(el).display==='none')el.style.display=c.d||'block';el.style.visibility='visible';el.style.opacity='1';el.style.pointerEvents='auto'}
+else{el.style.opacity='0';el.style.visibility='hidden';el.style.pointerEvents='none'}}
+set();addEventListener('scroll',set,{passive:true});
+if(c.top){el.style.cursor='pointer';el.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();scrollTo({top:0,behavior:'smooth'})},true)}
+});
+})();</script>`;
+
+// Pointer followers (hello world studio's 3D cursor, not crispy enough's little pictures over some blocks; 2026-11-13):
+// capture finds what moves with the mouse and marks it (capture.mjs pointerFollowers, data-pv-pointer; the block that
+// shows it, data-pv-ptrig). Ours moves it with the pointer, shows it only over its block when it has one, and hides the
+// arrow where the site did. Hidden until the pointer moves, and never on touch screens, which have no pointer.
+const POINTER_SCRIPT = `<script id="preserve-pointer">(function(){
+if(!(window.matchMedia&&matchMedia('(hover: hover) and (pointer: fine)').matches))return;
+var css='';
+[].forEach.call(document.querySelectorAll('[data-pv-pointer]'),function(el){
+var c;try{c=JSON.parse(el.getAttribute('data-pv-pointer'))}catch(e){return}
+var trig=c.on!=null?document.querySelector('[data-pv-ptrig="'+c.on+'"]'):null;if(c.on!=null&&!trig)return;
+if(c.cur==='none'){var t=trig?'[data-pv-ptrig="'+c.on+'"]':'body>:not([id^="preserve"]):not([class*="preserve"])';css+=(trig?'':'html,body,')+t+','+t+' *{cursor:none!important}'}
+var base=null,on=false;el.style.transition='none';el.style.visibility='hidden';
+function show(){if(on)return;on=true;if(getComputedStyle(el).display==='none')el.style.display='block';el.style.visibility='visible';el.style.opacity='1'}
+function hide(){on=false;el.style.visibility='hidden'}
+function place(e){show();if(!base){el.style.left='0px';el.style.top='0px';el.style.right='auto';el.style.bottom='auto';var r=el.getBoundingClientRect();base={x:r.left,y:r.top}}
+el.style.left=(e.clientX+c.dx-base.x)+'px';el.style.top=(e.clientY+c.dy-base.y)+'px'}
+if(trig){trig.addEventListener('pointermove',place);trig.addEventListener('pointerleave',hide)}
+else{document.addEventListener('pointermove',place);document.documentElement.addEventListener('pointerleave',hide)}
+addEventListener('resize',function(){base=null});
+});
+if(css){var st=document.createElement('style');st.textContent=css;document.head.appendChild(st)}
+})();</script>`;
+
 // Squarespace's "film grain" image effect (field theory, 2026-11-10): the picture under a fine noise that flickers. The
 // capture keeps the picture with one frame of grain in it (data-pv-fx="film-grain"); ours lays a few frames of our own
 // noise over it (made here from a fixed seed, so every visit is the same) and steps through them, so it flickers as
@@ -348,7 +387,7 @@ for(var f=0;f<N;f++){var cv=document.createElement('canvas');cv.width=cv.height=
 for(var i=0;i<im.data.length;i+=4){var v=rnd()*255|0;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255}x.putImageData(im,0,0);urls.push(cv.toDataURL())}
 var layers=[];document.querySelectorAll('img[data-pv-fx="film-grain"]').forEach(function(im){var d=document.createElement('div');if(im.className)d.className=im.className;
 d.setAttribute('style',im.getAttribute('style')||'');d.setAttribute('aria-hidden','true');d.style.pointerEvents='none';d.style.objectFit='';
-d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S*1.25+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.15';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
+d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S*1.25+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.24';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
 if(!layers.length||reduce)return;var k=0;
 setInterval(function(){if(window.__pvStill||document.hidden)return;k=(k+1)%N;layers.forEach(function(d){d.style.backgroundImage='url('+urls[k]+')'})},90);
 })();</script>`;
@@ -446,6 +485,10 @@ if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+l
 // Nothing on a phone page reaches past the screen's right edge: the live site clips it (with its own script or
 // styles), and a copy that didn't would let the phone zoom out to show it. Phone layout only: on desktop nothing
 // zooms out, and clipping there changed how Design Forward's own stylesheet laid out its columns.
+// Block hover animations kept by capture (capture.mjs markBlockHovers): the hover's end state, eased in and out. The
+// individual rotate/scale/translate properties add to any transform the block already has (entrance animations).
+// Added by a script, since the page's own stylesheet is rebuilt from what elements look like at rest.
+const HOVER_FX_CSS = `<script id="preserve-hover-fx">(function(){var s=document.createElement('style');s.textContent='@media (hover:hover){[data-pv-hover]{transition:rotate var(--pv-hd),scale var(--pv-hd),translate var(--pv-hd),opacity var(--pv-hd);transform-origin:var(--pv-hog,50% 50%)}[data-pv-hover]:hover{rotate:var(--pv-hr);scale:var(--pv-hs);translate:var(--pv-ht);opacity:var(--pv-ho)}}@media (prefers-reduced-motion:reduce){[data-pv-hover]{transition:none}}';document.head.appendChild(s)})();</script>`;
 const CLIP_CSS = '<style id="preserve-clip">html,body{overflow-x:clip}</style>';
 
 const OVERLAY_CSS = `<style id="preserve-overlays">${OVERLAY_SELECTORS.join(',')}{display:none!important}</style>`;
@@ -497,7 +540,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -512,6 +555,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $(OVERLAY_SELECTORS.join(',')).remove();
     $('head').prepend(OVERLAY_CSS);
     if (outName === 'mobile.html') $('head').append(CLIP_CSS);
+    if ($('[data-pv-hover]').length) $('body').append(HOVER_FX_CSS);
     // Spam-protection and tracking frames (reCAPTCHA on forms etc.) do nothing on a copy and throw errors offline.
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
@@ -566,6 +610,8 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if (outName !== 'index.html' && $('[style*="--image-component-container-height"]').length) $('body').append(FLUID_IMAGE_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
       if ($('img[data-pv-dims]').length) $('body').append(DIMS_SCRIPT);
       if ($('canvas[data-preserve-follow], img[data-pv-follow]').length) $('body').append(FOLLOW_SCRIPT);
+      if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
+      if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));

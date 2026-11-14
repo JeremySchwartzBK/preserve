@@ -193,6 +193,165 @@ async function scrollThrough(page) {
   await sleep(1500);
 }
 
+// Buttons that only show once the visitor scrolls down, such as "back to top" (not crispy enough's yellow arrow,
+// 2026-11-13): an owner script shows them, so the copy, saved at the top of the page, kept them hidden for good. Find
+// fixed pieces hidden at the top that show further down, note how far down they show and whether clicking one takes
+// the page back to the top, for our stand-in (build.mjs SCROLL_SHOW_SCRIPT).
+export async function scrollShown(page) {
+  const vis = () => page.evaluate(() => {
+    const out = {};
+    document.querySelectorAll('[data-preserve-ss]').forEach((e) => {
+      const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+      out[e.getAttribute('data-preserve-ss')] = r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.5 ? cs.display : '';
+    });
+    return out;
+  });
+  await page.evaluate(() => scrollTo(0, 0)); await sleep(600);
+  const n = await page.evaluate(() => {
+    let k = 0;
+    for (const e of document.body.querySelectorAll('*')) {
+      const cs = getComputedStyle(e);
+      if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]')) continue;
+      if (e.querySelectorAll('*').length > 20 || e.textContent.trim().length > 40) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05) continue;
+      e.setAttribute('data-preserve-ss', String(k++));
+    }
+    return k;
+  }).catch(() => 0);
+  if (!n) return [];
+  const h = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+  const top = await vis(), found = {};
+  for (const y of [150, 400, 800, 1500, 2500, 3500, Math.round(h / 2)].filter((y, i, a) => y < h && (i === a.length - 1 || y < a[a.length - 1]))) {
+    await page.evaluate((y) => scrollTo(0, y), y); await sleep(700);
+    const v = await vis();
+    for (const [k, d] of Object.entries(v)) if (d && !top[k] && !found[k]) found[k] = { y, d };
+  }
+  // Does clicking it take the page back to the top? (Only ones that don't lead to another page.)
+  for (const k of Object.keys(found)) {
+    await page.evaluate((y) => scrollTo(0, y), Math.round(h / 2)); await sleep(500);
+    const box = await page.evaluate((k) => { const e = document.querySelector(`[data-preserve-ss="${k}"]`); const a = e.closest('a[href]'); if (a && !/^#|^javascript:/i.test(a.getAttribute('href'))) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, k);
+    if (!box) continue;
+    await page.mouse.click(box.x, box.y); await sleep(1500);
+    if (await page.evaluate(() => scrollY) < 40) found[k].top = 1;
+  }
+  await page.evaluate((found) => {
+    for (const [k, f] of Object.entries(found)) { const e = document.querySelector(`[data-preserve-ss="${k}"]`); if (e) e.setAttribute('data-pv-scrollshow', JSON.stringify(f)); }
+    document.querySelectorAll('[data-preserve-ss]').forEach((e) => e.removeAttribute('data-preserve-ss'));
+    scrollTo(0, 0);
+  }, found);
+  await sleep(600);
+  return Object.values(found);
+}
+
+// Pointer followers (2026-11-13: hello world studio's 3D cursor, not crispy enough's little pictures that follow the
+// pointer over some blocks): owner scripts hide the arrow and move a small fixed element with the pointer, everywhere
+// or only while it is over one block. Those scripts are dropped, so the copy showed the follower frozen where it sat
+// (or not at all). Find them by watching what moves with the mouse: anything fixed that ignores the pointer and moves
+// by as much as the mouse did. For the hidden ones, hover each block to find the one that shows it. Each is marked with
+// what our stand-in (build.mjs POINTER_SCRIPT) needs: where it sits relative to the pointer, the block that shows it,
+// and whether the arrow is hidden there. Desktop only: phones have no pointer.
+async function pointerFollowers(page) {
+  const n = await page.evaluate(() => {
+    let k = 0;
+    for (const el of document.body.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+      if (cs.pointerEvents !== 'none') continue;
+      const par = el.parentElement && getComputedStyle(el.parentElement);
+      if (cs.position !== 'fixed' && !(cs.position === 'absolute' && par && par.position === 'fixed' && par.pointerEvents === 'none')) continue;
+      if (el.querySelectorAll('*').length > 30 || el.textContent.trim().length > 60) continue;
+      el.setAttribute('data-preserve-fc', String(k++));
+    }
+    return k;
+  }).catch(() => 0);
+  if (!n) return [];
+  const snap = () => page.evaluate(() => [...document.querySelectorAll('[data-preserve-fc]')].map((e) => {
+    const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+    return { k: +e.getAttribute('data-preserve-fc'), vis: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none', x: r.left, y: r.top };
+  }));
+  const cursorAt = (x, y) => page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? getComputedStyle(e).cursor : ''; }, [x, y]);
+  const moved = (a, b, dx, dy) => a && b && a.vis && b.vis && Math.abs((b.x - a.x) - dx) < Math.abs(dx) * 0.25 + 4 && Math.abs((b.y - a.y) - dy) < Math.abs(dy) * 0.25 + 4;
+  const found = [];
+  // Everywhere on the page.
+  await page.evaluate(() => scrollTo(0, 0)); await sleep(300);
+  await page.mouse.move(300, 300, { steps: 5 }); await sleep(700);
+  const s1 = await snap();
+  await page.mouse.move(700, 500, { steps: 12 }); await sleep(1000);
+  const s2 = await snap();
+  for (const b of s2) {
+    const a = s1.find((x) => x.k === b.k);
+    if (moved(a, b, 400, 200)) found.push({ k: b.k, t: 'page', dx: Math.round(b.x - 700), dy: Math.round(b.y - 500), cur: await cursorAt(700, 500) === 'none' ? 'none' : '' });
+  }
+  // Only over a block: hover each block and see which hidden follower appears and moves with the pointer.
+  const hidden = s2.filter((x) => !x.vis && !found.some((f) => f.k === x.k)).map((x) => x.k);
+  if (hidden.length) {
+    const blocks = await page.evaluate(() => {
+      const bs = [...document.querySelectorAll('.sqs-block[id], .fe-block[id], [id^="block-"]')].slice(0, 200);
+      bs.forEach((b, i) => b.setAttribute('data-preserve-pb', String(i)));
+      return bs.length;
+    });
+    for (let i = 0; i < blocks && hidden.length; i++) {
+      // Sites often scroll smoothly: jump, then measure once the page has settled.
+      const ok = await page.evaluate((i) => { const b = document.querySelector(`[data-preserve-pb="${i}"]`); if (!b) return false; b.scrollIntoView({ block: 'center', behavior: 'instant' }); return true; }, i);
+      if (!ok) continue;
+      await sleep(150);
+      const box = await page.evaluate((i) => { const r = document.querySelector(`[data-preserve-pb="${i}"]`).getBoundingClientRect(); return r.width > 20 && r.height > 20 && r.top >= 0 && r.bottom <= innerHeight + r.height ? { x: r.left + r.width / 2, y: Math.max(10, Math.min(innerHeight - 30, r.top + r.height / 2)) } : null; }, i);
+      if (!box) continue;
+      await page.mouse.move(box.x, box.y, { steps: 2 }); await sleep(120);
+      const a = await snap();
+      if (!a.some((x) => x.vis && hidden.includes(x.k))) continue;
+      await page.mouse.move(box.x + 30, box.y + 15, { steps: 4 }); await sleep(250);
+      const b = await snap();
+      for (const k of [...hidden]) {
+        const p = a.find((x) => x.k === k), q = b.find((x) => x.k === k);
+        if (!moved(p, q, 30, 15)) continue;
+        found.push({ k, t: 'block', b: i, dx: Math.round(q.x - box.x - 30), dy: Math.round(q.y - box.y - 15), cur: await cursorAt(box.x + 30, box.y + 15) === 'none' ? 'none' : '' });
+        hidden.splice(hidden.indexOf(k), 1);
+      }
+    }
+  }
+  await page.mouse.move(1, 1); await sleep(300);
+  await page.evaluate((found) => {
+    for (const f of found) {
+      const e = document.querySelector(`[data-preserve-fc="${f.k}"]`); if (!e) continue;
+      const c = { dx: f.dx, dy: f.dy, cur: f.cur };
+      if (f.t === 'block') { const b = document.querySelector(`[data-preserve-pb="${f.b}"]`); if (!b) continue; b.setAttribute('data-pv-ptrig', String(f.k)); c.on = String(f.k); }
+      e.setAttribute('data-pv-pointer', JSON.stringify(c));
+    }
+    document.querySelectorAll('[data-preserve-fc]').forEach((e) => e.removeAttribute('data-preserve-fc'));
+    document.querySelectorAll('[data-preserve-pb]').forEach((e) => e.removeAttribute('data-preserve-pb'));
+    scrollTo(0, 0);
+  }, found);
+  await sleep(500);
+  return found.map((f) => ({ t: f.t, dx: f.dx, dy: f.dy, cur: f.cur }));
+}
+
+// Squarespace's block animations set to play on hover (not crispy enough's boxes tilt a little, 2026-11-13): the
+// settings sit in a JSON script next to the block, which Squarespace's own code reads and the copy drops. Keep the
+// hover's end state on the block itself (data-pv-hover with CSS variables) for our stylesheet (build.mjs HOVER_FX_CSS).
+function markBlockHovers() {
+  let n = 0;
+  for (const t of document.querySelectorAll('script[data-block-animations]')) {
+    let j; try { j = JSON.parse(t.textContent); } catch { continue; }
+    const a = (j.animations || []).find((x) => x.trigger === 'hover' && (x.triggerElement || 'self') === 'self' && x.transforms && x.transforms[0]);
+    const el = t.closest('.fe-block') || t.closest('.sqs-block');
+    if (!a || !el) continue;
+    const x = a.transforms[0], v = (o, d) => (o && o.value != null ? o.value : d), u = (o, d) => (o && o.unit) || d;
+    const dur = Math.max(0.05, Math.min(3, v(a.duration, 0.5)));
+    const ease = a.ease === 'linear' ? 'linear' : a.ease === 'spring' ? `cubic-bezier(.34,${(1 + Math.min(1, v({ value: a.bounce }, 0.5)) * 0.9).toFixed(2)},.64,1)` : 'cubic-bezier(.25,.1,.25,1)';
+    const o = j.transforms && j.transforms.origin;
+    el.style.setProperty('--pv-hr', `${v(x.rotation && x.rotation.z, 0)}deg`);
+    el.style.setProperty('--pv-hs', `${v(x.scale && x.scale.x, 100) / 100} ${v(x.scale && x.scale.y, 100) / 100}`);
+    el.style.setProperty('--pv-ht', `${v(x.offset && x.offset.x, 0)}${u(x.offset && x.offset.x, 'px')} ${v(x.offset && x.offset.y, 0)}${u(x.offset && x.offset.y, 'px')}`);
+    el.style.setProperty('--pv-ho', `${v(x.opacity, 100) / 100}`);
+    el.style.setProperty('--pv-hd', `${dur}s ${ease}`);
+    if (o) el.style.setProperty('--pv-hog', `${v(o.x, 50)}${u(o.x, '%')} ${v(o.y, 50)}${u(o.y, '%')}`);
+    el.setAttribute('data-pv-hover', '');
+    n++;
+  }
+  return n;
+}
+
 // Widgets built as web components (e.g. a third-party search box) draw inside a shadow root, which a DOM snapshot can't
 // keep, so the copy would show nothing there. Photograph each visible one now, as the visitor sees it, and mark the
 // element so the export puts the picture in its place (same size; clicking it shows the replica note).
@@ -245,6 +404,13 @@ async function canvasStills(page, outDir, prof, info) {
       let url = null; try { url = c.toDataURL('image/png'); } catch {}  // a canvas drawn from another site can't be read
       if (!url || url.length < 200) continue;
       c.setAttribute('data-preserve-canvas', String(out.length));
+      // Where it sits in the box it's placed against, in percent, so the copy can keep that at any width (field theory's
+      // film-grain picture stops above the strip at the foot of its section, 2026-11-13).
+      const op = c.offsetParent;
+      if (op && cs.position === 'absolute') {
+        const q = op.getBoundingClientRect();
+        if (q.width > 0 && q.height > 0) c.setAttribute('data-preserve-cbox', [r.left - q.left, r.top - q.top].map((v, i) => (100 * v / (i ? q.height : q.width)).toFixed(3)).concat([(100 * r.width / q.width).toFixed(3), (100 * r.height / q.height).toFixed(3)]).join(','));
+      }
       out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
       // Squarespace's radial gradient background that follows the pointer: its settings, with colours resolved, so
       // our stand-in (build.mjs FOLLOW_SCRIPT) can move the glow the way the site does.
@@ -397,9 +563,12 @@ export async function capture(url, outDir) {
     await page.evaluate((y) => scrollTo(0, y), y0); await sleep(500);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
+    (info.scrollShown ||= {})[prof] = await scrollShown(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
+    if (prof === 'desktop') (info.pointers ||= {})[prof] = await pointerFollowers(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await shadowStills(page, outDir, prof, info);
     await canvasStills(page, outDir, prof, info);
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
+    (info.blockHovers ||= {})[prof] = await page.evaluate(markBlockHovers).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it
     // saw. The copy redoes that sum at other widths (build.mjs HEADER_PAD_SCRIPT), so it needs the header's height that
     // the padding was worked out from: measured here as Squarespace saw it, announcement bar included.

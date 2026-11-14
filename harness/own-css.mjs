@@ -286,8 +286,9 @@ async function layoutCss(base, stage, layout, report) {
     for (const w of widthRules) css += `@media ${w.media}{\n${block(w.d)}}\n`;
     if (Object.keys(rm).length) css += `@media (prefers-reduced-motion:reduce){\n${block(rm)}}\n`;
     css += stateRules.join('\n') + '\n';
-    // Animations still in use, under our own names.
-    const used = [...new Set([...css.matchAll(/animation(?:-name)?:([^;}]*)/g)].flatMap((m) => m[1].split(/[\s,]+/)).filter((x) => /^[a-zA-Z_][\w-]*$/.test(x)))];
+    // Animations still in use, under our own names. (A name written with !important right after it, as plugins do,
+    // counts too: not crispy enough's bobbing "Take the quiz" sign lost its keyframes, 2026-11-13.)
+    const used = [...new Set([...css.matchAll(/animation(?:-name)?:([^;}]*)/g)].flatMap((m) => m[1].replace(/!\s*important/g, ' ').split(/[\s,]+/)).filter((x) => /^[a-zA-Z_][\w-]*$/.test(x)))];
     const kf = await page.evaluate((u) => window.__oc.keyframes(u), used);
     let kfCss = '', kn = 0;
     const nextName = () => 'k' + (kn++).toString(36);
