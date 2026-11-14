@@ -429,9 +429,17 @@ async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxM
         X.forEach((xs) => { for (let j = 0; j < N; j++) { const n = (j + 1) % N; if (!far(xs[j]) && !far(xs[n]) && xs[n] > xs[j]) gaps.push(xs[n] - xs[j] - Wd[j]); } });
         // Never two slides in view at once (a phone reel: each picture wider than the screen): they follow on with no gap.
         // (Mid-step they are, for a moment: the frames watched during the first step give their gap.)
-        if (!gaps.length) for (const [, xs] of track.rows) for (let j = 0; j < N; j++) {
-          const n = (j + 1) % N, a = tracked.indexOf(sl[j]), b = tracked.indexOf(sl[n]);
-          if (a >= 0 && b >= 0 && !far(xs[a]) && !far(xs[b]) && xs[b] > xs[a] && xs[b] - xs[a] < Wd[j] + 200) gaps.push(xs[b] - xs[a] - Wd[j]);
+        // Only when the frames agree: a slide brought in from where it was parked passes through every gap on its way
+        // (not crispy enough's phone banner fell back to the old player, 2026-11-14).
+        if (!gaps.length) {
+          const mid = [];
+          for (const [, xs] of track.rows) for (let j = 0; j < N; j++) {
+            const n = (j + 1) % N, a = tracked.indexOf(sl[j]), b = tracked.indexOf(sl[n]);
+            if (a >= 0 && b >= 0 && !far(xs[a]) && !far(xs[b]) && xs[b] > xs[a] && xs[b] - xs[a] < Wd[j] + 200) mid.push(xs[b] - xs[a] - Wd[j]);
+          }
+          mid.sort((p, q) => p - q);
+          const m = mid.length ? mid[mid.length >> 1] : 0, near = mid.filter((v) => Math.abs(v - m) <= 1.5);
+          if (mid.length >= 3 && near.length >= mid.length * 0.8) gaps.push(...near);
         }
         if (!gaps.length) gaps.push(0);
         gaps.sort((a, b) => a - b); const gap = Math.round(gaps[gaps.length >> 1] * 10) / 10;
