@@ -102,6 +102,46 @@ async function srcset(v, from) {
   return parts.join(', ');
 }
 
+// What a sign-up form in a frame asks for: its heading, its fields and its button, read from the frame when its page
+// is there but unstyled; a frame we were stopped from seeing at all gets the usual sign-up shape (an email and a
+// button) when its address says it is a form. With the page's font and primary button look. Null when it isn't a form.
+async function formOutline(f, page, src, text) {
+  const fr = await f.contentFrame().catch(() => null);
+  let o = fr ? await fr.evaluate(() => {
+    const vis = (e) => { const cs = getComputedStyle(e); return cs.display !== 'none' && cs.visibility !== 'hidden' && e.type !== 'hidden'; };
+    const lab = (e) => {
+      const l = (e.id && document.querySelector(`label[for="${CSS.escape(e.id)}"]`)) || e.closest('label');
+      return ((l && l.innerText) || e.getAttribute('placeholder') || e.getAttribute('aria-label') || e.name || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    };
+    const fields = [...document.querySelectorAll('input, select, textarea')].filter((e) => vis(e) && !/^(submit|button|image|reset)$/i.test(e.type))
+      .slice(0, 8).map((e) => ({ kind: e.tagName === 'TEXTAREA' ? 'area' : e.type === 'checkbox' || e.type === 'radio' ? 'check' : 'text', label: lab(e), ph: e.getAttribute('placeholder') || '' }));
+    const b = [...document.querySelectorAll('button, input[type=submit]')].find(vis);
+    const h = [...document.querySelectorAll('h1, h2, h3, h4, legend')].find((e) => vis(e) && e.innerText.trim());
+    return fields.length ? { title: h ? h.innerText.replace(/\s+/g, ' ').trim().slice(0, 80) : '', fields, button: b ? (b.innerText || b.value || '').trim().slice(0, 30) : '' } : null;
+  }).catch(() => null) : null;
+  if (!o && /form|signup|sign-up|subscribe|newsletter|mailchimp|list-manage|flodesk|convertkit|kit\.com|klaviyo|mailerlite|cobrand|typeform|jotform/i.test(src)) o = { title: '', fields: [{ kind: 'text', label: 'Email', ph: 'Email address' }], button: '' };
+  if (!o) return null;
+  o.button = o.button || 'Sign up';
+  o.look = await page.evaluate(() => {
+    const cs = (e) => e && getComputedStyle(e);
+    const p = cs(document.querySelector('p')) || cs(document.body), btn = cs(document.querySelector('.sqs-button-element--primary, .ps-button-element--primary, button, .btn, [class*="button"]'));
+    return { font: p.fontFamily, color: p.color, size: p.fontSize, bbg: btn ? btn.backgroundColor : p.color, bfg: btn ? btn.color : '#fff', bfont: btn ? btn.fontFamily : p.fontFamily, brad: btn ? btn.borderRadius : '0px' };
+  }).catch(() => ({}));
+  return o;
+}
+const escH = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+// The stand-in itself: plain fields that can't be sent (clicking anything shows the replica note).
+function formStandIn(s) {
+  const o = s.form, L = o.look || {}, q = (v, d) => escH(v || d);
+  const field = (x) => x.kind === 'check'
+    ? `<div style="display:flex;gap:.5em;align-items:center"><span style="width:1em;height:1em;border:1px solid currentColor;flex:none"></span><span>${escH(x.label)}</span></div>`
+    : `<div style="display:flex;flex-direction:column;gap:.35em;text-align:left">${x.label && x.label !== x.ph ? `<span style="font-size:.85em">${escH(x.label)}</span>` : ''}<span style="display:block;border:1px solid currentColor;opacity:.85;padding:.7em .8em;min-height:${x.kind === 'area' ? '5em' : '1.2em'};font-size:.9em;color:inherit"><span style="opacity:.55">${escH(x.ph)}</span></span></div>`;
+  return `<div class="preserve-embed-form" data-preserve-replica="1" role="img" aria-label="Sign-up form" style="box-sizing:border-box;width:100%;max-width:${s.w}px;height:${s.h}px;margin:0 auto;overflow:hidden;display:flex;flex-direction:column;justify-content:center;gap:1em;padding:1.5em;cursor:pointer;font-family:${q(L.font, 'inherit')};color:${q(L.color, 'inherit')};font-size:${q(L.size, '16px')}">`
+    + (o.title ? `<div style="font-size:1.3em;text-align:center">${escH(o.title)}</div>` : '')
+    + o.fields.map(field).join('')
+    + `<span style="display:block;align-self:center;padding:.8em 2em;background:${q(L.bbg, '#000')};color:${q(L.bfg, '#fff')};font-family:${q(L.bfont, 'inherit')};border-radius:${q(L.brad, '0')}">${escH(o.button)}</span></div>`;
+}
+
 // Third-party embeds (signup widgets, maps, feeds) would keep a hosted copy talking to outside servers. Photograph each
 // one as it looks on the page and put the still image in its place; clicking it shows the replica notice.
 async function embedStills(layout, pageUrl) {
@@ -146,6 +186,10 @@ async function embedStills(layout, pageUrl) {
       return links.length > 0 && !links.some(ok) && ![...document.querySelectorAll('style')].some((st) => (st.textContent || '').length > 200);
     }).catch(() => false);
     const blocked = unstyled || /verifying (?:you are human|your browser)|checking your browser|security checkpoint|are you (?:a )?(?:robot|human)|just a moment\.\.\.|captcha/i.test(text.slice(0, 2000));
+    // A sign-up form we couldn't show as it looked: what it asks for, so the copy can draw a plain stand-in in the
+    // page's own font and button colours at the same size (Jeremy's call for colorizemusic, 2026-11-13).
+    const form = blocked && box ? await formOutline(f, page, src, text) : null;
+    if (form) { out.push({ src, file: null, form, w: Math.round(box.width), h: Math.round(box.height) }); continue; }
     const shot = !blocked && box && box.width > 2 && box.height > 2 ? await f.screenshot({ timeout: 15000 }).catch(() => null) : null;
     // A widget that didn't draw (bot checks often stop it in our capture browser) keeps its space as an empty box.
     const st = shot && (await sharp(shot).greyscale().stats()).channels[0];
@@ -271,6 +315,7 @@ for (const layout of ['desktop', 'mobile']) {
   $('iframe').each((i, el) => {
     const s = shots[i]; if (!s) return;
     stills.push({ layout, src: s.src.slice(0, 80), replaced: !!s.file });
+    if (!s.file && s.form && s.h) return $(el).replaceWith(formStandIn(s));
     if (!s.file) return $(el).replaceWith(s.h ? `<div class="preserve-embed-blank" style="width:100%;max-width:${s.w}px;height:${s.h}px"></div>` : '');
     $(el).replaceWith(`<img src="${s.file}" alt="" loading="lazy" decoding="async" class="preserve-embed-still" style="display:block;width:100%;max-width:${s.w}px;height:auto;aspect-ratio:${s.w}/${s.h};cursor:pointer" data-preserve-replica="1">`);
   });
@@ -334,9 +379,13 @@ for (const layout of ['desktop', 'mobile']) {
     const cls = $(el).attr('class');
     const follow = $(el).attr('data-preserve-follow');
     const fx = $(el).attr('data-preserve-fx');
+    const ptr = $(el).attr('data-pv-pointer');
     // Laid over its section (the usual background effect): fill it at any width, not the capture width's pixels.
-    const fill = /position\s*:\s*absolute/.test(style) ? ';left:0;top:0;width:100%;height:100%' : '';
-    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);
+    const cbox = ($(el).attr('data-preserve-cbox') || '').split(',').map(Number);
+    const fill = ptr || !/position\s*:\s*absolute/.test(style) ? ''
+      : cbox.length === 4 && cbox.every(Number.isFinite) ? `;left:${cbox[0]}%;top:${cbox[1]}%;width:${cbox[2]}%;height:${cbox[3]}%`
+      : ';left:0;top:0;width:100%;height:100%';
+    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}${ptr ? ` data-pv-pointer="${ptr.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);
     stills.push({ layout, src: 'canvas', replaced: true });
   }
   // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):

@@ -114,7 +114,18 @@
   const active = (conds) => conds.every(([k, v]) => k !== 'media' || matchMedia(v).matches);
 
   // Cascade one element's matched rules (already sorted) into its winning declarations, in cascade order.
-  const SH_KEEP = { border: ['border-radius', 'border-collapse', 'border-spacing', 'border-image'] };
+  // Properties whose names start like a shorthand's but that the shorthand doesn't set. (`flex` wiped out a later
+  // `flex-flow: wrap` on margaret rajic's centred header, so the logo and links fell out of place, 2026-11-13.)
+  const SH_KEEP = {
+    border: ['border-radius', 'border-collapse', 'border-spacing', 'border-image'],
+    flex: ['flex-flow', 'flex-direction', 'flex-wrap'],
+    overflow: ['overflow-wrap', 'overflow-anchor', 'overflow-clip-margin'],
+    outline: ['outline-offset'],
+    background: ['background-blend-mode'],
+    grid: ['grid-row', 'grid-column', 'grid-area', 'grid-gap', 'grid-row-gap', 'grid-column-gap'],
+    mask: ['mask-type'],
+    'text-decoration': ['text-decoration-skip'],
+  };
   function cascade(list) {
     const m = new Map(), imp = new Map();
     for (const r of list) for (const [name, v, important] of r.ds) {
