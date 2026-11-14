@@ -177,30 +177,51 @@ addEventListener('load',function(){draw(false)});
 // stepped each one through its slides and wrote down what every step changes (capture.mjs recordGalleries, in
 // data-pv-gal). This plays those steps back: on its "next" / "previous" arrows, and on the site's own timer when the
 // site played it by itself (paused while our checks compare pictures, and for visitors who ask for less motion).
-// Classes are the ones this copy gives to the classes the capture saw (renamed as our stylesheet renames them), learned
-// from the first step, where both the shown and the hidden slides' classes are present. Positions were measured at the
+// Each step adds and removes the classes the capture saw change (under the names our stylesheet gives them); how a
+// slide and what is inside it look in each step is written into our stylesheet (own-css.mjs, gallery states), which
+// plays every step once through g.__pvShow while it records.
+// The page as saved is not always the first recorded step (a slideshow that plays by itself moved on in between): the
+// player starts from the step whose marks match the page, so the first press of an arrow always changes the picture. Positions were measured at the
 // capture width; at any other width they are scaled by how much wider or narrower the gallery is. Squarespace moved
 // some galleries with its own animation code rather than CSS, so moving parts get a short slide of their own, played
 // as the visitor sees it (2026-11-11, backbipoc and sunnie): a slide waiting far off to the side comes in from the edge
 // the others move away from, one leaving goes the same way before it is parked, and one that wraps round from the
 // front of the line to the back comes in from the edge too, never sweeping back across the gallery.
+// A ticker (cfg.strip.drift, pixels a second: a strip the live page kept drifting sideways without rest) drifts the same
+// way, while it is on screen, and holds still for visitors who ask for less motion.
+// A row that had an end on the live page (cfg.fin: the last press of its arrow changed nothing) stops at its ends.
+// A moving part whose own styles already slide it (a summary carousel's row: transition: transform 0.4s) is left to them.
+// A strip of slides (cfg.strip from the capture: list carousels, banner slideshows, reels; 2026-11-13, sunnie, not crispy
+// enough, borrachito) is not replayed from the capture's pixel offsets, which overlapped the slides or opened gaps at
+// any width but the capture's. strip() lays it out from each slide's own size at this width: slide after slide with the
+// recorded gap, the current one resting at the strip's start or middle as it did live, going round for ever if it did
+// live. Arrows move it along the path the live one took over time; where the live one could be dragged, a drag moves it
+// with the pointer (by a slide and its gap for each slide's width, as Squarespace's does) and lets go to the next slide
+// in the drag's direction once past 20 pixels. Slides out of view are parked, and what marks a slide as current, in view or out of view (aria-hidden, data-active) follows.
 const GALLERY_SCRIPT = `<script id="preserve-gallery">(function(){
 var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 [].forEach.call(document.querySelectorAll('[data-pv-gal]'),function(g){
 var cfg;try{cfg=JSON.parse(g.getAttribute('data-pv-gal'))}catch(e){return}
-var steps=cfg.steps||[],n=steps.length;if(n<2)return;
+var steps=cfg.steps||[],n=steps.length;if(n<2&&!(n&&cfg.strip&&cfg.strip.drift))return;
 var els=[];[].forEach.call(g.querySelectorAll('[data-pv-gi]'),function(e){els[+e.getAttribute('data-pv-gi')]=e});
 if(g.hasAttribute('data-pv-gi'))els[+g.getAttribute('data-pv-gi')]=g;
-var map={},base=[];
-els.forEach(function(e,j){if(!e)return;var c=steps[0][j][0];if(!(c in map))map[c]=e.getAttribute('class')||'';base[j]=e.getAttribute('style')||''});
-function cls(e,j,c){if(c in map)return e.setAttribute('class',map[c]);var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
-was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(x)});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(x)})}
+var base=[];els.forEach(function(e,j){if(e)base[j]=e.getAttribute('style')||''});
+var home=els.map(function(e,j){if(!e)return null;var a={};steps.forEach(function(st){var o=kv(st[j][2]);for(var k in o)a[k]=e.getAttribute(k)});return{c:e.getAttribute('class'),a:a}});
+var kids=[];els.forEach(function(e){var p=e&&e.parentElement;if(p&&!kids.some(function(x){return x[0]===p}))kids.push([p,[].slice.call(p.childNodes)])});
+function back(skip){els.forEach(function(e,j){if(!e||(skip&&skip[j]))return;var h=home[j];if(h.c==null)e.removeAttribute('class');else e.setAttribute('class',h.c);
+if(base[j])e.setAttribute('style',base[j]);else e.removeAttribute('style');for(var k in h.a){if(h.a[k]==null)e.removeAttribute(k);else e.setAttribute(k,h.a[k])}});
+kids.forEach(function(x){x[1].forEach(function(n){x[0].appendChild(n)})})}
+var tm={},raw=!document.getElementById('pv-css');function rn(x){return x.replace(/^sqsrte-/,'rte-').replace(/^sqsp-/,'ps-').replace(/^sqs-/,'ps-').replace(/^tweak-/,'tw-')}
+els.forEach(function(e){if(e)(e.getAttribute('class')||'').split(/\\s+/).forEach(function(y){var r=rn(y);if(r!==y)tm[r]=y})});
+function ren(x){return tm[x]||(raw&&/^ps-/.test(x)?'sqs-'+x.slice(3):raw&&/^tw-/.test(x)?'tweak-'+x.slice(3):x)}
+function cls(e,j,c){var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
+was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(ren(x))});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(ren(x))})}
 function scale(css){var k=g.getBoundingClientRect().width/(cfg.w||1);if(!k||Math.abs(k-1)<0.01)return css;
 return css.replace(/(^|;)\\s*(left|right|transform|translate|margin-left|margin-right)\\s*:[^;]*/g,function(d){return d.replace(/(-?\\d*\\.?\\d+)px/g,function(_,v){return(+v*k).toFixed(2)+'px'})})}
-var cur=0;
+var cur=0;(function(){for(var i=0;i<n;i++){var ok=true,any=false;for(var j=0;j<els.length&&ok;j++){if(!els[j])continue;var o=kv(steps[i][j][2]);for(var k in o){any=true;if(els[j].getAttribute(k)!==o[k]){ok=false;break}}}if(ok&&any){cur=i;return}}})();var cur0=cur;
 function decl(css){var o={};(css||'').split(';').forEach(function(d){var k=d.indexOf(':');if(k>0)o[d.slice(0,k).trim().toLowerCase()]=d.slice(k+1).trim()});return o}
 var first=steps[0].map(function(s){return decl(s[1])});
-function put(i){steps[i].forEach(function(s,j){var e=els[j];if(!e)return;cls(e,j,s[0]);
+function put(i,skip){steps[i].forEach(function(s,j){var e=els[j];if(!e||(skip&&skip[j]))return;cls(e,j,s[0]);
 e.setAttribute('style',base[j]);if(!base[j])e.removeAttribute('style');
 if(i){var to=decl(scale(s[1]||''));for(var k in first[j])if(!(k in to))e.style.removeProperty(k);
 for(k in to){var v=to[k],imp=/!important$/.test(v);e.style.setProperty(k,v.replace(/\\s*!important$/,''),imp?'important':'')}}
@@ -210,12 +231,13 @@ var E='.65s cubic-bezier(.215,.61,.355,1)',ends=[];
 function draw(i,anim,dir){ends.forEach(clearTimeout);ends=[];
 if(!anim||reduce){els.forEach(function(e){if(e){e.style.transition='none';e.style.translate=''}});put(i);return}
 var gl=g.getBoundingClientRect(),W=gl.width||1,x=function(e){return e?e.getBoundingClientRect().left-gl.left:0};
-var b4=els.map(function(e){if(e){e.style.transition='opacity '+E;e.style.translate=''}return x(e)});
-put(i);els.forEach(function(e){if(e)e.style.transition='opacity '+E});var af=els.map(x),near=function(v){return v>-2*W&&v<3*W};
+var own=els.map(function(e){if(!e)return false;e.style.transition='';var s=getComputedStyle(e);return /transform|translate|left|all/.test(s.transitionProperty)&&parseFloat(s.transitionDuration)>0});
+var b4=els.map(function(e,j){if(e&&!own[j]){e.style.transition='opacity '+E;e.style.translate=''}return x(e)});
+put(i);els.forEach(function(e,j){if(e&&!own[j])e.style.transition='opacity '+E});var af=els.map(x),near=function(v){return v>-2*W&&v<3*W};
 var ds=[];els.forEach(function(e,j){var d=af[j]-b4[j];if(e&&near(b4[j])&&near(af[j])&&Math.abs(d)>1&&Math.abs(d)<1.5*W)ds.push(d)});
 var sg=dir||(ds.length?(ds.filter(function(d){return d<0}).length>=ds.length/2?1:-1):1);ds=ds.filter(function(d){return (d<0)===(sg>0)});
 ds.sort(function(a,b){return Math.abs(a)-Math.abs(b)});var D=ds.length?ds[ds.length>>1]:-sg*W;
-els.forEach(function(e,j){if(!e)return;var a=af[j],b=b4[j],d=a-b,from=0,to=0,park=false;if(Math.abs(d)<1)return;
+els.forEach(function(e,j){if(!e||own[j])return;var a=af[j],b=b4[j],d=a-b,from=0,to=0,park=false;if(Math.abs(d)<1)return;
 if(near(a)&&near(b)&&(d<0)===(D<0)&&Math.abs(d)<1.5*W){from=-d}
 else if(near(a)){from=-D}
 else if(near(b)){from=-d;to=-d+D;park=true}
@@ -229,22 +251,77 @@ ps.forEach(function(p){var kids=[];els.forEach(function(e,j){if(e&&e.parentEleme
 var moved=kids.some(function(j){return steps[i][j][3]!==steps[0][j][3]})||i===0;if(!moved)return;
 var anchor=null;kids.forEach(function(j){var nx=els[j].nextSibling;while(nx&&kids.some(function(k){return els[k]===nx}))nx=nx.nextSibling;if(!anchor||(nx&&anchor.compareDocumentPosition(nx)&4))anchor=nx});
 kids.sort(function(a,b){return steps[i][a][3]-steps[i][b][3]}).forEach(function(j){p.insertBefore(els[j],anchor)})})}
+function strip(){var S=cfg.strip,sl=S.sl.map(function(j){return els[j]});if(sl.some(function(e){return !e}))return false;
+var N=sl.length,par=sl[0].parentElement,skip={};S.sl.forEach(function(j){skip[j]=1});
+var W=[],nat=[],st=[],L=0,pw=0,vl=0,vr=0,pos=S.cur[0],raf=0,shown=0,tgt=null,rn={};
+['c','v','o'].forEach(function(r){for(var k in (S.roles||{})[r]||{})rn[k]=1});
+function tf(e,v){if(v)e.style.setProperty('transform',v,'important');else e.style.removeProperty('transform')}
+function measure(){var ph=par.getBoundingClientRect().height;
+if(S.ar&&ph)sl.forEach(function(e,j){var h=ph*S.hk;e.style.height=h+'px';e.style.width=h*S.ar[j]+'px'});
+var keep=sl.map(function(e){var t=e.style.transform;e.style.transition='none';tf(e,'none');return t});
+var pr=par.getBoundingClientRect();pw=pr.width;
+sl.forEach(function(e,j){var r=e.getBoundingClientRect();nat[j]=r.left-pr.left;W[j]=r.width});
+sl.forEach(function(e,j){tf(e,keep[j])});
+L=0;for(var j=0;j<N;j++){st[j]=L;L+=W[j]+S.gap}
+var l=0,r=document.documentElement.clientWidth;for(var a=par;a&&a!==document.body;a=a.parentElement){if(getComputedStyle(a).overflowX!=='visible'){var q=a.getBoundingClientRect();l=Math.max(l,q.left);r=Math.min(r,q.right)}}
+vl=l-pr.left;vr=r-pr.left}
+function anchor(c){return S.al==='c'?(pw-W[c])/2:S.x0*(S.pw?pw/S.pw:1)}
+function at(c){var k=((c%N)+N)%N;return st[k]-anchor(k)+L*Math.floor(c/N)}
+function off(p){var c=Math.floor(p),f=p-c;return at(c)+(f?(at(c+1)-at(c))*f:0)}
+function inv(o,p){for(var i=0;i<5;i++){var c=Math.floor(p),m=at(c+1)-at(c);if(!m)break;p+=(o-off(p))/m}return p}
+function lim(p){return S.inf?p:Math.max(S.cur[0],Math.min(S.max,p))}
+function role(e,r){var a=(S.roles||{})[r]||{};for(var k in rn){if(a[k]==null)e.removeAttribute(k);else if(e.getAttribute(k)!==a[k])e.setAttribute(k,a[k])}}
+function paint(){if(!L)return;var o=off(pos),lo=vl-(L-(vr-vl))/2,c=((Math.round(pos)%N)+N)%N;
+sl.forEach(function(e,j){var x=st[j]-o;if(S.inf)x=((x-lo)%L+L)%L+lo;var on=x<vr&&x+W[j]>vl;
+tf(e,'translate3d('+(on?(x-nat[j]).toFixed(2):-9999)+'px, 0px, 0px)');role(e,j===c?'c':on?'v':'o')})}
+function rest(){if(S.inf)pos=((pos%N)+N)%N;tgt=null;paint();var c=Math.round(pos),k=S.cur.indexOf(c);if(k<0)k=c%S.cur.length;if(k!==shown&&steps[k]){shown=k;put(k,skip);paint()}}
+function run(to,ms,curve){cancelAnimationFrame(raf);if(reduce||!ms){pos=to;rest();return}var from=pos,t0=performance.now();
+(function f(now){var t=Math.min(1,Math.max(0,(now-t0)/ms));if(t<1){pos=from+(to-from)*curve(t);paint();raf=requestAnimationFrame(f)}else{pos=to;rest()}})(t0)}
+var pts=S.ease&&S.ease.pts;function rec(t){if(!pts||pts.length<3)return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+for(var i=1;i<pts.length;i++)if(t<=pts[i][0]){var a=pts[i-1],b=pts[i];return a[1]+(b[1]-a[1])*((t-a[0])/((b[0]-a[0])||1))}return 1}
+function out3(t){return 1-Math.pow(1-t,3)}
+function step(d){var to=lim((tgt!==null?tgt:Math.round(pos))+d*S.by);tgt=to;run(to,S.ease?S.ease.ms:600,rec)}
+function bindS(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();step(d);auto()},true)})}
+bindS('data-pv-gal-next',1);bindS('data-pv-gal-prev',-1);
+var timer=null;function auto(){clearTimeout(timer);if(!cfg.auto||reduce||window.__pvStill)return;timer=setTimeout(function tick(){if(!document.hidden&&!d0)step(1);timer=setTimeout(tick,cfg.auto)},cfg.auto)}
+var d0=null,drag=false;
+if(S.drag){g.addEventListener('pointerdown',function(e){if(e.button||(e.target.closest&&e.target.closest('[data-pv-gal-next],[data-pv-gal-prev]')))return;d0={x:e.clientX,y:e.clientY,on:false,p:pos};drag=false},true);
+g.addEventListener('pointermove',function(e){if(!d0)return;var dx=e.clientX-d0.x,dy=e.clientY-d0.y;
+if(!d0.on){if(Math.abs(dx)<6)return;if(Math.abs(dy)>Math.abs(dx)){d0=null;return}d0.on=true;drag=true;cancelAnimationFrame(raf);tgt=null;d0.p=pos;clearTimeout(timer);try{g.setPointerCapture(e.pointerId)}catch(x){}}
+pos=lim(inv(off(d0.p)-dx*(S.gap>0&&L>N*S.gap?L/(L-N*S.gap):1),d0.p));paint()},true);
+var up=function(e){if(!d0)return;var d=d0;d0=null;if(!d.on)return;var dx=e.type==='pointercancel'?0:e.clientX-d.x,n=Math.ceil(Math.abs(pos-d.p)-0.002);
+if(Math.abs(dx)<=20)n=0;var to=lim(Math.round(d.p)+(dx<0?n:-n));
+run(to,Math.max(250,Math.min(600,250+0.4*Math.abs(off(to)-off(pos)))),out3);auto()};
+g.addEventListener('pointerup',up,true);g.addEventListener('pointercancel',up,true);
+g.addEventListener('click',function(e){if(drag){e.preventDefault();e.stopImmediatePropagation();drag=false}},true);
+g.addEventListener('dragstart',function(e){e.preventDefault()},true);
+if(!g.style.touchAction)g.style.touchAction='pan-y'}
+g.__pvShow=function(i){cancelAnimationFrame(raf);tgt=null;if(i<0){back(skip);pos=S.cur[0];shown=0;paint();return}if(S.cur[i]!=null)pos=S.cur[i];shown=i;put(i,skip);paint()};
+function lay(){measure();paint()}
+var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(lay,60)});
+addEventListener('load',lay);lay();auto();
+if(S.drift&&!reduce){var seen=true,lt=0;if(window.IntersectionObserver)new IntersectionObserver(function(en){seen=en[en.length-1].isIntersecting}).observe(g);
+(function tick(now){if(lt&&seen&&L&&!window.__pvStill&&!document.hidden){pos=inv(off(pos)+S.drift*Math.min(100,now-lt)/1000,pos);pos=((pos%N)+N)%N;paint()}lt=now;requestAnimationFrame(tick)})(0)}
+return true}
+if(cfg.strip&&strip())return;
 function go(i,dir){cur=((i%n)+n)%n;draw(cur,true,dir)}
+g.__pvShow=function(i){ends.forEach(clearTimeout);ends=[];if(i<0){back();cur=cur0;return}cur=i;draw(i,false)};
 // A recorded rhythm (dt: ms before each step) can split one slide change into quick steps; an arrow plays a whole one.
-var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}function major(i){return !dt||dt[i]>=900}
+var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}var dmax=dt?Math.max.apply(null,dt):0;function major(i){return !dt||dt[i]>=dmax/2}
 var timer=null,sub=null;function restart(){clearTimeout(timer);if(!cfg.auto||reduce||window.__pvStill)return;
 timer=setTimeout(function tick(){if(!document.hidden)go(cur+1,1);timer=setTimeout(tick,wait((cur+1)%n))},wait((cur+1)%n))}
-function slide(d){clearTimeout(sub);var i=cur;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
+function slide(d){clearTimeout(sub);var i=cur;if(cfg.fin&&(d>0?cur>=n-1:cur<=0))return;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
 go(i,d);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j,d);more()},Math.min(wait(j),900))}})()}
 function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();slide(d);restart()},true)})}
 bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
 // Drag or swipe: Squarespace lets visitors slide carousels and slideshows with the mouse held down or a finger, so a
 // sideways drag of more than 40 pixels plays one step, like the arrow on that side. A drag doesn't count as a click.
+// Not where the capture swiped the live one and nothing changed (cfg.swipe 0: colorize's summary carousel).
 var sx=null,sy=0,moved=false;
 g.addEventListener('pointerdown',function(e){if(e.button)return;sx=e.clientX;sy=e.clientY;moved=false},true);
 g.addEventListener('pointermove',function(e){if(sx!==null&&Math.abs(e.clientX-sx)>8)moved=true},true);
 g.addEventListener('pointerup',function(e){if(sx===null)return;var dx=e.clientX-sx,dy=e.clientY-sy;sx=null;
-if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){slide(dx<0?1:-1);restart()}},true);
+if(cfg.swipe!==0&&Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){slide(dx<0?1:-1);restart()}},true);
 g.addEventListener('pointercancel',function(){sx=null},true);
 g.addEventListener('click',function(e){if(moved){e.preventDefault();e.stopImmediatePropagation();moved=false}},true);
 g.addEventListener('dragstart',function(e){e.preventDefault()},true);
@@ -603,6 +680,24 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       $('body').append(MENU_SCRIPT);
       $('body').append(SLIDER_SCRIPT);
       if ($('[data-pv-gal]').length) $('body').append(GALLERY_SCRIPT);
+      // Pictures the capture found fitted to their box in pixels (capture.mjs, data-pv-fit): fitted by the browser
+      // instead, the same way (cover or contain) and cut at the same place, so they fill their box at every width.
+      $('img[data-pv-fit]').each((_, el) => {
+        const [fit, ox, oy] = $(el).attr('data-pv-fit').split(' ');
+        const st = ($(el).attr('style') || '').replace(/(^|;)\s*(left|top|width|height|position)\s*:[^;]*/g, '$1').replace(/;\s*;+/g, ';').replace(/^\s*;/, '').trim();
+        $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}position:absolute;left:0;top:0;width:100%;height:100%;object-fit:${fit};object-position:${ox} ${oy}`).removeAttr('data-pv-fit');
+      });
+      $('[data-pv-fitpc]').each((_, el) => {
+        const [l, t, w, h] = $(el).attr('data-pv-fitpc').split(' ');
+        const st = ($(el).attr('style') || '').replace(/(^|;)\s*(left|top|width|height)\s*:[^;]*/g, '$1').replace(/;\s*;+/g, ';').replace(/^\s*;/, '').trim();
+        $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}left:${l}%;top:${t}%;width:${w}%;height:${h}%`).removeAttr('data-pv-fitpc');
+      });
+      $('[data-pv-ar]').each((_, el) => {
+        const [w, h] = $(el).attr('data-pv-ar').split(' ');
+        const st = ($(el).attr('style') || '').replace(/(^|;)\s*height\s*:[^;]*/g, '$1').replace(/;\s*;+/g, ';').replace(/^\s*;/, '').trim();
+        $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}height:auto;aspect-ratio:${w} / ${h}`).removeAttr('data-pv-ar');
+      });
+      $('[data-pv-fitbox]').each((_, el) => { const st = ($(el).attr('style') || '').trim(); $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}position:relative`).removeAttr('data-pv-fitbox'); });
       $('body').append(SHAPES_SCRIPT);
       const pxPad = (_, el) => /padding-top:\s*[\d.]+px/.test($(el).attr('style') || '');
       const padded = [$('.header-menu').filter(pxPad).first(), $('section.page-section').first().filter(pxPad)].filter((x) => x.length);

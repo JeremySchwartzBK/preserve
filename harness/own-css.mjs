@@ -154,7 +154,7 @@ async function layoutCss(base, stage, layout, report) {
     }, [...IGNORE_ATTR]);
     const endObs = () => page.evaluate(() => { window.__mo.takeRecords().forEach(() => {}); window.__mo.disconnect(); const out = {}; for (const [k, o] of window.__mut) { const e = document.querySelector(`[data-pz="${k}"]`); const ch = {}; for (const a in o) { const nv = e.getAttribute(a); const same = a === 'class' ? [...new Set((nv || '').split(/\s+/).filter(Boolean))].sort().join(' ') === [...new Set((o[a] || '').split(/\s+/).filter(Boolean))].sort().join(' ') : nv === o[a]; if (!same) ch[a] = [o[a], nv]; } if (Object.keys(ch).length) out[k] = ch; } return out; });
     const revert = (changed) => page.evaluate((changed) => { for (const k in changed) { const e = document.querySelector(`[data-pz="${k}"]`); for (const a in changed[k]) { const v = changed[k][a][0]; if (v === null) e.removeAttribute(a); else e.setAttribute(a, v); } } }, changed);
-    const stateSel = (E, ch) => {
+    const stateSel0 = (E, ch) => {
       let s = `.u${E}`;
       for (const [attr, [ov, nv]] of Object.entries(ch)) {
         if (attr === 'class') {
@@ -167,7 +167,7 @@ async function layoutCss(base, stage, layout, report) {
     };
     // Rules for one state: each changed element gets the declarations it has in that state, keyed on the nearest
     // element whose attributes changed (itself, an ancestor, or a preceding sibling of either).
-    function addState(name, d, changed, prefix = '') {
+    function addState(name, d, changed, prefix = '', stateSel = stateSel0) {
       let n = 0, orphan = 0;
       for (const i in d) {
         const t = T.get(+i); if (!t) continue;
@@ -204,7 +204,7 @@ async function layoutCss(base, stage, layout, report) {
         const fc = await endObs();
         // Folder rules only apply with the menu open: key them under the menu's own change too.
         const bodyKey = Object.keys(ch).find((k) => ch[k].class) ;
-        addState('menu-folder-' + f, diffAll(open, await capture()), fc, bodyKey ? stateSel(bodyKey, ch[bodyKey]) + ' ' : '');
+        addState('menu-folder-' + f, diffAll(open, await capture()), fc, bodyKey ? stateSel0(bodyKey, ch[bodyKey]) + ' ' : '');
         if (bodyKey) unique.add(+bodyKey);
         await revert(fc);
       }
@@ -228,6 +228,52 @@ async function layoutCss(base, stage, layout, report) {
       await startObs();
       await page.evaluate(() => document.querySelector('header.header,#header').classList.add('shrink'));
       const ch = await endObs(); addState('header-scrolled', diffAll(rest, await capture()), ch); await revert(ch);
+    }
+
+    // Galleries, carousels and slideshows: our player (build.mjs GALLERY_SCRIPT) replays the steps the capture recorded by
+    // changing classes and attributes, so what each step looks like has to be in our stylesheet, for the slide and for
+    // everything inside it (a fading slideshow marks the slide current and the picture inside it turns visible;
+    // 2026-11-14, ela house: every picture after the first stayed blank). Each step that differs is shown once and
+    // written as rules keyed on the whole of what changes on an element across all steps (every toggling class and
+    // attribute, present or absent), so one step's look never leaks into another.
+    const gals = await page.evaluate(() => [...document.querySelectorAll('[data-pv-gal]')].map((g) => {
+      let c; try { c = JSON.parse(g.getAttribute('data-pv-gal')); } catch { return []; }
+      const s = c.steps || []; if (!g.__pvShow || s.length < 2) return [];
+      const sig = (st) => st.map((x) => x[0] + '\u0001' + (x[2] || '')).join('\u0002');
+      const seen = new Set([sig(s[0])]), list = [];
+      s.forEach((st, i) => { const k = sig(st); if (i && !seen.has(k)) { seen.add(k); list.push(i); } });
+      return list.slice(0, 40);
+    }));
+    const show = (gi, i) => page.evaluate(([gi, i]) => document.querySelectorAll('[data-pv-gal]')[gi].__pvShow(i), [gi, i]);
+    const toks = (c) => new Set((c || '').split(/\s+/).filter(Boolean));
+    for (let gi = 0; gi < gals.length; gi++) {
+      const runs = [];
+      for (const i of gals[gi]) {
+        await startObs(); await show(gi, i);
+        const ch = await endObs();
+        if (Object.keys(ch).length) runs.push({ i, ch, d: diffAll(rest, await capture()) });
+        await show(gi, -1); await revert(ch);
+      }
+      if (!runs.length) continue;
+      // Per element: its attributes and class names that change in any step, and what they are at rest.
+      const all = {};
+      for (const r of runs) for (const k in r.ch) {
+        const a = (all[k] ||= { attrs: {}, cls: null, tokens: new Set() });
+        for (const [attr, [ov, nv]] of Object.entries(r.ch[k])) {
+          if (attr === 'class') { a.cls = ov || ''; const o = toks(ov), n = toks(nv); for (const x of n) if (!o.has(x)) a.tokens.add(x); for (const x of o) if (!n.has(x)) a.tokens.add(x); }
+          else a.attrs[attr] = ov;
+        }
+      }
+      const galSel = (E, ch) => {
+        const a = all[E]; let s = `.u${E}`;
+        for (const attr of Object.keys(a.attrs).sort()) { const v = ch[attr] ? ch[attr][1] : a.attrs[attr]; s += v === null ? `:not([${attr}])` : `[${attr}="${String(v).replace(/["\\]/g, '\\$&')}"]`; }
+        const now = toks(ch.class ? ch.class[1] : a.cls);
+        for (const x of [...a.tokens].sort()) s += now.has(x) ? '.' + esc(x) : `:not(.${esc(x)})`;
+        return s;
+      };
+      let rules = 0, orphans = 0;
+      for (const r of runs) { addState(`gallery-${gi}-${r.i}`, r.d, r.ch, '', galSel); rules += report.states[`gallery-${gi}-${r.i}`].rules; orphans += report.states[`gallery-${gi}-${r.i}`].orphans; delete report.states[`gallery-${gi}-${r.i}`]; }
+      report.states[`gallery-${gi}`] = { steps: runs.length, rules, orphans };
     }
 
     // Hover: each element a :hover rule can apply to, hovered in turn (it and its ancestors match :hover).
@@ -285,7 +331,7 @@ async function layoutCss(base, stage, layout, report) {
     }
     for (const w of widthRules) css += `@media ${w.media}{\n${block(w.d)}}\n`;
     if (Object.keys(rm).length) css += `@media (prefers-reduced-motion:reduce){\n${block(rm)}}\n`;
-    css += stateRules.join('\n') + '\n';
+    css += [...new Set(stateRules)].join('\n') + '\n';
     // Animations still in use, under our own names. (A name written with !important right after it, as plugins do,
     // counts too: not crispy enough's bobbing "Take the quiz" sign lost its keyframes, 2026-11-13.)
     const used = [...new Set([...css.matchAll(/animation(?:-name)?:([^;}]*)/g)].flatMap((m) => m[1].replace(/!\s*important/g, ' ').split(/[\s,]+/)).filter((x) => /^[a-zA-Z_][\w-]*$/.test(x)))];

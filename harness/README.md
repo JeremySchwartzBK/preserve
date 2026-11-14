@@ -232,6 +232,41 @@ the page is saved. `GALLERY_SCRIPT` in `build.mjs` plays the steps back on the a
 (paused under `__pvStill` and for visitors who ask for less motion), with the copy's own class names, positions
 scaled to the gallery's width, and a short transition where Squarespace animated in script.
 
+### Galleries at any width (2026-11-14)
+
+Replaying recorded steps was right at the capture's width and wrong at every other one: pictures overlapped or left
+gaps, and "slid over each other" (Jeremy, many sites). Squarespace's scripts write pixels worked out for the window
+they ran in, and a Preserve is shown at any width. Four families, each fixed by saving the rule instead of the pixels:
+
+- **Strips** (list carousels, banner slideshows, gallery reels): slides side by side, each moved by a pixel offset.
+  The capture works out the strip's rules (`cfg.strip`: which elements are the slides, the gap, whether the current
+  slide rests at the start or in the middle, whether it goes round for ever, how a written-in size follows the
+  strip's height, how a step moves over time, and, from a real press-and-move of the pointer, whether it can be
+  dragged). The player lays the strip out from the slides' own sizes at the width it is shown, follows the pointer
+  during a drag as Squarespace's does, and lets go to the next slide in the drag's direction.
+- **Tickers**: a strip that never rests (an owner's "scrolling images" code). No steps exist to record; the capture
+  measures its settled speed (`cfg.strip.drift`, pixels a second) and the player drifts it while it is on screen.
+- **Pictures fitted in pixels** (7.0 gallery grids and slideshows, Instagram rows, video thumbnails): Squarespace's
+  image loader sizes and offsets each picture in pixels to cover its box. `snapshotDom()` marks them (`data-pv-fit`,
+  `data-pv-fitbox`, `data-pv-fitpc` for video wrappers) and the build writes the same fit as `object-fit` /
+  `object-position` or percentages, which hold at any width.
+- **Looks that depend on a step** (fading slideshows: the slide is marked current and the picture inside it turns
+  visible): `own-css.mjs` shows every recorded step once through the player (`g.__pvShow`) and writes what each one
+  looks like into the stylesheet, keyed on the whole of what changes on an element, so the player's class and
+  attribute changes change what is seen. The player starts from the step that matches the page as saved.
+
+- **Heights written in pixels** (7.0 slideshows): the script sets the slideshow's height from its shape and its
+  width at that moment. `snapshotDom()` marks the shape (`data-pv-ar`) and the build writes `aspect-ratio`.
+
+A row that had an end live (`cfg.fin`) stops at its ends instead of going round. A gallery that is
+not a strip answers a sideways swipe only where the live one did when the capture swiped it (`cfg.swipe`; ones that
+play on their own timer are not tested and keep answering).
+
+`node galcmp.mjs <liveUrl> <preserveUrl> <widths> [outDir]` measures every picture of every gallery on the live page
+and in the Preserve (at rest, after each arrow, during and after a drag) at each width and reports any more than 3
+pixels apart; `node galvis.mjs <liveUrl> <preserveUrl> <width> [steps]` compares which pictures can be seen after each
+step (for galleries that fade rather than move). In the Preserve address `{L}` stands for `desktop` or `mobile`.
+
 ## Gallery check (2026-10-28)
 
 `probeGalleries()` in `check.mjs` runs on the live page (in `gate.mjs`'s second look) and on the copy, in a page of its
