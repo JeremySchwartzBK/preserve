@@ -78,6 +78,12 @@ const tourTags = (data) => `<script id="preserve-tour-data" type="application/js
 const css = (s) => String(s).replace(/[\\"<>\n]/g, '');
 const fontTags = (list) => `<style id="preserve-fonts">${list.map((f) => `@font-face{font-family:"${css(f.family)}";font-weight:${css(f.weight)};font-style:${css(f.style)};font-display:swap;src:url(a/${css(f.src)})}`).join('')}</style>`;
 
+// Our scripts go just before the page's own closing body tag: the LAST one, since a saved widget frame (srcdoc) can carry
+// its own </body> earlier in the file. No closing tag: the page is served as it is.
+const beforeBodyEnd = (html, add) => {
+  const i = html.toLowerCase().lastIndexOf('</body>');
+  return i < 0 ? html : html.slice(0, i) + add + html.slice(i);
+};
 const page = (status, title, text) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="${ROBOTS}"><title>${title}</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif;color:#555;background:#f7f6f3;text-align:center;padding:0 24px}p{max-width:28em}</style></head><body><p>${text}</p></body></html>`, { status, headers: { 'content-type': TYPES.html, 'cache-control': 'no-store', 'x-robots-tag': ROBOTS } });
 const notFound = () => page(404, 'Not found', 'There’s no Preserve at this address.');
 
@@ -166,7 +172,7 @@ async function serveCopy(req, env, ctx, id, rest) {
   const fontCss = fonts?.length ? fontTags(fonts) : '';
   if (!asset && url(req).searchParams.has('review')) {
     h.set('cache-control', 'no-store');
-    const html = text.replace(/<\/body>/i, fontCss + REVIEW_BRIDGE + '</body>');
+    const html = beforeBodyEnd(text, fontCss + REVIEW_BRIDGE);
     return new Response(html, { headers: h });
   }
   // ?full=1 on a desktop page (opened from the Desktop embed on a phone): lay it out 1440 wide whatever the screen, so
@@ -182,7 +188,7 @@ async function serveCopy(req, env, ctx, id, rest) {
     if (tour && pageId) tour.spots = (tour.spots || []).filter((p) => !p.page || p.page === pageId);
     const hasTour = tour && ((tour.spots || []).length || (tour.credits || []).length);
     if (file.endsWith('.html') || hasTour || fontCss) {
-      const html = body.replace(/<\/body>/i, fontCss + (hasTour ? tourTags(tour) : '') + (file.endsWith('.html') ? FRAME_SCALE : '') + '</body>');
+      const html = beforeBodyEnd(body, fontCss + (hasTour ? tourTags(tour) : '') + (file.endsWith('.html') ? FRAME_SCALE : ''));
       return new Response(html, { headers: h });
     }
   }

@@ -109,6 +109,11 @@ def strip(h, domain):
                 v = H.unescape(a.group(2)); v2 = text(v)
                 return a.group(0) if v2 == v else a.group(1) + H.escape(v2, quote=True) + a.group(3)
             tag = re.sub(r'(\s(?:alt|title|aria-label|placeholder|value|content|data-[\w-]+)=")([^"]*)(")', attr, tag)
+            # A widget saved as a whole document in srcdoc (frames.mjs): the same rules, all the way through it.
+            def doc(a):
+                inner, more = strip(H.unescape(a.group(2)), domain); found.extend(more)
+                return a.group(1) + H.escape(inner, quote=True) + a.group(3)
+            tag = re.sub(r'(\ssrcdoc=")([^"]*)(")', doc, tag)
             tag = re.sub(r'href="mailto:[^"]*"', 'href="mailto:' + EMAIL_TO + '"', tag, flags=re.I)
             tag = re.sub(r'href="tel:[^"]*"', 'href="tel:+15555550100"', tag, flags=re.I)
             tag = re.sub(r'href="sms:[^"]*"', 'href="sms:+15555550100"', tag, flags=re.I)
