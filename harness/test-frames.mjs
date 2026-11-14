@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { frameDoc, PAGE_SCRIPT } from './frames.mjs';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'frames-'));
@@ -32,5 +33,16 @@ assert.ok(!/<\/script>(?!<\/html>$)/.test(d.doc.slice(d.doc.lastIndexOf('<script
 assert.ok(d.doc.includes('"List view') || d.doc.includes('List view'), 'the List view travels with the document');
 assert.ok(PAGE_SCRIPT.includes('preserve-frames') && PAGE_SCRIPT.includes('data-pv-autosize'));
 assert.equal(frameDoc(dir, 'mobile-9', () => null), null, 'no saved frame, no document');
+// After scrub.py the saved document has no raw < or >: text edits on the page (the viewer adds its scripts before the
+// first </body>) can't land inside the frame. Contact details inside the frame are replaced too.
+const site = path.join(dir, 'site'); fs.mkdirSync(path.join(site, 'a'), { recursive: true });
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+const inner = d.doc.replace('Card view', 'Card view, write to jane@acme-studio.com');
+fs.writeFileSync(path.join(site, 'desktop.html'), `<!doctype html><html><head></head><body><iframe data-preserve-frame="desktop-0" srcdoc="${esc(inner)}"></iframe></body></html>`);
+execFileSync('python3', ['scrub.py', site, 'https://acme-studio.com/'], { stdio: 'pipe' });
+const page = fs.readFileSync(path.join(site, 'desktop.html'), 'utf8');
+assert.equal(page.match(/<\/body>/g).length, 1, 'the only raw </body> is the page\'s own');
+assert.ok(/srcdoc="[^"<>]*"/.test(page), 'the frame document is fully escaped');
+assert.ok(!page.includes('jane@acme-studio.com') && page.includes('name@yourcompany.com'), 'contact details inside the frame are replaced');
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('frames: ok');

@@ -16,6 +16,14 @@ css_files = glob.glob(os.path.join(site, 'a', '*.css'))
 # Every page of the copy, at any depth (one page today: desktop.html and mobile.html).
 htmls = sorted(glob.glob(os.path.join(site, '**', '*.html'), recursive=True))
 read = lambda f: open(f, encoding='utf8', errors='ignore').read()
+# Widgets saved as real content (frames.mjs) sit in <iframe srcdoc="...">, a whole document inside one attribute. The
+# HTML writer leaves its < and > as they are, which is valid, but anything that edits the page as text then mistakes
+# the frame's own </body> for the page's (the viewer adds its scripts before the first one; 2026-11-14, Aether's
+# Eventually widget lost its view buttons that way). Written as &lt; and &gt; it means the same and can't be mistaken.
+for f in htmls:
+    h = read(f)
+    h2 = re.sub(r'(\ssrcdoc=")([^"]*)(")', lambda m: m.group(1) + m.group(2).replace('<', '&lt;').replace('>', '&gt;') + m.group(3), h)
+    if h2 != h: open(f, 'w', encoding='utf8').write(h2)
 # Families the page actually refers to (anywhere outside @font-face rules, including CSS variables and inline styles).
 usage = ' '.join(FACE.sub(' ', read(f)) for f in css_files + htmls).lower()
 
