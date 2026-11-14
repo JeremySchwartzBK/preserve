@@ -287,7 +287,7 @@ var timer=null;function auto(){clearTimeout(timer);if(!cfg.auto||reduce||window.
 var d0=null,drag=false;
 if(S.drag){g.addEventListener('pointerdown',function(e){if(e.button||(e.target.closest&&e.target.closest('[data-pv-gal-next],[data-pv-gal-prev]')))return;d0={x:e.clientX,y:e.clientY,on:false,p:pos};drag=false},true);
 g.addEventListener('pointermove',function(e){if(!d0)return;var dx=e.clientX-d0.x,dy=e.clientY-d0.y;
-if(!d0.on){if(Math.abs(dx)<6)return;if(Math.abs(dy)>Math.abs(dx)){d0=null;return}d0.on=true;drag=true;cancelAnimationFrame(raf);tgt=null;d0.p=pos;if(e.pointerType==='touch'){d0.x+=dx<0?-7:7;dx=e.clientX-d0.x}clearTimeout(timer);try{g.setPointerCapture(e.pointerId)}catch(x){}}
+if(!d0.on){if(Math.abs(dx)<6)return;if(Math.abs(dy)>Math.abs(dx)){d0=null;return}d0.on=true;drag=true;cancelAnimationFrame(raf);tgt=null;d0.p=pos;clearTimeout(timer);try{g.setPointerCapture(e.pointerId)}catch(x){}}
 pos=lim(inv(off(d0.p)-dx*(S.gap>0&&L>N*S.gap?L/(L-N*S.gap):1),d0.p));paint()},true);
 var up=function(e){if(!d0)return;var d=d0;d0=null;if(!d.on)return;var dx=e.type==='pointercancel'?0:e.clientX-d.x,n=Math.ceil(Math.abs(pos-d.p)-0.002);
 if(Math.abs(dx)<=20)n=0;var to=lim(Math.round(d.p)+(dx<0?n:-n));
@@ -316,11 +316,12 @@ function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.
 bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
 // Drag or swipe: Squarespace lets visitors slide carousels and slideshows with the mouse held down or a finger, so a
 // sideways drag of more than 40 pixels plays one step, like the arrow on that side. A drag doesn't count as a click.
+// Not where the capture swiped the live one and nothing changed (cfg.swipe 0: colorize's summary carousel).
 var sx=null,sy=0,moved=false;
 g.addEventListener('pointerdown',function(e){if(e.button)return;sx=e.clientX;sy=e.clientY;moved=false},true);
 g.addEventListener('pointermove',function(e){if(sx!==null&&Math.abs(e.clientX-sx)>8)moved=true},true);
 g.addEventListener('pointerup',function(e){if(sx===null)return;var dx=e.clientX-sx,dy=e.clientY-sy;sx=null;
-if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){slide(dx<0?1:-1);restart()}},true);
+if(cfg.swipe!==0&&Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){slide(dx<0?1:-1);restart()}},true);
 g.addEventListener('pointercancel',function(){sx=null},true);
 g.addEventListener('click',function(e){if(moved){e.preventDefault();e.stopImmediatePropagation();moved=false}},true);
 g.addEventListener('dragstart',function(e){e.preventDefault()},true);
@@ -690,6 +691,11 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
         const [l, t, w, h] = $(el).attr('data-pv-fitpc').split(' ');
         const st = ($(el).attr('style') || '').replace(/(^|;)\s*(left|top|width|height)\s*:[^;]*/g, '$1').replace(/;\s*;+/g, ';').replace(/^\s*;/, '').trim();
         $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}left:${l}%;top:${t}%;width:${w}%;height:${h}%`).removeAttr('data-pv-fitpc');
+      });
+      $('[data-pv-ar]').each((_, el) => {
+        const [w, h] = $(el).attr('data-pv-ar').split(' ');
+        const st = ($(el).attr('style') || '').replace(/(^|;)\s*height\s*:[^;]*/g, '$1').replace(/;\s*;+/g, ';').replace(/^\s*;/, '').trim();
+        $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}height:auto;aspect-ratio:${w} / ${h}`).removeAttr('data-pv-ar');
       });
       $('[data-pv-fitbox]').each((_, el) => { const st = ($(el).attr('style') || '').trim(); $(el).attr('style', `${st}${st && !/;$/.test(st) ? ';' : ''}position:relative`).removeAttr('data-pv-fitbox'); });
       $('body').append(SHAPES_SCRIPT);

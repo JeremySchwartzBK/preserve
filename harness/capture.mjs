@@ -62,6 +62,14 @@ function snapshotDom() {
     const pc = (v, of) => Math.round(v / of * 1e5) / 1e3;
     el.setAttribute('data-pv-fitpc', `${pc(l, pw)} ${pc(t, ph)} ${pc(w, pw)} ${pc(h, ph)}`);
   }
+  // A 7.0 slideshow's height is written in pixels by its script, from its shape (a setting) and its width at that
+  // moment: at any other width the copy kept that height, so pictures were cropped differently (the lurkshop: 538
+  // pixels tall at every width, 382 live at 1024). The shape is what holds, so the copy gets the shape.
+  for (const el of document.querySelectorAll('.sqs-gallery-block-slideshow .sqs-gallery[style*="height"]')) {
+    const st = el.style, w = el.clientWidth, h = parseFloat(st.height);
+    if (!/px$/.test(st.height) || st.width || !(w > 8 && h > 8)) continue;
+    el.setAttribute('data-pv-ar', `${Math.round(w * 100) / 100} ${Math.round(h * 100) / 100}`);
+  }
   for (const img of document.querySelectorAll('img')) {
     if (img.currentSrc) img.setAttribute('data-preserve-current', img.currentSrc);
     // An image's size can come from its own pixels (a gallery strip: width auto, height 100%). In the copy it's lazy,
@@ -115,6 +123,44 @@ export async function recordGalleries(page, opts = {}) {
   // Can a visitor drag the strip? Only a real pointer tells: press on it, move 60 pixels and see whether the slides
   // came along, then move back and let go where the press began, so it rests where it was. (The reel on borrachito
   // does not follow a drag; list carousels do.) The click that would follow is swallowed so no link opens.
+  // Galleries that are not strips (summary carousels, 7.0 slideshows): does a sideways swipe change the slide? Colorize's
+  // summary carousel ignores one, and the copy used to move on any drag. Swipe left, see whether anything changed, swipe
+  // back; if it did not come back, the first slide is put back as recorded. Ones that play on their own timer are not
+  // tested (they change anyway) and keep answering a swipe.
+  if (Array.isArray(out)) for (const r of out) {
+    if (r.strip || r.id === undefined || r.how === 'timer' || !(r.steps > 1)) continue;
+    try {
+      const box = await page.evaluate((id) => {
+        const g = [...document.querySelectorAll('[data-pv-gal]')].find((e) => { try { return JSON.parse(e.getAttribute('data-pv-gal')).id === id; } catch { return false; } });
+        if (!g) return null; g.scrollIntoView({ block: 'center', behavior: 'instant' }); window.__pvG = g;
+        window.__pvSig = () => [...g.querySelectorAll('[data-pv-gi]')].map((e) => [...e.attributes].filter((a) => !/^data-pv-/.test(a.name)).map((a) => a.name + '=' + a.value).join('|') + '#' + [...e.parentElement.children].indexOf(e)).join('\n');
+        window.__pvEat = (e) => { e.preventDefault(); e.stopImmediatePropagation(); }; addEventListener('click', window.__pvEat, true);
+        const q = g.getBoundingClientRect(); return { x: Math.max(0, q.left), w: Math.min(innerWidth, q.right) - Math.max(0, q.left), vh: innerHeight };
+      }, r.id);
+      if (!box) continue;
+      let b2 = null;
+      for (let t = 0; t < 12; t++) { await sleep(250); const q = await page.evaluate(() => { const q = window.__pvG.getBoundingClientRect(); return { y: q.top, h: q.height }; }); if (b2 && Math.abs(q.y - b2.y) < 1) { b2 = q; break; } b2 = q; }
+      const x0 = box.x + box.w / 2, y0 = Math.max(10, Math.min(box.vh - 10, b2.y + b2.h / 2));
+      const under = await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return !!e && window.__pvG.contains(e); }, [x0, y0]);
+      if (under) {
+        const touch = (page.viewportSize()?.width || 1440) < 768;
+        const cdp = touch ? await page.context().newCDPSession(page) : null;
+        const swipe = async (dir) => {
+          if (touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] }); else { await page.mouse.move(x0, y0); await page.mouse.down(); }
+          for (let k = 1; k <= 6; k++) { const x = x0 + dir * 20 * k; if (touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y0 }] }); else await page.mouse.move(x, y0); await sleep(30); }
+          if (touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); else await page.mouse.up();
+          await sleep(1100);
+        };
+        const sig = () => page.evaluate(() => window.__pvSig());
+        const s0 = await sig(); await swipe(-1);
+        r.swipe = (await sig()) !== s0;
+        if (r.swipe) { await swipe(1); if ((await sig()) !== s0) await page.evaluate((id) => window.__pvHome && window.__pvHome[id] && window.__pvHome[id](), r.id); }
+        if (cdp) await cdp.detach().catch(() => {});
+        await page.evaluate((sw) => { const g = window.__pvG, c = JSON.parse(g.getAttribute('data-pv-gal')); c.swipe = sw ? 1 : 0; g.setAttribute('data-pv-gal', JSON.stringify(c)); }, r.swipe);
+      }
+      await page.evaluate(() => removeEventListener('click', window.__pvEat, true));
+    } catch (e) { r.swipeError = String(e.message).split('\n')[0]; await page.mouse.up().catch(() => {}); }
+  }
   if (Array.isArray(out)) for (const r of out) {
     if (!r.strip || r.id === undefined) continue;
     try {
@@ -323,16 +369,19 @@ async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxM
         let par = null, n = 1; for (const [p, c] of byPar) if (c > n) { par = p; n = c; }
         if (par) { for (const e of par.children) { const i = at.get(e); if (i !== undefined && !moving.includes(i) && /transform\s*:/.test(states[0][i][1])) moving.push(i); } moving.sort((a, b) => a - b); } }
       moving.forEach((i, j) => els[i].setAttribute('data-pv-gi', j));
-      // Back to the first slide, as the page was before.
-      for (const i of moving) {
-        const [c, st, at] = states[0][i], e = els[i];
-        if (c) e.setAttribute('class', c); else e.removeAttribute('class');
-        if (st) e.setAttribute('style', st); else e.removeAttribute('style');
-        for (const a of [...e.attributes]) if (STATE.test(a.name) && a.value.length < 40) e.removeAttribute(a.name);
-        for (const kv of at ? at.split('\u001f') : []) { const k = kv.indexOf('='); e.setAttribute(kv.slice(0, k), kv.slice(k + 1)); }
-      }
-      const parents = new Set(moving.map((i) => els[i].parentElement).filter(Boolean));
-      for (const p of parents) { const kids = moving.filter((i) => els[i].parentElement === p).sort((a, b) => states[0][a][3] - states[0][b][3]); for (const i of kids) p.insertBefore(els[i], p.children[states[0][i][3]] || null); }
+      // Back to the first slide, as the page was before (kept for the swipe test, which may need it again).
+      const home = () => {
+        for (const i of moving) {
+          const [c, st, at] = states[0][i], e = els[i];
+          if (c) e.setAttribute('class', c); else e.removeAttribute('class');
+          if (st) e.setAttribute('style', st); else e.removeAttribute('style');
+          for (const a of [...e.attributes]) if (STATE.test(a.name) && a.value.length < 40) e.removeAttribute(a.name);
+          for (const kv of at ? at.split('\u001f') : []) { const k = kv.indexOf('='); e.setAttribute(kv.slice(0, k), kv.slice(k + 1)); }
+        }
+        const parents = new Set(moving.map((i) => els[i].parentElement).filter(Boolean));
+        for (const p of parents) { const kids = moving.filter((i) => els[i].parentElement === p).sort((a, b) => states[0][a][3] - states[0][b][3]); for (const i of kids) p.insertBefore(els[i], p.children[states[0][i][3]] || null); }
+      };
+      home(); (window.__pvHome ||= {})[id] = home;
       // Pictures set in a style (background-image) stay as the page has them: their addresses are rewritten to the
       // copy's own files only where the page uses them, not inside this record.
       // Played by itself: how long after the one before each step came, so the copy keeps the site's rhythm (a slide
@@ -379,6 +428,11 @@ async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxM
         const gaps = [];
         X.forEach((xs) => { for (let j = 0; j < N; j++) { const n = (j + 1) % N; if (!far(xs[j]) && !far(xs[n]) && xs[n] > xs[j]) gaps.push(xs[n] - xs[j] - Wd[j]); } });
         // Never two slides in view at once (a phone reel: each picture wider than the screen): they follow on with no gap.
+        // (Mid-step they are, for a moment: the frames watched during the first step give their gap.)
+        if (!gaps.length) for (const [, xs] of track.rows) for (let j = 0; j < N; j++) {
+          const n = (j + 1) % N, a = tracked.indexOf(sl[j]), b = tracked.indexOf(sl[n]);
+          if (a >= 0 && b >= 0 && !far(xs[a]) && !far(xs[b]) && xs[b] > xs[a] && xs[b] - xs[a] < Wd[j] + 200) gaps.push(xs[b] - xs[a] - Wd[j]);
+        }
         if (!gaps.length) gaps.push(0);
         gaps.sort((a, b) => a - b); const gap = Math.round(gaps[gaps.length >> 1] * 10) / 10;
         if (gaps[gaps.length - 1] - gaps[0] > 3) return null;
