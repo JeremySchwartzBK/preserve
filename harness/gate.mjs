@@ -12,6 +12,7 @@ import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mj
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
 import { probeBehavior, compareBehavior } from './behavior.mjs';
+import { probeLayout, compareLayout, LAYOUT_WIDTHS } from './layout.mjs';
 import { policyHeaders } from './policy.mjs';
 
 // Thresholds, calibrated on the five hand-checked copies (see gate-calibration in the write-up).
@@ -32,6 +33,19 @@ export const LIMITS = {
 // Behavior check (behavior.mjs): moving pictures, videos under a still, hover, drag and scroll effects. On by default;
 // PRESERVE_BEHAVIOR_CHECK=0 turns it off.
 const BEHAVIOR_CHECK = process.env.PRESERVE_BEHAVIOR_CHECK !== '0';
+// Part-by-part check (layout.mjs): each block's size, place, text wrapping, pictures and embedded widgets against the
+// same block on the live page, at desktop, tablet and phone widths. On by default; PRESERVE_LAYOUT_CHECK=0 turns it off.
+const LAYOUT_CHECK = process.env.PRESERVE_LAYOUT_CHECK !== '0';
+const LAYOUT_TEXT = {
+  'part-size-differs': 'a part of the page is a different size than on the live page',
+  'part-moved': 'a part of the page sits in a different place than on the live page',
+  'picture-size-differs': 'a picture shows at a different size than on the live page',
+  'text-wraps-differently': 'text breaks onto a different number of lines than on the live page',
+  'parts-overlap-differently': 'parts of the page overlap differently than on the live page',
+  'part-cut-off': 'a part of the page runs off the edge of the window',
+  'frame-missing': 'an embedded widget (a form, booking or map) is missing',
+  'frame-size-differs': 'an embedded widget is cropped or a different size than on the live page',
+};
 const BEHAVIOR_TEXT = {
   'animation-flattened': 'a moving picture on the live page shows one still frame',
   'video-hidden': 'a video plays behind a still picture',
@@ -330,6 +344,31 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     finally { srv2.close(); }
   }
 
+  if (LAYOUT_CHECK) {
+    const srv3 = await serve(path.dirname(copyDir));
+    try {
+      info.layoutParts = {};
+      const found = {};
+      await withBrowser(async (b) => {
+        for (const { prof, width, codes } of LAYOUT_WIDTHS) {
+          const live = await probeLayout(b, url, { prof, width });
+          const copy = await probeLayout(b, `http://127.0.0.1:${srv3.address().port}/${id}/${prof}`, { prof, width, isCopy: true });
+          if (live.error) warnings.push(`part check ${width}px, live page: ${live.error}`);
+          if (copy.error) warnings.push(`part check ${width}px, copy: ${copy.error}`);
+          const diff = compareLayout(live, copy, { codes });
+          info.layoutParts[width] = Object.fromEntries(Object.entries(diff).filter(([, l]) => l.length).map(([k, l]) => [k, l.length]));
+          for (const [code, list] of Object.entries(diff)) for (const x of list) (found[code] ||= []).push({ ...x, width, prof });
+        }
+      });
+      const name = (w) => (w === 390 ? 'phone' : w === 1440 ? 'desktop' : `smaller window (${w} px)`);
+      for (const [code, list] of Object.entries(found)) {
+        layoutSpots = { [code]: list.slice(0, 3).map((x) => x.at) }; layoutName = list[0].prof;
+        fail(code, `${list.length > 1 ? list.length + ' places: ' : ''}${LAYOUT_TEXT[code]} (${list.slice(0, 3).map((x) => `${name(x.width)}: ${x.detail}`).join('; ')})`);
+      }
+    } catch (e) { warnings.push(`part check failed: ${String(e.message).slice(0, 200)}`); }
+    finally { srv3.close(); layoutSpots = null; }
+  }
+
   // Fonts by who holds the license (google-fonts.py), each marked with the layouts that show it, for the review's Fonts
   // tab and the confirmation at Publish. Adobe fonts swapped for lookalikes get a note when a visitor would see them.
   if (fontRecord.length) {
@@ -355,7 +394,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   }
 
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(info.behavior ? { behavior: info.behavior } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(info.behavior ? { behavior: info.behavior } : {}), ...(info.layoutParts ? { layoutParts: info.layoutParts } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }

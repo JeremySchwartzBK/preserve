@@ -9,6 +9,7 @@
 //                                            runner has). Build-time findings (stylesheet swap, fonts) can't be re-run on a
 //                                            stored copy, so they are kept from the record.
 //   node score-check.mjs --rerun --add-behavior ...   only the behavior probes, added to the recorded findings
+//   node score-check.mjs --rerun --add-layout ...     only the part-by-part comparison (layout.mjs), added likewise
 //   node score-check.mjs --report <dir>      score the verdicts a --rerun left in <dir> again (no browsers)
 //
 // Counts: a MISS is a case with a problem the check passed (or shipped with a note); a FALSE HOLD is a case Jeremy
@@ -31,6 +32,8 @@ export const KIND = {
   'motion-lost': 'behavior', 'video-hidden': 'behavior', 'animation-flattened': 'behavior', 'hover-effect-lost': 'behavior', 'drag-lost': 'behavior', 'scroll-effect-lost': 'behavior',
   'broken-images': 'content', 'blank-images': 'content', 'gallery-blank-slide': 'content', 'page-length-differs': 'content',
   'font-not-on-google-fonts': 'font',
+  'part-size-differs': 'layout', 'part-moved': 'layout', 'picture-size-differs': 'layout', 'parts-overlap-differently': 'layout', 'part-cut-off': 'layout',
+  'text-wraps-differently': ['font', 'layout'], 'frame-missing': 'frame', 'frame-size-differs': 'frame',
   'first-screen-differs': 'vague', 'page-differs': 'vague', 'differs-at-other-widths': 'vague', 'breaks-on-resize': 'vague', 'own-stylesheet-mismatch': 'vague',
 };
 // Findings made while building the copy, not by loading it: a re-run on a stored copy keeps them from the record.
@@ -42,7 +45,7 @@ export function score(cases, verdictOf) {
     const v = verdictOf(c);
     if (!v) continue;
     const held = v.result === 'fail', codes = v.codes || [];
-    const kinds = new Set(codes.map((k) => KIND[k] || 'other'));
+    const kinds = new Set(codes.flatMap((k) => KIND[k] || 'other'));
     let outcome;
     if (c.truth === 'ok') outcome = held ? 'false-hold' : 'right';
     else if (!held) outcome = 'miss';
@@ -118,8 +121,33 @@ async function addBehavior(c, copyDir) {
   return { result: codes.length ? 'fail' : c.recorded.result, codes, reasons: found };
 }
 
+// --add-layout: only the part-by-part comparison (layout.mjs) runs, at each of its widths; findings added to the record.
+async function addLayout(c, copyDir) {
+  const { serve } = await import('./gate.mjs');
+  const { probeLayout, compareLayout, LAYOUT_WIDTHS } = await import('./layout.mjs');
+  const { launch } = await import('./lib.mjs');
+  const srv = await serve(path.dirname(copyDir)), b = await launch();
+  const found = [], detail = {};
+  try {
+    for (const { prof, width, codes } of LAYOUT_WIDTHS) {
+      const live = await probeLayout(b, c.url, { prof, width });
+      const copy = await probeLayout(b, `http://127.0.0.1:${srv.address().port}/${c.copy}/${prof}`, { prof, width, isCopy: true });
+      detail[width] = { live, copy };
+      for (const [code, list] of Object.entries(compareLayout(live, copy, { label: String(width), codes }))) for (const x of list) found.push({ code, detail: x.detail, at: x.at });
+    }
+  } finally { await b.close(); srv.close(); }
+  fs.writeFileSync(path.join(path.dirname(path.dirname(copyDir)), 'layout.json'), JSON.stringify(detail));
+  const codes = [...new Set([...(c.recorded?.codes || []), ...found.map((f) => f.code)])];
+  return { result: codes.length ? 'fail' : c.recorded.result, codes, reasons: found };
+}
+
 export async function runOne(c, work) {
   const { copyDir, siteDir } = await fetchCase(c, work);
+  if (process.env.SCORE_ADD_LAYOUT === '1') {
+    const out = { case: c.case, copy: c.copy, ...(await addLayout(c, copyDir)), at: new Date().toISOString() };
+    fs.writeFileSync(path.join(work, c.case, 'rescore.json'), JSON.stringify(out, null, 1));
+    return out;
+  }
   if (process.env.SCORE_ADD_BEHAVIOR === '1') {
     const out = { case: c.case, copy: c.copy, ...(await addBehavior(c, copyDir)), at: new Date().toISOString() };
     fs.writeFileSync(path.join(work, c.case, 'rescore.json'), JSON.stringify(out, null, 1));
@@ -150,7 +178,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     fs.mkdirSync(work, { recursive: true });
     if (args.includes('--rerun')) {
       // Load time is not a fidelity check, and it is the slowest part: left out here.
-      const env = { ...process.env, PRESERVE_LOAD_CHECK: '0', ...(args.includes('--add-behavior') ? { SCORE_ADD_BEHAVIOR: '1' } : {}) };
+      const env = { ...process.env, PRESERVE_LOAD_CHECK: '0', ...(args.includes('--add-behavior') ? { SCORE_ADD_BEHAVIOR: '1' } : {}), ...(args.includes('--add-layout') ? { SCORE_ADD_LAYOUT: '1' } : {}) };
       const queue = [...cases]; const jobs = +opt('--jobs', 3);
       await Promise.all(Array.from({ length: jobs }, async () => {
         for (let c; (c = queue.shift());) {

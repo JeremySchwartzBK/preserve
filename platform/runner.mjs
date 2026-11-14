@@ -70,6 +70,11 @@ async function main() {
       .map((t) => `“${t.length > 40 ? t.slice(0, 40).replace(/\s+\S*$/, '') + '…' : t}”`);
     return labels.length ? `, most around ${labels.join(' and ')}` : '';
   };
+  // "on phones and at about 1024 pixels wide": the window sizes a part-by-part finding (harness/layout.mjs) was seen at.
+  const seenAt = (d) => {
+    const w = [...new Set([...String(d).matchAll(/(phone|smaller window \((\d+) px\)|desktop):/g)].map((m) => (m[1] === 'phone' ? 'on phones' : m[2] ? `when the window is about ${m[2]} pixels wide (${+m[2] < 1200 ? 'a tablet' : 'a laptop'})` : 'on computers')))];
+    return w.length ? ' ' + w.slice(0, 2).join(' and ') : '';
+  };
   const PLAIN = {
     'blank-images': 'Some images stay blank (for example, a gallery or slideshow with empty frames).',
     'blocks-stay-invisible': 'Some parts of the page stay hidden that show on the live site.',
@@ -87,6 +92,15 @@ async function main() {
     'hover-effect-lost': 'Something on your site that reacts when the mouse moves over it doesn’t react in the Preserve.',
     'drag-lost': 'Something on your site that can be dragged or swiped doesn’t move in the Preserve.',
     'scroll-effect-lost': 'An effect that plays as you scroll your site doesn’t play in the Preserve.',
+    // Part by part against the live site (step 3 of the quality-check plan, 2026-11-13): says which part and where.
+    'part-size-differs': (d, r) => `A part of the page is a different size than on your site${seenAt(d)}${near(r)}.`,
+    'part-moved': (d, r) => `A part of the page sits in a different place than on your site${seenAt(d)}${near(r)}.`,
+    'picture-size-differs': (d, r) => `A picture shows at a different size than on your site${seenAt(d)}${near(r)}.`,
+    'text-wraps-differently': (d, r) => `Some text breaks onto a different number of lines than on your site${seenAt(d)}${near(r)}, often a sign the font is slightly off.`,
+    'parts-overlap-differently': (d, r) => `Parts of the page overlap differently than on your site${seenAt(d)}${near(r)}.`,
+    'part-cut-off': (d, r) => `A part of the page runs off the edge of the screen${seenAt(d)}${near(r)}.`,
+    'frame-missing': (d, r) => `An embedded part of your site (such as a sign-up form, booking widget or map) is missing from the Preserve${near(r)}.`,
+    'frame-size-differs': (d, r) => `An embedded part of your site (such as a sign-up form, booking widget or map) is cropped or a different size${seenAt(d)}${near(r)}.`,
     'outside-requests': 'The copy still reaches out to other websites.',
     'overlay-left': 'A popup or banner may still cover part of the page.',
     'page-differs': (d, r) => `Parts of the page look different from the live site${near(r)}.`,
