@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import { launch, sleep, PROFILES, NEXT_SEL, PREV_SEL } from './lib.mjs';
 const [liveUrl, copyUrl, widths = '1440,390', outDir = ''] = process.argv.slice(2);
-const SEL = '.user-items-list-carousel, .user-items-list-banner-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-slideshow, .gallery-strips, .gallery-grid, .gallery-masonry, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .sqs-gallery-block-grid, .sqs-gallery-block-stacked, .summary-block-wrapper, .user-items-list-simple';
+const SEL = '.flickity-enabled, .user-items-list-carousel, .user-items-list-banner-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-slideshow, .gallery-strips, .gallery-grid, .gallery-masonry, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .sqs-gallery-block-grid, .sqs-gallery-block-stacked, .summary-block-wrapper, .user-items-list-simple';
 const ren = (s) => s.replace(/\.sqs-/g, '.ps-');
 const only = process.env.ONLY ? process.env.ONLY.split(',').map(Number) : null;
 const b = await launch();
