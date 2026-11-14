@@ -387,3 +387,44 @@ Scores on the 37 cases (15 fine, 22 with problems), 2026-11-11:
 
 Newly caught: Sunnie drag gallery, Potted Plant GIF letters, Gather and Colorize hero videos behind their still,
 Backbipoc mouse-follow pictures, State of Sage sideways scroll gallery.
+
+## Part-by-part check against the live page (step 3, 2026-11-13)
+
+Jeremy asked for step 3 of the plan on 2026-11-13. Pixel diffs say that something differs, not what. Most layout
+problems in his spot-checks were one part of the page with the wrong size or place, so `layout.mjs` measures every
+block on the live page and on the Preserve and compares them block by block (called from gate.mjs after the size check;
+`PRESERVE_LAYOUT_CHECK=0` turns it off). New findings:
+
+- `part-size-differs` and `part-moved`: a block's size, or its place inside its section.
+- `picture-size-differs`: the picture it actually draws. A fitted picture (object-fit: contain) and an SVG shape are
+  measured by what they paint, not by their box (Sam Fresquez, Minaa B).
+- `text-wraps-differently`: lines of text. Owner code blocks and text inside carousels are skipped because their
+  lines aren't steady.
+- `parts-overlap-differently`: two blocks that newly run into each other, that no longer overlap, or text that sat
+  wholly on a backdrop and now runs off it.
+- `part-cut-off`: content past the window's edge (after cutting to carousel strips and cropped boxes).
+- `frame-missing` and `frame-size-differs`: an embedded widget the live page draws that the Preserve leaves out, shows
+  as an empty box, or crops.
+
+Widths: desktop 1440 and phone 390 compare everything. Laptop 1280 and tablet 1024 count only what looks broken
+(overlaps, cut-off, missing widgets), because sizes there are already the size check's job. Minaa B's color block
+only came apart at 1280, and Gather's text ran into its button only at 1024. Blocks whose words differ are only
+compared by place, along with their whole section: that covers contact details we replace and live edits.
+`score-check.mjs --rerun --add-layout` runs only this check (about a minute a case).
+
+Scores on 52 cases (15 fine, 37 with problems; Jeremy's notes up to 2026-11-13). The live pages were loaded on
+2026-11-13, days after the capture:
+
+| | Misses | False holds | Holds that named the right kind |
+| --- | --- | --- | --- |
+| As recorded | 6 (Minaa B, Potted Plant, Sunnie, Colorize's Nov 10 copy, two later Sunnie copies) | 1 | 10 of 31 |
+| With the behavior and part checks | 2 (Sunnie's gallery slides awkwardly or overlaps mid-slide; dragging works) | 3 | 23 of 35 |
+
+"As recorded" now has one false hold, not three, because Jeremy later found problems in Borrachito's and Gather's
+Nov 10 copies.
+
+Newly caught by this step: Minaa B, the Gather tablet overlap, the Colorize sign-up form (missing, two copies),
+Backbipoc's footer running off the screen, Myrtle Green's shapes, Margaret Rajic's overlaps, and Field Theory's hero.
+The false holds are Fireside Pilates (a stylesheet finding, as before), Little Ripper's Nov 10 copy (a drag from step 2)
+and Sisu Bar. Sisu Bar's live site changed after capture, and the Preserve matches the capture. Holds are still about
+70% of cases, mostly pixel and stylesheet findings: lowering that is step 4 (smarter pixel diff).
