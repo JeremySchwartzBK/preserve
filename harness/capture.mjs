@@ -25,6 +25,42 @@ function snapshotDom() {
     el.setAttribute('data-pv-swiper', JSON.stringify({ effect: p.effect, speed: p.speed, loop: !!p.loop, autoplay: ap, autoHeight: !!p.autoHeight, spv: typeof p.slidesPerView === 'number' ? p.slidesPerView : null, gap: typeof p.spaceBetween === 'number' ? p.spaceBetween : null }));
   }
   // Record live form/input state and the current src chosen from srcset.
+  // Pictures Squarespace's loader fitted to their box in pixels (gallery grids and slideshows, video thumbnails, summary
+  // thumbnails: style="left: 0px; top: -112px; width: 288px; height: 512px"). Those pixels are for the box as the
+  // capture saw it; in a wider or narrower window the box changes and the picture no longer fills it, or is cut
+  // differently (Jeremy: the Instagram rows on dreamsake, margaret rajic and not crispy enough). Marked here with how
+  // it was fitted (covering the box or held inside it) and where it was cut, so the copy fits it the same way at any
+  // size (build.mjs). Only where the box keeps its size without the picture.
+  for (const img of document.querySelectorAll('img')) {
+    const px = (v) => (/px$/.test(v) ? parseFloat(v) : NaN), st = img.style, p = img.parentElement;
+    const w = px(st.width), h = px(st.height), l = st.left ? px(st.left) : 0, t = st.top ? px(st.top) : 0;
+    if (!(w > 0 && h > 0) || !(st.left || st.top) || isNaN(l) || isNaN(t) || !p) continue;
+    const pw = p.clientWidth, ph = p.clientHeight, ps = getComputedStyle(p);
+    if (pw < 8 || ph < 8 || parseFloat(ps.paddingLeft) || parseFloat(ps.paddingTop) || getComputedStyle(img).position !== 'relative') continue;
+    const edge = Math.abs(w - pw) < 1.5 || Math.abs(h - ph) < 1.5;
+    const fit = edge && w >= pw - 1.5 && h >= ph - 1.5 ? 'cover' : edge && w <= pw + 1.5 && h <= ph + 1.5 ? 'contain' : '';
+    if (!fit) continue;
+    const d = st.display; st.display = 'none';
+    const holds = Math.abs(p.clientWidth - pw) < 1 && Math.abs(p.clientHeight - ph) < 1;
+    st.display = d;
+    if (!holds) continue;
+    const at = (o, box, size) => (Math.abs(box - size) < 1.5 ? 50 : Math.max(0, Math.min(100, Math.round(o / (box - size) * 1000) / 10)));
+    img.setAttribute('data-pv-fit', `${fit} ${at(l, pw, w)}% ${at(t, ph, h)}%`);
+    if (ps.position === 'static') p.setAttribute('data-pv-fitbox', '');
+  }
+  // The same for a box the loader fitted (a video's frame inside its grid cell, dreamsake): placed and sized in pixels
+  // inside its box, it keeps the same share of the box at any size.
+  for (const el of document.querySelectorAll('.sqs-video-wrapper[style*="px"], [class*="video-fit"][style*="px"], [class*="video-fill"][style*="px"]')) {
+    const px = (v) => (/px$/.test(v) ? parseFloat(v) : NaN), st = el.style, p = el.offsetParent;
+    const w = px(st.width), h = px(st.height), l = px(st.left), t = px(st.top);
+    if (!(w > 0 && h > 0) || isNaN(l) || isNaN(t) || !p || p !== el.parentElement || getComputedStyle(el).position !== 'absolute') continue;
+    const pw = p.clientWidth, ph = p.clientHeight;
+    if (pw < 8 || ph < 8) continue;
+    const edge = Math.abs(w - pw) < 1.5 || Math.abs(h - ph) < 1.5;
+    if (!edge) continue;
+    const pc = (v, of) => Math.round(v / of * 1e5) / 1e3;
+    el.setAttribute('data-pv-fitpc', `${pc(l, pw)} ${pc(t, ph)} ${pc(w, pw)} ${pc(h, ph)}`);
+  }
   for (const img of document.querySelectorAll('img')) {
     if (img.currentSrc) img.setAttribute('data-preserve-current', img.currentSrc);
     // An image's size can come from its own pixels (a gallery strip: width auto, height 100%). In the copy it's lazy,
@@ -73,12 +109,65 @@ export async function loadPlaceholders(page) {
 // the site played the gallery by itself, on the same timer. The timer is the site's setting where Squarespace records
 // one (gallery blocks), otherwise measured here by watching the gallery before touching it. Swiper sliders have their
 // own player (SLIDER_SCRIPT), and carousels from a site's own code are not Squarespace's, so both are left out. The gallery is put back on its first slide before the page is saved.
-export async function recordGalleries(page, { watchMs = 9000, maxSteps = 30, maxMs = 45000 } = {}) {
+export async function recordGalleries(page, opts = {}) {
+  const out = await recordGalleriesInPage(page, opts);
+  // Can a visitor drag the strip? Only a real pointer tells: press on it, move 60 pixels and see whether the slides
+  // came along, then move back and let go where the press began, so it rests where it was. (The reel on borrachito
+  // does not follow a drag; list carousels do.) The click that would follow is swallowed so no link opens.
+  if (Array.isArray(out)) for (const r of out) {
+    if (!r.strip || r.id === undefined) continue;
+    try {
+      const sel = '[data-pv-gal]';
+      const box = await page.evaluate(([sel, id]) => {
+        const g = [...document.querySelectorAll(sel)].find((e) => { try { return JSON.parse(e.getAttribute('data-pv-gal')).id === id; } catch { return false; } });
+        if (!g) return null; g.scrollIntoView({ block: 'center', behavior: 'instant' }); window.__pvG = g;
+        window.__pvXs = () => { const c = JSON.parse(g.getAttribute('data-pv-gal')); return c.strip.sl.map((j) => g.querySelector('[data-pv-gi="' + j + '"]')).map((e) => (e ? e.getBoundingClientRect().left : 0)); };
+        window.__pvEat = (e) => { e.preventDefault(); e.stopImmediatePropagation(); }; addEventListener('click', window.__pvEat, true);
+        const q = g.getBoundingClientRect(); return { x: Math.max(0, q.left), y: q.top, w: Math.min(innerWidth, q.right) - Math.max(0, q.left), h: q.height, vh: innerHeight };
+      }, [sel, r.id]);
+      if (!box) continue;
+      await sleep(500);
+      // A page that scrolls smoothly may still be on its way: wait until the gallery holds still, and press only if it is
+      // really under the pointer.
+      let b2 = null;
+      for (let t = 0; t < 12; t++) { const q = await page.evaluate(() => { const q = window.__pvG.getBoundingClientRect(); return { y: q.top, h: q.height }; }); if (b2 && Math.abs(q.y - b2.y) < 1) { b2 = q; break; } b2 = q; await sleep(250); }
+      const x0 = box.x + box.w / 2, y0 = Math.max(10, Math.min(box.vh - 10, b2.y + b2.h / 2));
+      const under = await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return !!e && window.__pvG.contains(e); }, [x0, y0]);
+      if (!under) { r.strip.dragError = 'not under the pointer'; await page.evaluate(() => removeEventListener('click', window.__pvEat, true)); continue; }
+      const xs0 = await page.evaluate(() => window.__pvXs());
+      const touch = (page.viewportSize()?.width || 1440) < 768;
+      const cdp = touch ? await page.context().newCDPSession(page) : null;
+      const down = () => (touch ? cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] }) : page.mouse.move(x0, y0).then(() => page.mouse.down()));
+      const move = (dx) => (touch ? cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + dx, y: y0 }] }) : page.mouse.move(x0 + dx, y0));
+      const upp = () => (touch ? cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }) : page.mouse.up());
+      await down();
+      for (const dx of [-10, -20, -30, -40, -50, -60]) { await move(dx); await sleep(30); }
+      await sleep(150);
+      const xs1 = await page.evaluate(() => window.__pvXs());
+      for (const dx of [-45, -30, -15, 0]) { await move(dx); await sleep(30); }
+      await upp(); await sleep(900);
+      const xs2 = await page.evaluate(() => window.__pvXs());
+      const d = xs1.map((x, j) => x - xs0[j]).filter((v, j) => Math.abs(xs0[j]) < 4000 && Math.abs(xs1[j]) < 4000);
+      // Most slides came along (one may have changed places with its double as the drag began).
+      d.sort((a, b) => a - b); const md = d.length ? d[d.length >> 1] : 0;
+      r.strip.drag = md < -35 && md > -75;
+      r.strip.dragRest = xs2.every((x, j) => Math.abs(x - xs0[j]) < 2);
+      await page.evaluate(([drag, back, xs0]) => {
+        const g = window.__pvG, c = JSON.parse(g.getAttribute('data-pv-gal')); c.strip.drag = drag; g.setAttribute('data-pv-gal', JSON.stringify(c));
+        removeEventListener('click', window.__pvEat, true);
+      }, [r.strip.drag, r.strip.dragRest]);
+      if (cdp) await cdp.detach().catch(() => {});
+    } catch (e) { r.strip.dragError = String(e.message).split('\n')[0]; await page.mouse.up().catch(() => {}); }
+  }
+  return out;
+}
+
+async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxMs = 45000 } = {}) {
   return page.evaluate(async ([gSel, nSel, pSel, watchMs, maxSteps, maxMs]) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const BLOCK = '[id^="block-"],.sqs-block,[data-block-id],section[data-section-id]';
     const shown = (e) => { for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; } const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
-    const pics = (e) => e.querySelectorAll('img, .swiper-slide, [data-slide-index], .slide').length;
+    const pics = (e) => e.querySelectorAll('img, .swiper-slide, [data-slide-index], .slide, .list-item, [class*="__slide"]').length;
     const blockOf = (e) => e.closest(BLOCK) || e.parentElement;
     const cand = new Set([...document.querySelectorAll(gSel)]);
     for (const b of document.querySelectorAll(nSel)) { const c = b.closest(gSel); if (c) cand.add(c); }
@@ -132,6 +221,14 @@ export async function recordGalleries(page, { watchMs = 9000, maxSteps = 30, max
       if (!step) continue;
       if (inst) await idle();
       const states = [await settle()], dt = [0];
+      // Where each element sits (left edge and width, from the gallery's left edge) in every state: what the strip
+      // model below is worked out from.
+      const geo = () => { const gl = g.getBoundingClientRect().left; return els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round((r.left - gl) * 10) / 10, Math.round(r.width * 10) / 10]; }); };
+      const geos = [geo()];
+      // How the first step moves, frame by frame (elements placed by a transform), so the copy can move the same way.
+      const tracked = els.map((e, i) => i).filter((i) => /transform|translate/.test(els[i].getAttribute('style') || '')).slice(0, 80);
+      const track = { on: true, t0: performance.now(), rows: [] };
+      (function frame() { if (!track.on) return; const gl = g.getBoundingClientRect().left; track.rows.push([performance.now() - track.t0, tracked.map((i) => els[i].getBoundingClientRect().left - gl)]); if (track.rows.length < 1500) requestAnimationFrame(frame); })();
       let tPrev = performance.now();
       const classes = (st) => st.map((x) => x[0] + '|' + x[2]).join('\n');
       const t1 = performance.now();
@@ -148,11 +245,18 @@ export async function recordGalleries(page, { watchMs = 9000, maxSteps = 30, max
         if (same(s, states[0]) || (classes(s) === classes(states[0]) && states.some((x) => classes(x) !== classes(states[0])))) { res.stop = 'back to the first slide'; dt[0] = gap; break; }
         if (same(s, states[states.length - 1])) { res.stop = 'no change'; break; }
         if (states.some((x) => same(s, x))) { res.stop = 'repeats'; break; }
-        states.push(s); dt.push(gap);
+        states.push(s); dt.push(gap); geos.push(geo()); track.on = false;
       }
+      track.on = false;
       res.steps = states.length;
       if (res.skip || states.length < 2) continue;
       const moving = els.map((_, i) => i).filter((i) => states.some((s) => s[i].some((v, k) => v !== states[0][i][k])));
+      // A strip's spare slides can stay parked through every step (not crispy enough: twelve slides, six steps); they
+      // are slides all the same, so they are numbered with the ones that moved.
+      { const at = new Map(els.map((e, i) => [e, i])), byPar = new Map();
+        for (const i of moving) { const p = els[i].parentElement; if (p && /transform\s*:/.test(states[0][i][1])) byPar.set(p, (byPar.get(p) || 0) + 1); }
+        let par = null, n = 1; for (const [p, c] of byPar) if (c > n) { par = p; n = c; }
+        if (par) { for (const e of par.children) { const i = at.get(e); if (i !== undefined && !moving.includes(i) && /transform\s*:/.test(states[0][i][1])) moving.push(i); } moving.sort((a, b) => a - b); } }
       moving.forEach((i, j) => els[i].setAttribute('data-pv-gi', j));
       // Back to the first slide, as the page was before.
       for (const i of moving) {
@@ -172,6 +276,87 @@ export async function recordGalleries(page, { watchMs = 9000, maxSteps = 30, max
       // Squarespace's class names as the copy has them (own-css.mjs renames them; none may be left in a copy).
       const ren = (t) => t.replace(/data-sqsp?-/g, 'data-ps-').replace(/(^|[^\w-])sqsrte-/g, '$1rte-').replace(/(^|[^\w-])sqsp?-/g, '$1ps-').replace(/(^|[^\w-])tweak-/g, '$1tw-');
       const timed = res.how === 'timer' ? { dt: dt.map((x) => x || auto) } : {};
+      // A strip of slides (list carousels, banner slideshows, gallery reels): slides that sit side by side and are slid
+      // along by a pixel offset written on each one. Those offsets, and any written-in slide sizes, are for the width
+      // the capture saw, so replaying them at another width overlaps the slides or opens gaps (Jeremy, sunnie, not
+      // crispy enough and borrachito, 2026-11-13). For these the copy gets the strip's rules instead of its pixels:
+      // which elements are the slides, the gap between them, where the current one rests (the strip's start, or the
+      // middle), whether it goes round for ever, how a written-in size follows the strip's height, and how a step
+      // moves over time. The copy's player lays the strip out from the slides' own sizes at whatever width it is shown.
+      const strip = (() => {
+        const at = new Map(els.map((e, i) => [e, i]));
+        const moved = (i) => geos.some((q) => Math.abs(q[i][0] - geos[0][i][0]) > 1);
+        const tops = moving.filter((i) => moved(i) && !(at.has(els[i].parentElement) && moved(at.get(els[i].parentElement))));
+        const byPar = new Map(); for (const i of tops) { const p = els[i].parentElement; byPar.set(p, [...(byPar.get(p) || []), i]); }
+        let sl = []; for (const v of byPar.values()) if (v.length > sl.length) sl = v;
+        if (sl.length < 2) return null;
+        const par = els[sl[0]].parentElement;
+        // Every slide among its siblings, in page order, each placed by a transform that only moves it sideways.
+        sl = [...par.children].map((e) => at.get(e)).filter((i) => i !== undefined && /transform\s*:/.test(states[0][i][1]));
+        if (sl.length < 2 || sl.some((i) => !moving.includes(i))) return null;
+        const yOf = (st) => { const m = /translate3d\(\s*[^,]+,\s*(-?[\d.]+)px/.exec(st) || /matrix\((?:[^,]+,){5}\s*(-?[\d.]+)\)/.exec(st) || /translate\(\s*[^,]+,\s*(-?[\d.]+)px/.exec(st); return m ? +m[1] : 0; };
+        if (states.some((s) => sl.some((i) => Math.abs(yOf(s[i][1])) > 0.5))) return null;
+        const N = sl.length, pr = par.getBoundingClientRect(), gl = g.getBoundingClientRect().left, pl = pr.left - gl, pw = pr.width;
+        const far = (x) => Math.abs(x) > 4000;
+        const X = geos.map((q) => sl.map((i) => q[i][0] - pl)), Wd = sl.map((i) => geos[0][i][1]);
+        // The current slide of each state: the one resting at the strip's start offset, or else in its middle.
+        const first = X[0].findIndex((x) => !far(x)); if (first < 0) return null;
+        const c0 = !far(X[0][0]) && X[0].every((x, j) => far(x) || x >= X[0][0] - 1 || j > N / 2) ? 0 : X[0].reduce((b, x, j) => (!far(x) && x >= -1 && (b < 0 || x < X[0][b]) ? j : b), -1);
+        if (c0 < 0) return null;
+        const find = (k, test) => { const c = X[k].findIndex((x, j) => !far(x) && test(x, j)); return c; };
+        const x0 = X[0][c0];
+        // In the middle wins when the slide rests away from the strip's start: slides of nearly one width sit at nearly
+        // one offset, which would pass for a start offset and then be wrong at every other width (borrachito's reel).
+        const mid = (k) => find(k, (x, j) => Math.abs(x + Wd[j] / 2 - pw / 2) < 2);
+        let al = 'c', cur = Math.abs(x0) > 2 ? X.map((_, k) => mid(k)) : [-1];
+        if (cur.some((c) => c < 0)) { al = 's'; cur = X.map((_, k) => find(k, (x) => Math.abs(x - x0) < 2)); }
+        if (cur.some((c) => c < 0)) { al = 'c'; cur = X.map((_, k) => mid(k)); }
+        if (cur.some((c) => c < 0)) return null;
+        // Slides resting side by side give the gap; they must also agree with one another.
+        const gaps = [];
+        X.forEach((xs) => { for (let j = 0; j < N; j++) { const n = (j + 1) % N; if (!far(xs[j]) && !far(xs[n]) && xs[n] > xs[j]) gaps.push(xs[n] - xs[j] - Wd[j]); } });
+        // Never two slides in view at once (a phone reel: each picture wider than the screen): they follow on with no gap.
+        if (!gaps.length) gaps.push(0);
+        gaps.sort((a, b) => a - b); const gap = Math.round(gaps[gaps.length >> 1] * 10) / 10;
+        if (gaps[gaps.length - 1] - gaps[0] > 3) return null;
+        const by = cur.length > 1 ? ((cur[1] - cur[0]) % N + N) % N : 1;
+        if (!by || cur.some((c, k) => k && ((c - cur[k - 1]) % N + N) % N !== by)) return null;
+        const prev = (c0 + N - 1) % N, inf = res.stop === 'back to the first slide' || (!far(X[0][prev]) && X[0][prev] < x0) || cur.some((c, k) => k && c < cur[k - 1]);
+        // A size written on the slide (reels: each picture's width for the strip's height) follows the strip's height.
+        const ph = par.getBoundingClientRect().height || 1;
+        const sized = sl.map((i) => { const e = els[i], w = parseFloat(e.style.width), h = parseFloat(e.style.height); return /px/.test(e.style.width) && /px/.test(e.style.height) && w > 0 && h > 0 ? [Math.round(w / h * 1e4) / 1e4, Math.round(h / ph * 1e3) / 1e3] : null; });
+        const out = { sl: sl.map((i) => moving.indexOf(i)), gap, al, x0: al === 's' ? Math.round(x0 * 10) / 10 : 0, pw: Math.round(pw), by, inf, cur, max: inf ? 0 : cur[cur.length - 1] };
+        if (sized.every(Boolean)) out.ar = sized.map((q) => q[0]), out.hk = sized[0][1];
+        // What tells the current slide, one in view and one waiting out of view apart (aria-hidden, data-active...).
+        const role = (k, j) => (j === cur[k] ? 'c' : far(X[k][j]) ? 'o' : 'v');
+        const names = new Set(); const seen = { c: {}, v: {}, o: {} };
+        states.forEach((s, k) => sl.forEach((i, j) => { const o = {}; for (const kv of s[i][2] ? s[i][2].split('\u001f') : []) { const q = kv.indexOf('='); o[kv.slice(0, q)] = kv.slice(q + 1); names.add(kv.slice(0, q)); } const r = role(k, j); (seen[r].all ||= []).push(o); }));
+        const roles = {};
+        for (const n of names) {
+          const vals = (r) => [...new Set((seen[r].all || []).map((o) => (n in o ? o[n] : null)))];
+          const per = { c: vals('c'), v: vals('v'), o: vals('o') };
+          // Only attributes that depend on the slide's place and nothing else.
+          if (Object.values(per).some((v) => v.length > 1)) continue;
+          const flat = Object.values(per).filter((v) => v.length).map((v) => v[0]);
+          if (new Set(flat).size < 2) continue;
+          for (const r of ['c', 'v', 'o']) if (per[r].length) (roles[r] ||= {})[ren(n)] = per[r][0];
+        }
+        if (Object.keys(roles).length) out.roles = roles;
+        // The first step over time: where the slide that becomes current is, from start (0) to rest (1).
+        const lv = cur.length > 1 && !far(X[1][cur[0]]) ? cur[0] : cur[1] ?? 0, tj = tracked.indexOf(sl[lv]);
+        if (tj >= 0 && cur.length > 1 && res.how !== 'timer' && track.rows.length > 4 && !far(X[0][lv]) && !far(X[1][lv])) {
+          const a = track.rows[0][1][tj], b = X[1][lv] + pl, rows = track.rows.map(([t, xs]) => [t, (xs[tj] - a) / ((b - a) || 1)]).filter(([, p]) => p > -5 && p < 5);
+          let i0 = 0; rows.forEach(([, p], i) => { if (p < 0.004) i0 = i; });
+          const i1 = rows.findIndex(([, p], i) => i > i0 && p > 0.996);
+          if (i1 > i0 + 2 && Math.abs(b - a) > 20) {
+            const T = rows[i1][0] - rows[i0][0], pts = [];
+            for (let i = i0; i <= i1; i++) { const t = (rows[i][0] - rows[i0][0]) / T, p = Math.min(1, Math.max(0, rows[i][1])); if (!pts.length || t - pts[pts.length - 1][0] >= 0.05 || i === i1) pts.push([Math.round(t * 1000) / 1000, Math.round(p * 1000) / 1000]); }
+            if (T >= 120 && T <= 3000) out.ease = { ms: Math.round(T), pts };
+          }
+        }
+        return out;
+      })();
+      if (strip) { timed.strip = strip; res.strip = { slides: strip.sl.length, gap: strip.gap, align: strip.al, endless: strip.inf, sized: !!strip.ar, ms: strip.ease?.ms || null }; }
       g.setAttribute('data-pv-gal', JSON.stringify({ id, auto, ...timed, w: Math.round(g.getBoundingClientRect().width), steps: states.map((s) => moving.map((i) => [ren(s[i][0]), ren(noUrl(s[i][1])), ren(s[i][2]), s[i][3]])) }));
       for (const b of nexts) b.setAttribute('data-pv-gal-next', id);
       for (const b of prevs) b.setAttribute('data-pv-gal-prev', id);
