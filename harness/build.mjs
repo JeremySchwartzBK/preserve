@@ -177,13 +177,19 @@ addEventListener('load',function(){draw(false)});
 // stepped each one through its slides and wrote down what every step changes (capture.mjs recordGalleries, in
 // data-pv-gal). This plays those steps back: on its "next" / "previous" arrows, and on the site's own timer when the
 // site played it by itself (paused while our checks compare pictures, and for visitors who ask for less motion).
-// Classes are the ones this copy gives to the classes the capture saw (renamed as our stylesheet renames them), learned
-// from the first step, where both the shown and the hidden slides' classes are present. Positions were measured at the
+// Each step adds and removes the classes the capture saw change (under the names our stylesheet gives them); how a
+// slide and what is inside it look in each step is written into our stylesheet (own-css.mjs, gallery states), which
+// plays every step once through g.__pvShow while it records.
+// The page as saved is not always the first recorded step (a slideshow that plays by itself moved on in between): the
+// player starts from the step whose marks match the page, so the first press of an arrow always changes the picture. Positions were measured at the
 // capture width; at any other width they are scaled by how much wider or narrower the gallery is. Squarespace moved
 // some galleries with its own animation code rather than CSS, so moving parts get a short slide of their own, played
 // as the visitor sees it (2026-11-11, backbipoc and sunnie): a slide waiting far off to the side comes in from the edge
 // the others move away from, one leaving goes the same way before it is parked, and one that wraps round from the
 // front of the line to the back comes in from the edge too, never sweeping back across the gallery.
+// A ticker (cfg.strip.drift, pixels a second: a strip the live page kept drifting sideways without rest) drifts the same
+// way, while it is on screen, and holds still for visitors who ask for less motion.
+// A row that had an end on the live page (cfg.fin: the last press of its arrow changed nothing) stops at its ends.
 // A moving part whose own styles already slide it (a summary carousel's row: transition: transform 0.4s) is left to them.
 // A strip of slides (cfg.strip from the capture: list carousels, banner slideshows, reels; 2026-11-13, sunnie, not crispy
 // enough, borrachito) is not replayed from the capture's pixel offsets, which overlapped the slides or opened gaps at
@@ -196,16 +202,23 @@ const GALLERY_SCRIPT = `<script id="preserve-gallery">(function(){
 var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 [].forEach.call(document.querySelectorAll('[data-pv-gal]'),function(g){
 var cfg;try{cfg=JSON.parse(g.getAttribute('data-pv-gal'))}catch(e){return}
-var steps=cfg.steps||[],n=steps.length;if(n<2)return;
+var steps=cfg.steps||[],n=steps.length;if(n<2&&!(n&&cfg.strip&&cfg.strip.drift))return;
 var els=[];[].forEach.call(g.querySelectorAll('[data-pv-gi]'),function(e){els[+e.getAttribute('data-pv-gi')]=e});
 if(g.hasAttribute('data-pv-gi'))els[+g.getAttribute('data-pv-gi')]=g;
-var map={},base=[];
-els.forEach(function(e,j){if(!e)return;var c=steps[0][j][0];if(!(c in map))map[c]=e.getAttribute('class')||'';base[j]=e.getAttribute('style')||''});
-function cls(e,j,c){if(c in map)return e.setAttribute('class',map[c]);var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
-was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(x)});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(x)})}
+var base=[];els.forEach(function(e,j){if(e)base[j]=e.getAttribute('style')||''});
+var home=els.map(function(e,j){if(!e)return null;var a={};steps.forEach(function(st){var o=kv(st[j][2]);for(var k in o)a[k]=e.getAttribute(k)});return{c:e.getAttribute('class'),a:a}});
+var kids=[];els.forEach(function(e){var p=e&&e.parentElement;if(p&&!kids.some(function(x){return x[0]===p}))kids.push([p,[].slice.call(p.childNodes)])});
+function back(skip){els.forEach(function(e,j){if(!e||(skip&&skip[j]))return;var h=home[j];if(h.c==null)e.removeAttribute('class');else e.setAttribute('class',h.c);
+if(base[j])e.setAttribute('style',base[j]);else e.removeAttribute('style');for(var k in h.a){if(h.a[k]==null)e.removeAttribute(k);else e.setAttribute(k,h.a[k])}});
+kids.forEach(function(x){x[1].forEach(function(n){x[0].appendChild(n)})})}
+var tm={},raw=!document.getElementById('pv-css');function rn(x){return x.replace(/^sqsrte-/,'rte-').replace(/^sqsp-/,'ps-').replace(/^sqs-/,'ps-').replace(/^tweak-/,'tw-')}
+els.forEach(function(e){if(e)(e.getAttribute('class')||'').split(/\\s+/).forEach(function(y){var r=rn(y);if(r!==y)tm[r]=y})});
+function ren(x){return tm[x]||(raw&&/^ps-/.test(x)?'sqs-'+x.slice(3):raw&&/^tw-/.test(x)?'tweak-'+x.slice(3):x)}
+function cls(e,j,c){var was=steps[0][j][0].split(/\\s+/),now=c.split(/\\s+/);
+was.forEach(function(x){if(x&&now.indexOf(x)<0)e.classList.remove(ren(x))});now.forEach(function(x){if(x&&was.indexOf(x)<0)e.classList.add(ren(x))})}
 function scale(css){var k=g.getBoundingClientRect().width/(cfg.w||1);if(!k||Math.abs(k-1)<0.01)return css;
 return css.replace(/(^|;)\\s*(left|right|transform|translate|margin-left|margin-right)\\s*:[^;]*/g,function(d){return d.replace(/(-?\\d*\\.?\\d+)px/g,function(_,v){return(+v*k).toFixed(2)+'px'})})}
-var cur=0;
+var cur=0;(function(){for(var i=0;i<n;i++){var ok=true,any=false;for(var j=0;j<els.length&&ok;j++){if(!els[j])continue;var o=kv(steps[i][j][2]);for(var k in o){any=true;if(els[j].getAttribute(k)!==o[k]){ok=false;break}}}if(ok&&any){cur=i;return}}})();var cur0=cur;
 function decl(css){var o={};(css||'').split(';').forEach(function(d){var k=d.indexOf(':');if(k>0)o[d.slice(0,k).trim().toLowerCase()]=d.slice(k+1).trim()});return o}
 var first=steps[0].map(function(s){return decl(s[1])});
 function put(i,skip){steps[i].forEach(function(s,j){var e=els[j];if(!e||(skip&&skip[j]))return;cls(e,j,s[0]);
@@ -242,12 +255,13 @@ function strip(){var S=cfg.strip,sl=S.sl.map(function(j){return els[j]});if(sl.s
 var N=sl.length,par=sl[0].parentElement,skip={};S.sl.forEach(function(j){skip[j]=1});
 var W=[],nat=[],st=[],L=0,pw=0,vl=0,vr=0,pos=S.cur[0],raf=0,shown=0,tgt=null,rn={};
 ['c','v','o'].forEach(function(r){for(var k in (S.roles||{})[r]||{})rn[k]=1});
+function tf(e,v){if(v)e.style.setProperty('transform',v,'important');else e.style.removeProperty('transform')}
 function measure(){var ph=par.getBoundingClientRect().height;
 if(S.ar&&ph)sl.forEach(function(e,j){var h=ph*S.hk;e.style.height=h+'px';e.style.width=h*S.ar[j]+'px'});
-var keep=sl.map(function(e){var t=e.style.transform;e.style.transition='none';e.style.transform='none';return t});
+var keep=sl.map(function(e){var t=e.style.transform;e.style.transition='none';tf(e,'none');return t});
 var pr=par.getBoundingClientRect();pw=pr.width;
 sl.forEach(function(e,j){var r=e.getBoundingClientRect();nat[j]=r.left-pr.left;W[j]=r.width});
-sl.forEach(function(e,j){e.style.transform=keep[j]});
+sl.forEach(function(e,j){tf(e,keep[j])});
 L=0;for(var j=0;j<N;j++){st[j]=L;L+=W[j]+S.gap}
 var l=0,r=document.documentElement.clientWidth;for(var a=par;a&&a!==document.body;a=a.parentElement){if(getComputedStyle(a).overflowX!=='visible'){var q=a.getBoundingClientRect();l=Math.max(l,q.left);r=Math.min(r,q.right)}}
 vl=l-pr.left;vr=r-pr.left}
@@ -259,7 +273,7 @@ function lim(p){return S.inf?p:Math.max(S.cur[0],Math.min(S.max,p))}
 function role(e,r){var a=(S.roles||{})[r]||{};for(var k in rn){if(a[k]==null)e.removeAttribute(k);else if(e.getAttribute(k)!==a[k])e.setAttribute(k,a[k])}}
 function paint(){if(!L)return;var o=off(pos),lo=vl-(L-(vr-vl))/2,c=((Math.round(pos)%N)+N)%N;
 sl.forEach(function(e,j){var x=st[j]-o;if(S.inf)x=((x-lo)%L+L)%L+lo;var on=x<vr&&x+W[j]>vl;
-e.style.transform='translate3d('+(on?(x-nat[j]).toFixed(2):-9999)+'px, 0px, 0px)';role(e,j===c?'c':on?'v':'o')})}
+tf(e,'translate3d('+(on?(x-nat[j]).toFixed(2):-9999)+'px, 0px, 0px)');role(e,j===c?'c':on?'v':'o')})}
 function rest(){if(S.inf)pos=((pos%N)+N)%N;tgt=null;paint();var c=Math.round(pos),k=S.cur.indexOf(c);if(k<0)k=c%S.cur.length;if(k!==shown&&steps[k]){shown=k;put(k,skip);paint()}}
 function run(to,ms,curve){cancelAnimationFrame(raf);if(reduce||!ms){pos=to;rest();return}var from=pos,t0=performance.now();
 (function f(now){var t=Math.min(1,Math.max(0,(now-t0)/ms));if(t<1){pos=from+(to-from)*curve(t);paint();raf=requestAnimationFrame(f)}else{pos=to;rest()}})(t0)}
@@ -282,16 +296,21 @@ g.addEventListener('pointerup',up,true);g.addEventListener('pointercancel',up,tr
 g.addEventListener('click',function(e){if(drag){e.preventDefault();e.stopImmediatePropagation();drag=false}},true);
 g.addEventListener('dragstart',function(e){e.preventDefault()},true);
 if(!g.style.touchAction)g.style.touchAction='pan-y'}
+g.__pvShow=function(i){cancelAnimationFrame(raf);tgt=null;if(i<0){back(skip);pos=S.cur[0];shown=0;paint();return}if(S.cur[i]!=null)pos=S.cur[i];shown=i;put(i,skip);paint()};
 function lay(){measure();paint()}
 var rt;addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(lay,60)});
-addEventListener('load',lay);lay();auto();return true}
+addEventListener('load',lay);lay();auto();
+if(S.drift&&!reduce){var seen=true,lt=0;if(window.IntersectionObserver)new IntersectionObserver(function(en){seen=en[en.length-1].isIntersecting}).observe(g);
+(function tick(now){if(lt&&seen&&L&&!window.__pvStill&&!document.hidden){pos=inv(off(pos)+S.drift*Math.min(100,now-lt)/1000,pos);pos=((pos%N)+N)%N;paint()}lt=now;requestAnimationFrame(tick)})(0)}
+return true}
 if(cfg.strip&&strip())return;
 function go(i,dir){cur=((i%n)+n)%n;draw(cur,true,dir)}
+g.__pvShow=function(i){ends.forEach(clearTimeout);ends=[];if(i<0){back();cur=cur0;return}cur=i;draw(i,false)};
 // A recorded rhythm (dt: ms before each step) can split one slide change into quick steps; an arrow plays a whole one.
-var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}function major(i){return !dt||dt[i]>=900}
+var dt=cfg.dt||null;function wait(i){return dt?dt[i]||cfg.auto:cfg.auto}var dmax=dt?Math.max.apply(null,dt):0;function major(i){return !dt||dt[i]>=dmax/2}
 var timer=null,sub=null;function restart(){clearTimeout(timer);if(!cfg.auto||reduce||window.__pvStill)return;
 timer=setTimeout(function tick(){if(!document.hidden)go(cur+1,1);timer=setTimeout(tick,wait((cur+1)%n))},wait((cur+1)%n))}
-function slide(d){clearTimeout(sub);var i=cur;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
+function slide(d){clearTimeout(sub);var i=cur;if(cfg.fin&&(d>0?cur>=n-1:cur<=0))return;if(d>0){do{i=(i+1)%n}while(!major(i)&&i!==cur)}else{while(!major(i)&&i)i--;do{i=(i-1+n)%n}while(!major(i)&&i!==cur)}
 go(i,d);(function more(){var j=(cur+1)%n;if(!major(j)&&j){sub=setTimeout(function(){go(j,d);more()},Math.min(wait(j),900))}})()}
 function bind(sel,d){[].forEach.call(document.querySelectorAll('['+sel+'="'+cfg.id+'"]'),function(b){b.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();slide(d);restart()},true)})}
 bind('data-pv-gal-next',1);bind('data-pv-gal-prev',-1);
@@ -318,6 +337,8 @@ restart();
 // from its drawn size. Shapes that ring the whole phrase (circle, box) cover the phrase, the rest go one per line.
 // Shapes are placed where the text sits once its entrance animation is over: an animation partway through (myrtle-green's headings rise
 // 18px into place) moves the text but not the shapes, which then sat a line-third low on every heading (2026-11-11).
+// Strokes may run past their box, as live (not crispy enough's scribbled underline lost its loops, 2026-11-13); only a
+// repeated wave is cut to length.
 const SHAPES_SCRIPT = `<script id="preserve-shapes">(function(){
 var RING=/circle|oval|ellipse|box|rect|bracket|bubble|cloud/i;
 function lines(el,hr){var out=[];[].forEach.call(el.getClientRects(),function(q){if(q.width<1)return;var l=out[out.length-1];
@@ -327,7 +348,7 @@ function moved(el,host){var x=0,y=0;for(var e=el;e&&e!==host;e=e.parentElement){
 function orig(n){var d=n.dataset;if(!d.pvW){d.pvW=parseFloat(n.style.width)||n.offsetWidth;d.pvH=parseFloat(n.style.height)||n.offsetHeight;var p=n.querySelector('path');if(p)d.pvD=p.getAttribute('d')||''}return{w:+d.pvW,h:+d.pvH,d:d.pvD||''}}
 function draw(n,shape,fs,w,h){var p=n.querySelector('path'),svg=n.querySelector('svg');if(!p||!svg)return;
 if(shape==='marker'){var y=h*0.55;p.setAttribute('d','M 0,'+y+' c '+w/8+',0 '+w/4+',0 '+w/2+',0 c '+w/4+',0 '+3*w/8+',0 '+w/2+',0');p.setAttribute('stroke-dasharray',String(w));p.setAttribute('stroke-dashoffset',String(2*w));return}
-var o=orig(n);svg.style.width=w+'px';svg.style.height=h+'px';svg.style.overflow='hidden';
+var o=orig(n);svg.style.width=w+'px';svg.style.height=h+'px';svg.style.overflow=/wave|zigzag/i.test(shape)?'hidden':'visible';
 if(/wave|zigzag/i.test(shape)){var sc=h/o.h||1,vw=w/sc,m=/^\\s*(M[^cCsSlLqQ]*)([\\s\\S]*)$/.exec(o.d),d=o.d;if(m&&o.w>0)for(var i=1;i*o.w<vw;i++)d+=' '+m[2];p.setAttribute('d',d);svg.setAttribute('viewBox','0 0 '+vw+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
 else{svg.setAttribute('viewBox','0 0 '+o.w+' '+o.h);svg.setAttribute('preserveAspectRatio','none')}
 p.removeAttribute('stroke-dasharray');p.removeAttribute('stroke-dashoffset');p.style.strokeDasharray='none';p.style.strokeDashoffset='0'}
@@ -392,6 +413,43 @@ if(!on){on=true;paint();d.style.opacity='1';im.style.visibility='hidden'}if(!raf
 addEventListener('resize',function(){if(on)paint()})});
 })();</script>`;
 
+// Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
+// data-pv-scrollshow: how far down they show, how they display, whether clicking goes back to the top).
+const SCROLL_SHOW_SCRIPT = `<script id="preserve-scroll-show">(function(){
+[].forEach.call(document.querySelectorAll('[data-pv-scrollshow]'),function(el){
+var c;try{c=JSON.parse(el.getAttribute('data-pv-scrollshow'))}catch(e){return}
+var y=Math.max(1,c.y||1)*0.75,on=null;
+function set(){var v=scrollY>=y;if(v===on)return;on=v;
+if(v){if(getComputedStyle(el).display==='none')el.style.display=c.d||'block';el.style.visibility='visible';el.style.opacity='1';el.style.pointerEvents='auto'}
+else{el.style.opacity='0';el.style.visibility='hidden';el.style.pointerEvents='none'}}
+set();addEventListener('scroll',set,{passive:true});
+if(c.top){el.style.cursor='pointer';el.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();scrollTo({top:0,behavior:'smooth'})},true)}
+});
+})();</script>`;
+
+// Pointer followers (hello world studio's 3D cursor, not crispy enough's little pictures over some blocks; 2026-11-13):
+// capture finds what moves with the mouse and marks it (capture.mjs pointerFollowers, data-pv-pointer; the block that
+// shows it, data-pv-ptrig). Ours moves it with the pointer, shows it only over its block when it has one, and hides the
+// arrow where the site did. Hidden until the pointer moves, and never on touch screens, which have no pointer.
+const POINTER_SCRIPT = `<script id="preserve-pointer">(function(){
+if(!(window.matchMedia&&matchMedia('(hover: hover) and (pointer: fine)').matches))return;
+var css='';
+[].forEach.call(document.querySelectorAll('[data-pv-pointer]'),function(el){
+var c;try{c=JSON.parse(el.getAttribute('data-pv-pointer'))}catch(e){return}
+var trig=c.on!=null?document.querySelector('[data-pv-ptrig="'+c.on+'"]'):null;if(c.on!=null&&!trig)return;
+if(c.cur==='none'){var t=trig?'[data-pv-ptrig="'+c.on+'"]':'body>:not([id^="preserve"]):not([class*="preserve"])';css+=(trig?'':'html,body,')+t+','+t+' *{cursor:none!important}'}
+var base=null,on=false;el.style.transition='none';el.style.visibility='hidden';
+function show(){if(on)return;on=true;if(getComputedStyle(el).display==='none')el.style.display='block';el.style.visibility='visible';el.style.opacity='1'}
+function hide(){on=false;el.style.visibility='hidden'}
+function place(e){show();if(!base){el.style.left='0px';el.style.top='0px';el.style.right='auto';el.style.bottom='auto';var r=el.getBoundingClientRect();base={x:r.left,y:r.top}}
+el.style.left=(e.clientX+c.dx-base.x)+'px';el.style.top=(e.clientY+c.dy-base.y)+'px'}
+if(trig){trig.addEventListener('pointermove',place);trig.addEventListener('pointerleave',hide)}
+else{document.addEventListener('pointermove',place);document.documentElement.addEventListener('pointerleave',hide)}
+addEventListener('resize',function(){base=null});
+});
+if(css){var st=document.createElement('style');st.textContent=css;document.head.appendChild(st)}
+})();</script>`;
+
 // Squarespace's "film grain" image effect (field theory, 2026-11-10): the picture under a fine noise that flickers. The
 // capture keeps the picture with one frame of grain in it (data-pv-fx="film-grain"); ours lays a few frames of our own
 // noise over it (made here from a fixed seed, so every visit is the same) and steps through them, so it flickers as
@@ -405,7 +463,7 @@ for(var f=0;f<N;f++){var cv=document.createElement('canvas');cv.width=cv.height=
 for(var i=0;i<im.data.length;i+=4){var v=rnd()*255|0;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255}x.putImageData(im,0,0);urls.push(cv.toDataURL())}
 var layers=[];document.querySelectorAll('img[data-pv-fx="film-grain"]').forEach(function(im){var d=document.createElement('div');if(im.className)d.className=im.className;
 d.setAttribute('style',im.getAttribute('style')||'');d.setAttribute('aria-hidden','true');d.style.pointerEvents='none';d.style.objectFit='';
-d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S*1.25+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.15';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
+d.style.backgroundImage='url('+urls[0]+')';d.style.backgroundSize=S*1.25+'px';d.style.mixBlendMode='overlay';d.style.opacity='0.24';im.parentNode.insertBefore(d,im.nextSibling);layers.push(d)});
 if(!layers.length||reduce)return;var k=0;
 setInterval(function(){if(window.__pvStill||document.hidden)return;k=(k+1)%N;layers.forEach(function(d){d.style.backgroundImage='url('+urls[k]+')'})},90);
 })();</script>`;
@@ -503,6 +561,10 @@ if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+l
 // Nothing on a phone page reaches past the screen's right edge: the live site clips it (with its own script or
 // styles), and a copy that didn't would let the phone zoom out to show it. Phone layout only: on desktop nothing
 // zooms out, and clipping there changed how Design Forward's own stylesheet laid out its columns.
+// Block hover animations kept by capture (capture.mjs markBlockHovers): the hover's end state, eased in and out. The
+// individual rotate/scale/translate properties add to any transform the block already has (entrance animations).
+// Added by a script, since the page's own stylesheet is rebuilt from what elements look like at rest.
+const HOVER_FX_CSS = `<script id="preserve-hover-fx">(function(){var s=document.createElement('style');s.textContent='@media (hover:hover){[data-pv-hover]{transition:rotate var(--pv-hd),scale var(--pv-hd),translate var(--pv-hd),opacity var(--pv-hd);transform-origin:var(--pv-hog,50% 50%)}[data-pv-hover]:hover{rotate:var(--pv-hr);scale:var(--pv-hs);translate:var(--pv-ht);opacity:var(--pv-ho)}}@media (prefers-reduced-motion:reduce){[data-pv-hover]{transition:none}}';document.head.appendChild(s)})();</script>`;
 const CLIP_CSS = '<style id="preserve-clip">html,body{overflow-x:clip}</style>';
 
 const OVERLAY_CSS = `<style id="preserve-overlays">${OVERLAY_SELECTORS.join(',')}{display:none!important}</style>`;
@@ -554,7 +616,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -569,6 +631,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $(OVERLAY_SELECTORS.join(',')).remove();
     $('head').prepend(OVERLAY_CSS);
     if (outName === 'mobile.html') $('head').append(CLIP_CSS);
+    if ($('[data-pv-hover]').length) $('body').append(HOVER_FX_CSS);
     // Spam-protection and tracking frames (reCAPTCHA on forms etc.) do nothing on a copy and throw errors offline.
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
@@ -636,6 +699,8 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if (outName !== 'index.html' && $('[style*="--image-component-container-height"]').length) $('body').append(FLUID_IMAGE_SCRIPT(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
       if ($('img[data-pv-dims]').length) $('body').append(DIMS_SCRIPT);
       if ($('canvas[data-preserve-follow], img[data-pv-follow]').length) $('body').append(FOLLOW_SCRIPT);
+      if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
+      if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));

@@ -232,6 +232,36 @@ the page is saved. `GALLERY_SCRIPT` in `build.mjs` plays the steps back on the a
 (paused under `__pvStill` and for visitors who ask for less motion), with the copy's own class names, positions
 scaled to the gallery's width, and a short transition where Squarespace animated in script.
 
+### Galleries at any width (2026-11-14)
+
+Replaying recorded steps was right at the capture's width and wrong at every other one: pictures overlapped or left
+gaps, and "slid over each other" (Jeremy, many sites). Squarespace's scripts write pixels worked out for the window
+they ran in, and a Preserve is shown at any width. Four families, each fixed by saving the rule instead of the pixels:
+
+- **Strips** (list carousels, banner slideshows, gallery reels): slides side by side, each moved by a pixel offset.
+  The capture works out the strip's rules (`cfg.strip`: which elements are the slides, the gap, whether the current
+  slide rests at the start or in the middle, whether it goes round for ever, how a written-in size follows the
+  strip's height, how a step moves over time, and, from a real press-and-move of the pointer, whether it can be
+  dragged). The player lays the strip out from the slides' own sizes at the width it is shown, follows the pointer
+  during a drag as Squarespace's does, and lets go to the next slide in the drag's direction.
+- **Tickers**: a strip that never rests (an owner's "scrolling images" code). No steps exist to record; the capture
+  measures its settled speed (`cfg.strip.drift`, pixels a second) and the player drifts it while it is on screen.
+- **Pictures fitted in pixels** (7.0 gallery grids and slideshows, Instagram rows, video thumbnails): Squarespace's
+  image loader sizes and offsets each picture in pixels to cover its box. `snapshotDom()` marks them (`data-pv-fit`,
+  `data-pv-fitbox`, `data-pv-fitpc` for video wrappers) and the build writes the same fit as `object-fit` /
+  `object-position` or percentages, which hold at any width.
+- **Looks that depend on a step** (fading slideshows: the slide is marked current and the picture inside it turns
+  visible): `own-css.mjs` shows every recorded step once through the player (`g.__pvShow`) and writes what each one
+  looks like into the stylesheet, keyed on the whole of what changes on an element, so the player's class and
+  attribute changes change what is seen. The player starts from the step that matches the page as saved.
+
+A row that had an end live (`cfg.fin`) stops at its ends instead of going round.
+
+`node galcmp.mjs <liveUrl> <preserveUrl> <widths> [outDir]` measures every picture of every gallery on the live page
+and in the Preserve (at rest, after each arrow, during and after a drag) at each width and reports any more than 3
+pixels apart; `node galvis.mjs <liveUrl> <preserveUrl> <width> [steps]` compares which pictures can be seen after each
+step (for galleries that fade rather than move). In the Preserve address `{L}` stands for `desktop` or `mobile`.
+
 ## Gallery check (2026-10-28)
 
 `probeGalleries()` in `check.mjs` runs on the live page (in `gate.mjs`'s second look) and on the copy, in a page of its
@@ -387,3 +417,44 @@ Scores on the 37 cases (15 fine, 22 with problems), 2026-11-11:
 
 Newly caught: Sunnie drag gallery, Potted Plant GIF letters, Gather and Colorize hero videos behind their still,
 Backbipoc mouse-follow pictures, State of Sage sideways scroll gallery.
+
+## Part-by-part check against the live page (step 3, 2026-11-13)
+
+Jeremy asked for step 3 of the plan on 2026-11-13. Pixel diffs say that something differs, not what. Most layout
+problems in his spot-checks were one part of the page with the wrong size or place, so `layout.mjs` measures every
+block on the live page and on the Preserve and compares them block by block (called from gate.mjs after the size check;
+`PRESERVE_LAYOUT_CHECK=0` turns it off). New findings:
+
+- `part-size-differs` and `part-moved`: a block's size, or its place inside its section.
+- `picture-size-differs`: the picture it actually draws. A fitted picture (object-fit: contain) and an SVG shape are
+  measured by what they paint, not by their box (Sam Fresquez, Minaa B).
+- `text-wraps-differently`: lines of text. Owner code blocks and text inside carousels are skipped because their
+  lines aren't steady.
+- `parts-overlap-differently`: two blocks that newly run into each other, that no longer overlap, or text that sat
+  wholly on a backdrop and now runs off it.
+- `part-cut-off`: content past the window's edge (after cutting to carousel strips and cropped boxes).
+- `frame-missing` and `frame-size-differs`: an embedded widget the live page draws that the Preserve leaves out, shows
+  as an empty box, or crops.
+
+Widths: desktop 1440 and phone 390 compare everything. Laptop 1280 and tablet 1024 count only what looks broken
+(overlaps, cut-off, missing widgets), because sizes there are already the size check's job. Minaa B's color block
+only came apart at 1280, and Gather's text ran into its button only at 1024. Blocks whose words differ are only
+compared by place, along with their whole section: that covers contact details we replace and live edits.
+`score-check.mjs --rerun --add-layout` runs only this check (about a minute a case).
+
+Scores on 52 cases (15 fine, 37 with problems; Jeremy's notes up to 2026-11-13). The live pages were loaded on
+2026-11-13, days after the capture:
+
+| | Misses | False holds | Holds that named the right kind |
+| --- | --- | --- | --- |
+| As recorded | 6 (Minaa B, Potted Plant, Sunnie, Colorize's Nov 10 copy, two later Sunnie copies) | 1 | 10 of 31 |
+| With the behavior and part checks | 2 (Sunnie's gallery slides awkwardly or overlaps mid-slide; dragging works) | 3 | 23 of 35 |
+
+"As recorded" now has one false hold, not three, because Jeremy later found problems in Borrachito's and Gather's
+Nov 10 copies.
+
+Newly caught by this step: Minaa B, the Gather tablet overlap, the Colorize sign-up form (missing, two copies),
+Backbipoc's footer running off the screen, Myrtle Green's shapes, Margaret Rajic's overlaps, and Field Theory's hero.
+The false holds are Fireside Pilates (a stylesheet finding, as before), Little Ripper's Nov 10 copy (a drag from step 2)
+and Sisu Bar. Sisu Bar's live site changed after capture, and the Preserve matches the capture. Holds are still about
+70% of cases, mostly pixel and stylesheet findings: lowering that is step 4 (smarter pixel diff).
