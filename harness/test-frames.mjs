@@ -16,6 +16,7 @@ fs.writeFileSync(path.join(dir, 'frames', 'desktop-0.json'), JSON.stringify({
   states: [
     { key: 'CARD', html: [['lang', 'en']], body: body('Card'), css: '.w{color:red}</style><script>x</script>', h: 600, text: 'Card view' },
     { key: 'LIST', html: [['lang', 'en']], body: body('List'), css: '.w{color:red}', h: 300, text: 'List view' },
+    { key: 'pv:d0', ov: '<div class="modal"><button data-pv-ctl="pv:close">×</button><img src="pfa:pf-aaa.png">Event details $\' text</div>', host: [], ch: [[[], [['class', 'w open'], ['inert', null]]]], css: '.w{color:red}', h: 0, text: 'Event details' },
   ],
 }));
 const copied = [];
@@ -23,6 +24,9 @@ const d = frameDoc(dir, 'desktop-0', (name, file) => { copied.push(name); return
 assert.ok(d, 'a saved frame gives a document');
 assert.equal(d.autosize, true);
 assert.equal(d.views, 2, 'both views are kept');
+assert.equal(d.details, 1, 'the detail window is kept');
+assert.ok(d.doc.includes('pv:d0') && d.doc.includes('Event details $\' text'), 'the detail window travels with the document, text as it was');
+assert.ok(d.doc.includes('cur="CARD"'), 'the frame starts on the first view');
 assert.ok(copied.includes('pf-aaa.png'), 'its files are copied with the Preserve');
 assert.ok(!d.doc.includes('pfa:'), 'every saved-file address is replaced');
 assert.ok(d.doc.includes('a/pf-aaa.png'));
