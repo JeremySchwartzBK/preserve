@@ -10,6 +10,23 @@ Decided 2026-10-18: Cloudflare Containers, sleeping when idle (no always-on mach
   - after 3 quiet minutes it asks the runner whether it's busy and stops it only if not. On SIGTERM the runner hands
     any running job back to the queue (`release_copy_job`).
 
+## More than one runner (2026-11-16)
+One runner makes two Preserves at a time. When more are waiting, the minute check starts more runners (`src/scale.js`):
+enough for the jobs waiting and being made, up to the variable `RUNNERS_MAX` in `wrangler.jsonc` (never above the
+container's `max_instances` there). Each runner goes back to sleep by itself once the queue is empty, so extra runners
+cost only while a queue is being worked through. Runner 1 also does the upkeep (what visitors see, stills, capture
+clean-up); the host tells the others to leave that alone. `RUNNERS_MAX` "1" is one runner, as before.
+`max_instances` is 3 (36 GiB, 12 vCPU at once); before going higher, check the account's Containers limits.
+Test: `node test-scale.mjs`.
+
+## Deploying from GitHub (2026-11-16)
+Actions, "deploy", "Run workflow", choose runner, viewer, app or everything (`.github/workflows/deploy.yml`). It runs
+the tests first, deploys the commit `main` is on, and never runs by itself. Needs the repository secret
+`CLOUDFLARE_API_TOKEN`. The runner's secrets stay on the Worker and are untouched.
+The runner image is tagged with the commit (`preserve-runner:<12 characters>`); to go back to an earlier one, run the
+workflow for the runner with that tag filled in. A runner deploy restarts the runner: jobs being made go back to the
+queue and start again.
+
 ## Seeing failures (2026-11-11)
 - Each copy job's log is saved by the runner to R2 at `logs/<copy>/a<round>-t<try>.log` (what the job printed, then its
   steps, timings and result). The viewer never serves `logs/`. `copy_job.verdict` carries `steps`, `minutes` and `log`.

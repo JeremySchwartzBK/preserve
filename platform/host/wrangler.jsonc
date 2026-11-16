@@ -18,9 +18,12 @@
       "image_build_context": "../..",
       // 4 vCPU / 12 GiB / 20 GB: two copy jobs at a time (RUNNER_SLOTS=2 in the image).
       "instance_type": "standard-4",
-      "max_instances": 1
+      // Up to this many runners at once; RUNNERS_MAX below decides how many the host actually starts.
+      "max_instances": 3
     }
   ],
+  // How many runners the host may have awake when a queue builds up (src/scale.js). 1 = one runner, as before.
+  "vars": { "RUNNERS_MAX": "1" },
   "durable_objects": { "bindings": [{ "name": "RUNNER", "class_name": "Runner" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Runner"] }],
   // The safety net: once a minute, start the runner if there's work it hasn't picked up.

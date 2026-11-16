@@ -1,11 +1,14 @@
 // Starts and stops the copy runner container. v1 sleeps when idle to keep costs down (Jeremy, 2026-10-18):
 //   - POST /wake (from the database when a copy job is queued or something visitors see changes) starts it at once;
 //   - a once-a-minute check starts it if queued jobs or serving changes are waiting (in case a wake was missed);
+//   - when more jobs are waiting than one runner takes at a time, the minute check starts more runners (scale.js), up to
+//     RUNNERS_MAX; each goes back to sleep by itself when the queue is empty;
 //   - when it has been quiet for sleepAfter, the container is asked whether it's still busy (its /health page) and is
 //     stopped only if it isn't. On stop (SIGTERM) the runner hands any running job back to the queue.
 import { Container } from '@cloudflare/containers';
 import postgres from 'postgres';
 import { WINDOW_MIN, readState, alertFor, alertsOn, sendAlert } from './alerts.js';
+import { runnersMax, runnersNeeded } from './scale.js';
 
 export class Runner extends Container {
   defaultPort = 8080;
@@ -27,22 +30,33 @@ export class Runner extends Container {
   }
 }
 
-const runner = (env) => env.RUNNER.getByName('runner-1');
-const wake = async (env) => (await runner(env).fetch(new Request('http://runner/health'))).json();
+// Runner 1 is the first to start and the one that also keeps what visitors see in step (the runner's upkeep); the
+// others are told to make Preserves only (lead=0), so that work is never done twice.
+const runner = (env, n) => env.RUNNER.getByName(`runner-${n}`);
+const wakeOne = async (env, n) => (await runner(env, n).fetch(new Request(`http://runner/health?lead=${n === 1 ? 1 : 0}`))).json();
+// Starts runners 1..count. The first one's answer (or error) is what callers report; the others are best effort.
+async function wake(env, count = 1) {
+  const all = await Promise.allSettled(Array.from({ length: count }, (_, i) => wakeOne(env, i + 1)));
+  all.slice(1).forEach((r, i) => { if (r.status === 'rejected') console.error(`runner-${i + 2} did not start:`, r.reason?.message || r.reason); });
+  if (all[0].status === 'rejected') throw all[0].reason;
+  return all[0].value;
+}
 
 async function workWaiting(env) {
   const db = postgres(env.DATABASE_URL, { max: 1, prepare: false });
   try {
-    const [r] = await db`select exists (select 1 from copy_job where state = 'queued' or (state = 'working' and lease_until < now())) as jobs,
+    // jobs: waiting to be made (queued, or dropped by a runner that stopped). busy: being made right now.
+    const [r] = await db`select (select count(*)::int from copy_job where state = 'queued' or (state = 'working' and lease_until < now())) as jobs,
+      (select count(*)::int from copy_job where state = 'working' and lease_until >= now()) as busy,
       exists (select 1 from serving_outbox) or exists (select 1 from copy_tombstone where cleared_at is null) as serving`;
-    return r.jobs || r.serving;
+    return { ...r, count: runnersNeeded(r, runnersMax(env)) };
   } finally { await db.end(); }
 }
 
-async function checkAndAlert(env, waiting, dbError) {
+async function checkAndAlert(env, waiting, dbError, count = 1) {
   if (dbError) return sendAlert(env, { subject: 'Preserve alert: database not reachable', text: `The runner host could not read the queue: ${String(dbError).slice(0, 300)}\n` });
   let wakeError = null;
-  if (waiting) { try { await wake(env); } catch (e) { wakeError = e.message || String(e); } }
+  if (waiting) { try { await wake(env, count); } catch (e) { wakeError = e.message || String(e); } }
   const db = postgres(env.DATABASE_URL, { max: 1, prepare: false });
   let state;
   try { state = await readState(db); } finally { await db.end(); }
@@ -61,11 +75,11 @@ export default {
   },
   async scheduled(event, env, ctx) {
     // If the database can't be reached, the alert check below says so (when alerts are on).
-    let waiting = false, dbError = null;
-    try { waiting = await workWaiting(env); } catch (e) { dbError = e.message || String(e); console.error('queue check failed:', dbError); }
+    let waiting = false, dbError = null, count = 1;
+    try { const w = await workWaiting(env); waiting = w.jobs > 0 || w.serving; count = w.count; if (count > 1) console.log(`runners wanted: ${count} (waiting ${w.jobs}, being made ${w.busy})`); } catch (e) { dbError = e.message || String(e); console.error('queue check failed:', dbError); }
     // Every 15 minutes: tell the team about failed jobs, a backed-up queue or a runner that won't start (alerts.js).
     if (alertsOn(env) && new Date(event.scheduledTime).getUTCMinutes() % WINDOW_MIN === 0) {
-      ctx.waitUntil(checkAndAlert(env, waiting, dbError).catch((e) => console.error('alert check failed:', e.message)));
-    } else if (waiting) ctx.waitUntil(wake(env));
+      ctx.waitUntil(checkAndAlert(env, waiting, dbError, count).catch((e) => console.error('alert check failed:', e.message)));
+    } else if (waiting) ctx.waitUntil(wake(env, count).catch((e) => console.error('wake failed:', e.message)));
   },
 };
