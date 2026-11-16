@@ -533,21 +533,26 @@ function fontRow(c, f) {
   // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
   // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
   const fam = (n) => `font-family:'${esc(n || '')}',sans-serif`;
-  let site, after;
+  // The second row is always the lookalike, so there's something to compare (Jeremy, 2026-11-16: two identical
+  // pictures for a font kept as on the site told the person nothing). Labelled "In your Preserve" when it’s what the
+  // Preserve uses, and "Lookalike" when it's the alternative to keeping the font. A font the Preserve draws from the
+  // person's own uploaded file has no second row: that file is the font on their site.
+  const own = f.decision === 'upload' || !!saved;
+  let site, alt = null;
   if (f.fox) {
-    const set = `${fam(f.look)};font-weight:${esc(f.fox.weight)};font-style:${esc(f.fox.style)}`;
     site = `<img class="fox" src="${esc(f.fox.file)}" alt="${FOX} in ${esc(f.name)}">`;
-    after = look ? `<span class="fsample fox" style="${set}">${FOX}</span>` : site;
+    if (f.look) alt = `<span class="fsample fox" style="${fam(f.look)};font-weight:${esc(f.fox.weight)};font-style:${esc(f.fox.style)}">${FOX}</span>`;
   } else {
     // A font we couldn't photograph on the live site shows its name in place of the picture.
     const words = f.text || f.name;
     site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
-    after = look ? `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>` : site;
+    if (f.look) alt = `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>`;
   }
+  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Lookalike'}</span>${alt}`;
   return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <p class="fine">${state}</p>
     <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">On your site</span>${site}
-      <span class="fl">In your Preserve</span>${after}</div>
+      ${second}</div>
     <div class="row wrap">${actions}</div>
     ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
 }
