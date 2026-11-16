@@ -1,0 +1,117 @@
+name: deploy
+# One-button deploys (production-readiness review, A2). Nothing here runs by itself: someone opens Actions, picks
+# "deploy", chooses what to deploy and presses "Run workflow". It always deploys the commit that main is on.
+# Needs the repository secret CLOUDFLARE_API_TOKEN (Workers, Pages and Containers edit). The runner's own secrets
+# (database, storage, mail) live on the Worker in Cloudflare and are not touched by a deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: What to deploy
+        type: choice
+        required: true
+        options: [runner, viewer, app, viewer and app, everything]
+      runner_tag:
+        description: "Runner only: go back to an earlier image (its 12-character tag). Leave empty to build main."
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+env:
+  CLOUDFLARE_ACCOUNT_ID: 1dcf2dbf05caa4963ed872ff035bc9db
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  WRANGLER: wrangler@4.151.1
+jobs:
+  check:
+    # The same tests a pull request runs: a deploy never ships code that fails them.
+    uses: ./.github/workflows/test.yml
+  runner:
+    if: contains(fromJSON('["runner", "everything"]'), inputs.what)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Key present
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+      - name: Build the image, or pick an earlier one to go back to
+        id: image
+        env:
+          RUNNER_TAG: ${{ inputs.runner_tag }}
+        run: |
+          set -euo pipefail
+          REG=registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/preserve-runner
+          TAG="$RUNNER_TAG"
+          [ -z "$TAG" ] || [[ "$TAG" =~ ^[0-9a-f]{12}$ ]] || { echo "::error::A runner tag is 12 characters, 0-9 and a-f."; exit 1; }
+          # Sign in to Cloudflare's image registry with a short-lived password (the endpoint is sometimes busy: retry).
+          for i in 1 2 3 4; do
+            CRED=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/containers/registries/registry.cloudflare.com/credentials" \
+              -H "authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "content-type: application/json" -d '{"expiration_minutes":30,"permissions":["push","pull"]}')
+            PASS=$(echo "$CRED" | jq -r '.result.password // empty'); [ -n "$PASS" ] && break; echo "registry sign-in not ready, trying again"; sleep 30
+          done
+          [ -n "$PASS" ] || { echo "::error::Could not sign in to the image registry: $(echo "$CRED" | jq -c '.errors')"; exit 1; }
+          echo "::add-mask::$PASS"
+          echo "$PASS" | docker login registry.cloudflare.com -u "$(echo "$CRED" | jq -r '.result.username // "v1"')" --password-stdin
+          if [ -z "$TAG" ]; then
+            # The tag is the commit, and is recorded on every Preserve version made by this image.
+            TAG=$(git rev-parse --short=12 HEAD)
+            docker build --build-arg PIPELINE_VERSION="$TAG" -t "$REG:$TAG" .
+            docker push "$REG:$TAG"
+          else
+            docker manifest inspect "$REG:$TAG" > /dev/null || { echo "::error::No runner image with the tag $TAG"; exit 1; }
+          fi
+          echo "ref=$REG:$TAG" >> "$GITHUB_OUTPUT"
+          echo "Runner image: \`preserve-runner:$TAG\`. To go back to it later, run this workflow with that tag." >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy the runner
+        working-directory: platform/host
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # Same settings, pointing at the image just pushed instead of building it again.
+          sed "s#\"image\": \"../../Dockerfile\"#\"image\": \"$IMAGE_REF\"#" wrangler.jsonc | grep -v '"image_build_context"' > wrangler.deploy.jsonc
+          grep -q '"image": "registry.cloudflare.com' wrangler.deploy.jsonc
+          npm ci && npx $WRANGLER deploy -c wrangler.deploy.jsonc
+  viewer:
+    if: contains(fromJSON('["viewer", "viewer and app", "everything"]'), inputs.what)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Key present
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+      - name: Deploy the viewer
+        run: |
+          mkdir -p /tmp/view && cp platform/worker/src/index.js /tmp/view/_worker.js
+          echo '{"version":1,"include":["/*"],"exclude":[]}' > /tmp/view/_routes.json
+          npx $WRANGLER pages deploy /tmp/view --project-name preserve-view --branch main --commit-hash "$(git rev-parse HEAD)" --commit-dirty=true
+  app:
+    if: contains(fromJSON('["app", "viewer and app", "everything"]'), inputs.what)
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Key present
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+      - name: Deploy the app
+        run: npx $WRANGLER pages deploy app --project-name preserve-app --branch main --commit-hash "$(git rev-parse HEAD)" --commit-dirty=true

@@ -176,7 +176,8 @@ async function main() {
     await sql(`insert into notification (person_id, kind, copy_id, body) select sm.person_id, ${lit(kind)}, c.id, ${lit(body)} from copy c join studio_member sm on sm.studio_id = c.studio_id where c.id = ${lit(copyId)}`);
   }
 
-  const WORKER = `${os.hostname()}:${process.pid}`;
+  // Unique per runner even when several containers share a hostname and process number: a lease belongs to one runner.
+  const WORKER = `${os.hostname()}:${process.pid}:${Math.random().toString(36).slice(2, 6)}`;
   const SLOTS = Math.max(1, +process.env.RUNNER_SLOTS || 1);
   const LEASE = 120;  // seconds; renewed every 30
   const running = new Map();  // job id -> { child }
@@ -453,9 +454,14 @@ async function main() {
 
   // Visitors' view: copies whose records changed (serving_outbox, filled by triggers) every few seconds, plus a full
   // pass every hour as a safety net. Capture retention every 15 minutes.
+  // With several hosted runners, only the first does the upkeep; the host tells the others (lead=0 on /health, right
+  // as they start), so each waits a moment to hear before beginning.
+  let upkeepOff = false;
   async function upkeep() {
     let full = 0, swept = 0;
+    if (process.env.PORT && !once) await new Promise((s) => setTimeout(s, 5000));
     while (!stopping) {
+      if (upkeepOff) { await new Promise((s) => setTimeout(s, 3000)); continue; }
       try {
         // The full pass reads every Preserve once, then can spend minutes making stills; anything queued after that read
         // (an accept, a rename) was not seen by it, so only entries queued before the pass started are cleared.
@@ -489,8 +495,10 @@ async function main() {
   if (process.env.PORT) {
     const http = await import('node:http');
     http.createServer((req, res) => {
+      if (/[?&]lead=0\b/.test(req.url || '')) { if (!upkeepOff) log('upkeep left to the first runner'); upkeepOff = true; }
+      else if (/[?&]lead=1\b/.test(req.url || '')) upkeepOff = false;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ worker: WORKER, pipeline: PIPELINE, jobs: running.size, idleSeconds: running.size ? 0 : Math.round((Date.now() - lastBusy) / 1000), stopping }));
+      res.end(JSON.stringify({ worker: WORKER, pipeline: PIPELINE, jobs: running.size, upkeep: !upkeepOff, idleSeconds: running.size ? 0 : Math.round((Date.now() - lastBusy) / 1000), stopping }));
     }).listen(+process.env.PORT);
   }
 
