@@ -530,13 +530,16 @@ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fit);addEventL
 // found by the size check). At the capture width the padding is kept as is; at any other width it is the header's
 // height now, plus whatever the padding had beyond the header's height at capture (data-pv-h0, see capture.mjs). The
 // header's height now leaves out the announcement bar the copy drops, as the live site does once the bar is gone.
+// That holds at the capture width too when the bar made the header taller there: the padding left the bar's height
+// as a gap, so the first section came out that much taller than live (Gumtree, Frankly, Not Work Related, 2026-11-16,
+// held by the first-screen check on phones).
 const HEADER_PAD_SCRIPT = (captureWidth) => `<script id="preserve-header-pad">(function(){
 if(window.__pvNoHeaderPad)return;var h=document.querySelector('[data-pv-h0]')||document.querySelector('header');if(!h)return;
 var els=[].slice.call(document.querySelectorAll('[data-pv-hpad]'));if(!els.length)return;
 var h0=parseFloat(h.getAttribute('data-pv-h0'));
 els.forEach(function(e){e.dataset.pvP0=parseFloat(e.style.paddingTop)||0});
 function fit(){var cw=document.documentElement.clientWidth,hh=h.getBoundingClientRect().height;els.forEach(function(e){var p0=+e.dataset.pvP0;
-if(Math.abs(cw-${captureWidth})<2||!(p0>0)){e.style.paddingTop=p0+'px';return}
+if(!(p0>0)||(Math.abs(cw-${captureWidth})<2&&!(h0-hh>1))){e.style.paddingTop=p0+'px';return}
 e.style.paddingTop=(hh+(h0>0?Math.max(0,p0-h0):0))+'px'})}
 var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)});
 if(window.ResizeObserver)new ResizeObserver(function(){fit()}).observe(h);
