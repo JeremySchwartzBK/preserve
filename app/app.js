@@ -521,7 +521,7 @@ function fontRow(c, f) {
   const state = f.checking ? `Checking your file ${esc(f.file)}. Your Preserve uses it as soon as it passes.`
     : f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
     : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
-    : f.holder === 'platform' ? `From Squarespace’s font menu. Squarespace licenses it from Adobe for Squarespace sites only, so your Preserve uses a lookalike, ${lookName}, unless you upload your own licensed file.`
+    : f.holder === 'platform' ? `Since ${esc(f.name)} is licensed from Adobe by Squarespace, you have the option of substituting the replacement font we’ve suggested or keeping ${esc(f.name)} by uploading your licensed files.`
     : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
     : 'You uploaded this font to your site, so we kept it. Keep it only if your license covers this Preserve.';
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
