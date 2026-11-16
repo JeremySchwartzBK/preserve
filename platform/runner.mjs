@@ -145,9 +145,10 @@ async function main() {
     for (const r of fonts || []) {
       if (r.holder === 'anyone' || r.action === 'open-equivalent' || !r.shown?.length) continue;
       const id = fontKey(fontName(r));
-      const row = rows.get(id) || { id, name: fontName(r), holder: r.holder === 'platform' ? 'platform' : 'user', source: r.source, look: null, sample: null, text: null, block: null, shown: [], faces: [], trial: false };
+      const row = rows.get(id) || { id, name: fontName(r), holder: r.holder === 'platform' ? 'platform' : 'user', source: r.source, look: null, sample: null, text: null, block: null, fox: null, shown: [], faces: [], trial: false };
       row.look ||= (r.holder === 'platform' ? r.served_as : r.alt?.family) || null;
-      if (r.sample && !row.sample) Object.assign(row, { sample: 'a/' + r.sample.file, text: r.sample.text, block: r.sample.block });
+      if (r.sample && !row.sample) Object.assign(row, { sample: 'a/' + r.sample.file, text: r.sample.text, block: r.sample.block,
+        fox: r.sample.fox ? { file: 'a/' + r.sample.fox, weight: String(r.sample.weight || r.weight), style: r.sample.style || r.style || 'normal' } : null });
       row.shown = [...new Set([...row.shown, ...r.shown])];
       row.faces.push({ family: r.family, weight: String(r.weight), style: r.style || 'normal', alt: r.alt?.file || null });
       if (r.trial_hint) row.trial = true;

@@ -204,8 +204,12 @@ From the 58-site run:
 The review's Fonts step works on real Preserves, not only the demo. Each font that needs the person's look (Adobe fonts
 from Squarespace's menu, fonts the owner uploaded, fonts from other hosts; open fonts never do) gets a row with:
 
-- **A picture from the live site** (`capture.mjs` `fontSamples`): the first visible words drawn in that font, photographed
-  tight at desktop width, plus the block they sit in. Adobe's files can't ship; pictures can.
+- **Pictures from the live site** (`capture.mjs` `fontSamples`): "The quick brown fox" drawn by the live page in that
+  font, black on white, in the weight and style the page uses (`foxPicture`); the app sets the same words beside it in the
+  lookalike, so the two compare like for like (2026-11-16). Skipped when the font lacks a letter of it (a cut-down
+  subset), and the row then falls back to the second picture: the first words a visitor can see in that font,
+  photographed tight at desktop width, plus the block they sit in. Hidden text (a "Skip to Content" link) is passed
+  over, since its photo showed whatever covered it. Adobe's files can't ship; pictures can.
 - **A lookalike** for fonts kept on the designer's word (`google-fonts.py` `alt`), fetched and shipped unused beside the
   Preserve, with its license. Adobe fonts already ship as their lookalike.
 

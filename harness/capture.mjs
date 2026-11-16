@@ -763,62 +763,114 @@ async function canvasStills(page, outDir, prof, info) {
   }
 }
 
-// A picture of each font as the live site draws it, in the page's own words, for the review's Fonts step (Adobe files
-// can't be shipped; pictures can). For each font face the page loaded: the first visible text drawn in it, photographed
-// tight around the words, and the block it sits in (for "Show on page").
+// Pictures of each font as the live site draws it, for the review's Fonts step (Adobe files can't be shipped; pictures
+// can). For each font face the page loaded:
+// - "The quick brown fox" set in that font on a plain background (FOX_TEXT), drawn by the live page itself, which the
+//   app sets beside the same words in the lookalike, so the two compare like for like (Jeremy, 2026-11-16).
+// - the first text drawn in it that a visitor can actually see, photographed tight, and the block it sits in (for "Show
+//   on page"). Text hidden off-screen or under other content (a "Skip to Content" link) is passed over: its photo was
+//   of whatever covered it (margaretrajic.com, 2026-11-16).
+export const FOX_TEXT = 'The quick brown fox';
 async function fontSamples(page, outDir, info) {
   // Desktop first; the phone layout adds fonts only it shows.
   const done = Object.keys(info.fontSamples || {});
   const found = await page.evaluate((done) => {
     const unq = (s) => s.trim().replace(/^["']|["']$/g, '').toLowerCase();
     const fams = new Set([...document.fonts].filter((f) => f.status === 'loaded').map((f) => unq(f.family)));
-    const out = [], seen = new Set(done);
+    const out = [], count = {};
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    // Hidden by an ancestor: see-through, or clipped to a sliver (the usual "visually hidden" pattern).
+    const hidden = (el) => {
+      for (let e = el; e && e !== document.body; e = e.parentElement) {
+        const cs = getComputedStyle(e);
+        if (+cs.opacity === 0 || cs.display === 'none') return true;
+        if (cs.clip && cs.clip !== 'auto' || cs.clipPath && /inset\(50%|circle\(0/.test(cs.clipPath)) return true;
+        if (cs.overflow !== 'visible') { const r = e.getBoundingClientRect(); if (r.width < 4 || r.height < 4) return true; }
+      }
+      return false;
+    };
+    const docW = document.documentElement.scrollWidth;
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const t = n.textContent.replace(/\s+/g, ' ').trim();
       const el = n.parentElement;
       if (t.length < 2 || !el || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(el.tagName)) continue;
       const cs = getComputedStyle(el);
       const fam = unq(cs.fontFamily.split(',')[0]);
-      if (!fams.has(fam) || seen.has(fam) || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+      if (!fams.has(fam) || done.includes(fam) || (count[fam] || 0) >= 6 || cs.visibility === 'hidden') continue;
       const r = document.createRange(); r.selectNodeContents(n);
       const box = r.getBoundingClientRect();
-      if (box.width < 8 || box.height < 6) continue;
-      seen.add(fam);
+      if (box.width < 8 || box.height < 6 || box.right < 0 || box.left > docW || box.bottom + scrollY < 0 || hidden(el)) continue;
+      count[fam] = (count[fam] || 0) + 1;
       const b = el.closest('[id^="block-"],[data-block-id],section[data-section-id]') || el.closest('header,footer');
       const block = !b ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
       el.setAttribute('data-pv-fsample', String(out.length));
-      out.push({ family: fam, text: t.slice(0, 60), block });
+      out.push({ family: fam, text: t.slice(0, 60), block, weight: cs.fontWeight, style: cs.fontStyle, upper: cs.textTransform === 'uppercase' });
     }
     return out;
   }, done).catch(() => []);
   if (!found.length) return;
   fs.mkdirSync(path.join(outDir, 'font-samples'), { recursive: true });
   info.fontSamples ||= {};
+  const unhide = () => page.evaluate(() => { for (const e of document.querySelectorAll('[data-preserve-hid]')) { e.style.visibility = e.dataset.preserveHid === '-' ? '' : e.dataset.preserveHid; delete e.dataset.preserveHid; } }).catch(() => {});
   for (const [i, f] of found.entries()) {
     const el = await page.$(`[data-pv-fsample="${i}"]`);
     if (!el) continue;
+    await el.evaluate((e) => e.removeAttribute('data-pv-fsample')).catch(() => {});
+    if (info.fontSamples[f.family]) continue;   // an earlier candidate for this font already worked
     await el.scrollIntoViewIfNeeded().catch(() => {}); await sleep(300);
     // A fixed header that doesn't hold the words would otherwise land in the picture.
     await el.evaluate((w) => { for (const e of document.querySelectorAll('body *')) if (getComputedStyle(e).position === 'fixed' && !e.contains(w)) { e.dataset.preserveHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }).catch(() => {});
+    // The words' box, if a visitor sees them there: the page's topmost element at their middle is theirs (or inside them).
     const box = await el.evaluate((e) => {
       const n = [...e.childNodes].find((x) => x.nodeType === 3 && x.textContent.trim());
       const r = document.createRange(); r.selectNodeContents(n || e);
       const b = r.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      if (!top || !(e.contains(top) || top.contains(e) && top.textContent.trim() === e.textContent.trim())) return null;
       return { x: b.left, y: b.top, width: b.width, height: b.height };
     }).catch(() => null);
-    await el.evaluate((e) => e.removeAttribute('data-pv-fsample')).catch(() => {});
-    if (!box) continue;
+    if (!box) { await unhide(); continue; }
     const pad = 6, vp = page.viewportSize();
     const clip = { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: Math.min(640, box.width + 2 * pad), height: Math.min(160, box.height + 2 * pad) };
     clip.width = Math.min(clip.width, vp.width - clip.x); clip.height = Math.min(clip.height, vp.height - clip.y);
-    if (clip.width < 8 || clip.height < 6) continue;
+    if (clip.width < 8 || clip.height < 6) { await unhide(); continue; }
     const file = `${hash(f.family)}.png`;
     const ok = await page.screenshot({ path: path.join(outDir, 'font-samples', file), clip }).then(() => true, () => false);
-    if (ok) info.fontSamples[f.family] = { file, text: f.text, block: f.block };
-    await page.evaluate(() => { for (const e of document.querySelectorAll('[data-preserve-hid]')) { e.style.visibility = e.dataset.preserveHid === '-' ? '' : e.dataset.preserveHid; delete e.dataset.preserveHid; } }).catch(() => {});
+    await unhide();
+    if (!ok) continue;
+    info.fontSamples[f.family] = { file, text: f.upper ? f.text.toUpperCase() : f.text, block: f.block, weight: f.weight, style: f.style };
+    const fox = await foxPicture(page, outDir, f);
+    if (fox) info.fontSamples[f.family].fox = fox;
   }
   await page.evaluate(() => scrollTo(0, 0)); await sleep(300);
+}
+
+// FOX_TEXT in one font, in the weight and style the page uses it in, black on white at 34px (twice the size the app
+// shows it, so it stays sharp), with nothing of the page's own styling. The app sets the lookalike at the same size.
+async function foxPicture(page, outDir, f) {
+  const box = await page.evaluate(async ([fam, weight, style, text]) => {
+    // The font has to be the one drawing every letter. A subset that lacks one (a font sliced by language, or an Adobe
+    // kit cut down to the letters the page uses) would let a fallback font draw it unseen: a letter it lacks measures
+    // differently behind two different fallbacks.
+    const spec = (fb) => `${style} ${weight} 34px "${fam}", ${fb}`;
+    await document.fonts.load(spec('serif'), text).catch(() => {});
+    const cx = document.createElement('canvas').getContext('2d');
+    const w = (ch, fb) => { cx.font = spec(fb); return cx.measureText(ch).width; };
+    if ([...new Set(text.replace(/ /g, ''))].some((ch) => Math.abs(w(ch, 'monospace') - w(ch, 'serif')) > 0.01)) return null;
+    const el = document.createElement('pv-fox');
+    el.setAttribute('style', `all:initial;position:fixed;left:0;top:0;z-index:2147483647;display:block;box-sizing:content-box;background:#fff;color:#111;padding:0 8px;font:${style} ${weight} 34px/44px "${fam}";white-space:nowrap;letter-spacing:normal;text-transform:none;font-feature-settings:normal`);
+    el.textContent = text;
+    document.documentElement.appendChild(el);
+    const r = el.getBoundingClientRect();
+    return { x: Math.ceil(r.left), y: Math.ceil(r.top), width: Math.floor(r.width), height: Math.floor(r.height) };
+  }, [f.family, f.weight, f.style, FOX_TEXT]).catch(() => null);
+  if (!box) return null;
+  await sleep(100);
+  const file = `${hash(f.family)}-fox.png`;
+  const vp = page.viewportSize();
+  const ok = await page.screenshot({ path: path.join(outDir, 'font-samples', file), clip: { ...box, width: Math.min(box.width, vp.width) } }).then(() => true, () => false);
+  await page.evaluate(() => document.querySelectorAll('pv-fox').forEach((e) => e.remove())).catch(() => {});
+  return ok ? file : null;
 }
 
 export async function capture(url, outDir) {

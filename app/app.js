@@ -183,7 +183,7 @@ function newCopy() {
 // a background refresh never reloads it or scrolls it back to the top; only the side panel is redrawn.
 // Desktop is shown at a real 1440px desktop width, scaled down to fit, so the copy lays out as it would on a monitor.
 const DESKTOP_W = 1440, PHONE_W = 390;
-let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
+let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [], fontShown: null };
 const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
 // Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
@@ -196,7 +196,7 @@ const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > 
 function copyPage(id) {
   const c = store.copy(id);
   if (!c || c.status === 'deleted') { location.hash = '#/'; return; }
-  if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null, missing: [] };
+  if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null, missing: [], fontShown: null };
   if (c.status === 'processing') {
     view.frameKey = null;
     shell(`<div class="card narrow"><h1>${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
@@ -253,6 +253,8 @@ function copyPage(id) {
   panel(c, review);
   $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
     : 'Click the spot on the page. Press Esc to cancel.';
+  // The boxes around a font's words belong to the Fonts step only (Jeremy, 2026-11-16).
+  if (view.fontShown && view.tab !== 'fonts') showFont(null);
   sendPins(c);
   sendFonts(c);
 }
@@ -277,6 +279,8 @@ function fitFrame() {
 addEventListener('resize', fitFrame);
 
 const frameWin = () => $('#fr')?.contentWindow;
+// Outline every place one font shows on the page, or (null) take the outlines away (worker: preserve-show-font).
+function showFont(f) { view.fontShown = f ? f.id : null; frameWin()?.postMessage({ type: 'preserve-show-font', name: f ? f.name : '' }, '*'); }
 function sendMode() { frameWin()?.postMessage({ type: 'preserve-pin-mode', on: !!view.pinFor }, '*'); }
 // The person's font choices, drawn in the preview at once (the viewer adds the same for visitors).
 let lastFonts = '';
@@ -312,7 +316,7 @@ function onFrameMessage(m, id) {
   if (m.source !== frameWin()) return;
   const d = m.data || {};
   const c = store.copy(id);
-  if (d.type === 'preserve-ready') { sendPins(c, true); if (store.fontCss) sendFonts(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
+  if (d.type === 'preserve-ready') { view.fontShown = null; sendPins(c, true); if (store.fontCss) sendFonts(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
   // Pins the page couldn't place (their block isn't there, e.g. after a refinement): tour stops are marked to move.
   if (d.type === 'preserve-missing') { const k = (d.blockIds || []).join('|'); if (k !== view.missing.join('|')) { view.missing = d.blockIds || []; copyPage(id); } }
   if (d.type === 'preserve-pin' && view.pinFor?.startsWith('move:')) {
@@ -336,6 +340,7 @@ function onFrameMessage(m, id) {
 addEventListener('click', (e) => { const p = $('#notes'); if (p && !p.hidden && !e.target.closest('#notes')) p.hidden = true; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#notes') && !$('#notes').hidden) $('#notes').hidden = true; });
 addEventListener('blur', () => { const p = $('#notes'); if (p) p.hidden = true; });   // a click inside the preview frame
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.fontShown && !view.pinFor) { showFont(null); if (view.id) copyPage(view.id); } });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { view.pinFor = null; sendMode(); if (view.id) copyPage(view.id); } });
 
 // A small form in a dialog (instead of the browser's prompt box). kind: issue | tour.
@@ -474,8 +479,9 @@ function panel(c, review) {
   P.querySelectorAll('[data-font]').forEach((b) => (b.onclick = () => store.setFont(id, b.dataset.fid, b.dataset.font)));
   P.querySelectorAll('[data-showfont]').forEach((b) => (b.onclick = () => {
     const f = c.fonts.find((x) => x.id === b.dataset.showfont);
+    if (view.fontShown === f.id) { showFont(null); copyPage(id); return; }
     frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: f.block }, '*');
-    frameWin()?.postMessage({ type: 'preserve-show-font', name: f.name }, '*');
+    showFont(f); copyPage(id);
   }));
   P.querySelectorAll('[data-upload]').forEach((b) => (b.onclick = () => { const inp = $('#fontfile'); inp.value = ''; inp.dataset.fid = b.dataset.upload; inp.click(); }));
   const ff = $('#fontfile');
@@ -506,6 +512,7 @@ function panel(c, review) {
 
 // One row per font (font licensing decisions, 2026-10-26): the original's name, a before/after sample, where it shows,
 // and the choices that fit who holds the license.
+const FOX = 'The quick brown fox';   // capture.mjs FOX_TEXT
 const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 function fontRow(c, f) {
   const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
@@ -522,13 +529,24 @@ function fontRow(c, f) {
     : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
     : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
     : `${chip('keep', 'I have the rights')}${chip('lookalike', 'I don’t have rights to this one')}<button class="link" data-upload="${f.id}">Replace the file</button>`;
-  // A font we couldn't photograph on the live site shows its name in place of the picture.
-  const words = f.text || f.name;
-  const site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
-  const after = look ? `<span class="fsample" style="font-family:'${esc(f.look || '')}',sans-serif">${esc(words)}</span>` : site;
-  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">Show on page</button></div>
+  // "The quick brown fox" in both fonts (Jeremy, 2026-11-16): a picture of it drawn by the live site in the original
+  // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
+  // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
+  const fam = (n) => `font-family:'${esc(n || '')}',sans-serif`;
+  let site, after;
+  if (f.fox) {
+    const set = `${fam(f.look)};font-weight:${esc(f.fox.weight)};font-style:${esc(f.fox.style)}`;
+    site = `<img class="fox" src="${esc(f.fox.file)}" alt="${FOX} in ${esc(f.name)}">`;
+    after = look ? `<span class="fsample fox" style="${set}">${FOX}</span>` : site;
+  } else {
+    // A font we couldn't photograph on the live site shows its name in place of the picture.
+    const words = f.text || f.name;
+    site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
+    after = look ? `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>` : site;
+  }
+  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <p class="fine">${state}</p>
-    <div class="fsamples"><span class="fl">On your site</span>${site}
+    <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">On your site</span>${site}
       <span class="fl">In your Preserve</span>${after}</div>
     <div class="row wrap">${actions}</div>
     ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
@@ -547,6 +565,13 @@ function loadLookalikes(c) {
   if (lookLoaded === href) return;
   lookLoaded = href;
   document.head.insertAdjacentHTML('beforeend', `<link rel="stylesheet" href="${href}">`);
+  // The weight and style each comparison sets the lookalike in, one family per request: Google refuses a whole request
+  // that names a weight one family lacks, and the plain request above stays as the fallback.
+  for (const fm of fams) {
+    const faces = [...new Set(c.fonts.filter((f) => f.look === fm && f.fox).map((f) => `${f.fox.style === 'normal' ? 0 : 1},${parseInt(f.fox.weight, 10) || 400}`))].sort();
+    if (!faces.length || faces.join() === '0,400') continue;
+    document.head.insertAdjacentHTML('beforeend', `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${fm.replace(/ /g, '+')}:ital,wght@${faces.join(';')}&display=swap">`);
+  }
 }
 
 // Accept: the last step of review. Accepted Preserves can't be refined. It goes live if the plan has room for another

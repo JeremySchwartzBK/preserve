@@ -282,6 +282,14 @@ for (const [fam, s] of Object.entries(capInfo.fontSamples || {})) {
   const name = 'fs-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12) + '.png';
   fs.writeFileSync(path.join(assetDir, name), buf);
   fontReview.samples[fam] = { file: name, text: s.text, block: s.block };
+  // "The quick brown fox" in the same font (capture.mjs foxPicture), for a like-for-like comparison with the lookalike.
+  const fox = s.fox && path.join(siteDir, 'font-samples', s.fox);
+  if (fox && fs.existsSync(fox)) {
+    const fb = fs.readFileSync(fox);
+    const fn = 'fs-' + crypto.createHash('sha1').update(fb).digest('hex').slice(0, 12) + '.png';
+    fs.writeFileSync(path.join(assetDir, fn), fb);
+    Object.assign(fontReview.samples[fam], { fox: fn, weight: s.weight, style: s.style });
+  }
 }
 for (const r of (fs.existsSync(gf) ? JSON.parse(fs.readFileSync(gf, 'utf8')).record || [] : [])) {
   const src = r.alt && path.join(siteDir, 'fonts-google', r.alt.file);

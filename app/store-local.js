@@ -25,12 +25,13 @@ const SEED_FINDINGS = { '9x2arj4e': [
 // decides what the Preserve uses. The three uploaded to kosa's site are real (trial builds); Omnes Pro (an Adobe font
 // from Squarespace's menu) and the saved GT Standard upload are staged so the demo shows every kind of row.
 // sample: a picture of the font in the page's own words, taken at capture (Adobe files can't be shipped, pictures can).
+// fox: a picture of "The quick brown fox" in it, drawn by the live site (Omnes Pro is staged, so it has none).
 // block: where it shows on the page. look: the open-license lookalike from Google Fonts.
 const SEED_FONTS = { '9x2arj4e': [
   { id: 'omnes', name: 'Omnes Pro', holder: 'platform', sample: 'demo/font-omnes.png', text: 'KOSA RESIDENCE', look: 'Nunito', block: 'block-yui_3_17_2_1_1784647111340_5833', staged: true },
-  { id: 'malamocco', name: 'Malamocco', holder: 'user', sample: 'demo/font-malamocco.png', text: '[ LIVE ]  [ EXPLORE ]  [ CREATE ]', look: 'Work Sans', block: 'block-yui_3_17_2_1_1784651790444_8028' },
-  { id: 'pixel', name: 'That That New Pixel', holder: 'user', sample: 'demo/font-pixel.png', text: 'Kosa', look: 'Pixelify Sans', block: 'block-e21d97e9c46d6622a3aa' },
-  { id: 'gt', name: 'GT Standard', holder: 'user', sample: 'demo/font-gt-standard.png', text: 'HOME  RESIDENCY  STORIES', look: 'Inter', block: 'el:header', covered: 'gt-standard' },
+  { id: 'malamocco', name: 'Malamocco', holder: 'user', sample: 'demo/font-malamocco.png', fox: { file: 'demo/font-malamocco-fox.png', weight: '400', style: 'normal' }, text: '[ LIVE ]  [ EXPLORE ]  [ CREATE ]', look: 'Work Sans', block: 'block-yui_3_17_2_1_1784651790444_8028' },
+  { id: 'pixel', name: 'That That New Pixel', holder: 'user', sample: 'demo/font-pixel.png', fox: { file: 'demo/font-pixel-fox.png', weight: '400', style: 'normal' }, text: 'Kosa', look: 'Pixelify Sans', block: 'block-e21d97e9c46d6622a3aa' },
+  { id: 'gt', name: 'GT Standard', holder: 'user', sample: 'demo/font-gt-standard.png', fox: { file: 'demo/font-gt-standard-fox.png', weight: '400', style: 'normal' }, text: 'HOME  RESIDENCY  STORIES', look: 'Inter', block: 'el:header', covered: 'gt-standard' },
 ] };
 // The studio's saved font files ("Your fonts"): a later Preserve using the same font is covered by the upload.
 const SEED_STUDIO_FONTS = [{ id: 'gt-standard', name: 'GT Standard', file: 'GTStandard-M-Regular.woff2', at: ago(15) }];
