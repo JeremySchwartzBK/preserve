@@ -414,6 +414,30 @@ if(!on){on=true;paint();d.style.opacity='1';im.style.visibility='hidden'}if(!raf
 addEventListener('resize',function(){if(on)paint()})});
 })();</script>`;
 
+// Effects tied to the scroll position (capture.mjs scrollLinked, data-pv-scroll: the element's transform and opacity at
+// scroll positions measured from the top of its box). Ours sets the in-between look as the page scrolls: a 2D transform
+// is taken apart into move, turn and size so a half turn passes through the angles between, as live, rather than
+// shrinking through the middle. Still for visitors who ask for less motion.
+const SCROLL_FX_SCRIPT = `<script id="preserve-scroll-fx">(function(){
+if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+function dec(m){if(!m||m==='none')return{x:0,y:0,r:0,sx:1,sy:1};var v=(m.match(/-?[\\d.e-]+/g)||[]).map(Number);if(v.length!==6)return{raw:m};
+var a=v[0],b=v[1],c=v[2],d=v[3],sx=Math.hypot(a,b),r=Math.atan2(b,a),sy=(a*d-b*c)/(sx||1);return{x:v[4],y:v[5],r:r,sx:sx,sy:sy}}
+var items=[];
+[].forEach.call(document.querySelectorAll('[data-pv-scroll]'),function(e){var pts;try{pts=JSON.parse(e.getAttribute('data-pv-scroll'))}catch(x){return}if(!pts||pts.length<2)return;
+var prev=null;pts=pts.map(function(p){var t=dec(p[1]);if(prev&&t.raw==null&&prev.raw==null){while(t.r-prev.r>Math.PI)t.r-=2*Math.PI;while(t.r-prev.r<-Math.PI)t.r+=2*Math.PI}prev=t;return{y:p[0],t:t,o:p[2]}});
+items.push({e:e,p:pts,base:e.parentElement||e})});
+if(!items.length)return;
+function lerp(a,b,k){return a+(b-a)*k}
+function look(it){var top=it.base.getBoundingClientRect().top+scrollY,s=scrollY-top,p=it.p,i=0;
+if(s<=p[0].y)return p[0];if(s>=p[p.length-1].y)return p[p.length-1];while(i<p.length-2&&p[i+1].y<s)i++;
+var A=p[i],B=p[i+1],k=(s-A.y)/((B.y-A.y)||1);if(A.t.raw!=null||B.t.raw!=null)return k<0.5?A:B;
+return{t:{x:lerp(A.t.x,B.t.x,k),y:lerp(A.t.y,B.t.y,k),r:lerp(A.t.r,B.t.r,k),sx:lerp(A.t.sx,B.t.sx,k),sy:lerp(A.t.sy,B.t.sy,k)},o:lerp(A.o,B.o,k)}}
+function css(t){return t.raw!=null?t.raw:'translate('+t.x.toFixed(2)+'px,'+t.y.toFixed(2)+'px) rotate('+(t.r*180/Math.PI).toFixed(3)+'deg) scale('+t.sx.toFixed(4)+','+t.sy.toFixed(4)+')'}
+var raf=0;function paint(){raf=0;items.forEach(function(it){var l=look(it);it.e.style.setProperty('transform',css(l.t),'important');it.e.style.setProperty('opacity',String(l.o),'important')})}
+function q(){if(!raf)raf=requestAnimationFrame(paint)}
+addEventListener('scroll',q,{passive:true});addEventListener('resize',q);paint();
+})();</script>`;
+
 // Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
 // data-pv-scrollshow: how far down they show, how they display, whether clicking goes back to the top).
 const SCROLL_SHOW_SCRIPT = `<script id="preserve-scroll-show">(function(){
@@ -617,7 +641,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -707,6 +731,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('canvas[data-preserve-follow], img[data-pv-follow]').length) $('body').append(FOLLOW_SCRIPT);
       if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
+      if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));

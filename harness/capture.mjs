@@ -556,6 +556,89 @@ export async function scrollShown(page) {
   return Object.values(found);
 }
 
+// Effects tied to the scroll position (2026-11-16: not crispy enough's piece that turns as you scroll, a plugin running
+// GSAP's ScrollTrigger; any script that moves, turns, scales or fades something in step with the scroll): the owner's
+// script is dropped, so the copy froze it where it sat at the top of the page. Find what such scripts move by watching
+// which elements get their style rewritten while we scroll, then sample each one's transform and opacity at scroll
+// positions down the page. Keep only those whose look depends on the scroll position alone: the same at a position
+// whether you arrive there or wait there (not running on a timer) and when you come back up to it (not a one-time
+// reveal). Positions are kept relative to the element's box's top, so our stand-in (build.mjs SCROLL_FX_SCRIPT) can
+// replay them at any width.
+export async function scrollLinked(page) {
+  await page.evaluate(() => {
+    window.__pvSL = new Set();
+    window.__pvSLo = new MutationObserver((ms) => { for (const m of ms) if (m.target.nodeType === 1) window.__pvSL.add(m.target); });
+    window.__pvSLo.observe(document.body, { attributes: true, attributeFilter: ['style'], subtree: true });
+  });
+  const { H, vh } = await page.evaluate(() => ({ H: document.documentElement.scrollHeight - innerHeight, vh: innerHeight }));
+  const step = Math.max(100, Math.round(vh / 4));
+  const ys = []; for (let y = 0; y < H; y += step) ys.push(y); ys.push(Math.max(0, H));
+  for (const y of ys) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(120); }
+  const n = await page.evaluate(() => {
+    window.__pvSLo.disconnect();
+    let k = 0;
+    for (const e of window.__pvSL) {
+      if (!e.isConnected || k >= 60) continue;
+      if (e.closest('header, [data-pv-gal], [data-pv-pointer], [data-pv-scrollshow], .user-items-list-carousel, .gallery-reel, .gallery-slideshow, [class*="marquee"], [class*="scrolling"]')) continue;
+      const r = e.getBoundingClientRect(); if (r.width < 8 || r.height < 8) continue;
+      e.setAttribute('data-preserve-sl', String(k++));
+    }
+    return k;
+  });
+  if (!n) return 0;
+  const read = () => page.evaluate(() => [...document.querySelectorAll('[data-preserve-sl]')].sort((x, y) => x.getAttribute('data-preserve-sl') - y.getAttribute('data-preserve-sl')).map((e) => { const cs = getComputedStyle(e); return [cs.transform, Math.round(+cs.opacity * 1000) / 1000]; }));
+  const same = (a, b) => a[0] === b[0] && Math.abs(a[1] - b[1]) < 0.01;
+  // A quick look first: only pieces whose look changes down the page are worth the slow, settled pass.
+  { const seen = []; for (let j = 0; j < ys.length; j += 2) { await page.evaluate((y) => scrollTo(0, y), ys[j]); await sleep(150); seen.push(await read()); }
+    const moving = seen[0].map((v, i) => seen.some((s) => !same(s[i], v)));
+    if (!moving.some(Boolean)) { await page.evaluate(() => { document.querySelectorAll('[data-preserve-sl]').forEach((e) => e.removeAttribute('data-preserve-sl')); scrollTo(0, 0); }); return 0; } }
+  const t0 = Date.now();
+  const samples = [], timed = new Set();
+  for (const y of ys) {
+    if (Date.now() - t0 > 150000) { for (let i = 0; i < n; i++) timed.add(i); break; }  // too slow to settle: leave it
+    await page.evaluate((y) => scrollTo(0, y), y); await sleep(250);
+    // Smoothed effects ease into place over a second or so: wait for it to settle.
+    let a = await read(), b = a;
+    for (let t = 0; t < 10; t++) { await sleep(250); b = await read(); if (b.every((v, i) => same(v, a[i]))) break; a = b; }
+    const c = await read(); await sleep(250); const d = await read();
+    c.forEach((v, i) => { if (!same(v, d[i])) timed.add(i); });
+    samples.push(d);
+  }
+  // Coming back up: the same look at the same place, or it isn't tied to the scroll.
+  const once = new Set();
+  for (let j = ys.length - 1; j >= 0; j -= 3) {
+    await page.evaluate((y) => scrollTo(0, y), ys[j]); await sleep(250);
+    let v = await read();
+    for (let t = 0; t < 10; t++) { await sleep(250); const w = await read(); if (w.every((x, i) => same(x, v[i]))) break; v = w; }
+    v.forEach((x, i) => { const r = samples[j][i]; if (!same(x, r) && !(x[0] !== 'none' && r[0] !== 'none' && near(x[0], r[0]))) once.add(i); });
+  }
+  function near(m1, m2) { const a = (m1.match(/-?[\d.e-]+/g) || []).map(Number), b = (m2.match(/-?[\d.e-]+/g) || []).map(Number); return a.length === b.length && a.every((x, i) => Math.abs(x - b[i]) < (i >= a.length - 2 ? 3 : 0.03)); }
+  const keep = [];
+  if (process.env.PV_DEBUG_SL) console.log('scrollLinked', { n, timed: [...timed], once: [...once] });
+  for (let i = 0; i < n; i++) {
+    if (timed.has(i) || once.has(i)) continue;
+    const vals = samples.map((s) => s[i]);
+    if (vals.every((v) => same(v, vals[0]))) continue;
+    keep.push(i);
+  }
+  await page.evaluate(([keep, ys, samples]) => {
+    const anchor = (e) => { const p = e.parentElement || e; return p.getBoundingClientRect().top + scrollY; };
+    for (const i of keep) {
+      const e = document.querySelector(`[data-preserve-sl="${i}"]`); if (!e) continue;
+      const top = anchor(e), pts = [];
+      ys.forEach((y, j) => { const v = samples[j][i], last = pts[pts.length - 1], next = samples[j + 1] && samples[j + 1][i];
+        // Drop points in the middle of a flat stretch.
+        if (last && last[1] === v[0] && last[2] === v[1] && next && next[0] === v[0] && next[1] === v[1]) return;
+        pts.push([Math.round(y - top), v[0], v[1]]); });
+      e.setAttribute('data-pv-scroll', JSON.stringify(pts));
+    }
+    document.querySelectorAll('[data-preserve-sl]').forEach((e) => e.removeAttribute('data-preserve-sl'));
+    scrollTo(0, 0);
+  }, [keep, ys, samples]);
+  await sleep(600);
+  return keep.length;
+}
+
 // Pointer followers (2026-11-13: hello world studio's 3D cursor, not crispy enough's little pictures that follow the
 // pointer over some blocks): owner scripts hide the arrow and move a small fixed element with the pointer, everywhere
 // or only while it is over one block. Those scripts are dropped, so the copy showed the follower frozen where it sat
@@ -928,6 +1011,7 @@ export async function capture(url, outDir) {
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
     (info.scrollShown ||= {})[prof] = await scrollShown(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
+    (info.scrollLinked ||= {})[prof] = await scrollLinked(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     if (prof === 'desktop') (info.pointers ||= {})[prof] = await pointerFollowers(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await shadowStills(page, outDir, prof, info);
     await canvasStills(page, outDir, prof, info);
