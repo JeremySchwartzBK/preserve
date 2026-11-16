@@ -10,7 +10,9 @@ permissions:
   actions: read
 jobs:
   retime:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to Ubuntu 26.04, which Playwright 1.56 can't install Chromium on.
+    # Move back to ubuntu-latest when harness/package.json gets a Playwright that supports it.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: harness
@@ -26,7 +28,7 @@ jobs:
       - name: Get last week's baseline
         continue-on-error: true
         run: |
-          id=$(gh run list -R "$GITHUB_REPOSITORY" -w retime.yml -s completed -L 10 --json databaseId -q '.[].databaseId' | head -1)
+          id=$(gh run list -R "$GITHUB_REPOSITORY" -w retime.yml -s success -L 10 --json databaseId -q '.[].databaseId' | head -1)
           [ -n "$id" ] && gh run download "$id" -R "$GITHUB_REPOSITORY" -n retime-baseline -D .
       - name: Time the test corpus
         id: time
