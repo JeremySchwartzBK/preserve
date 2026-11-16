@@ -74,7 +74,7 @@ function fontsOf(r, last) {
     const up = ch?.decision === 'upload' ? studioFonts.find((x) => x.id === ch.studio_font_id) : null;
     const cover = !ch ? studioFonts.find((x) => x.font_key === f.id && x.state === 'ok') : null;
     return {
-      ...f, sample: f.sample ? `${VIEW}/c/${r.id}/${f.sample}` : null,
+      ...f, sample: f.sample ? `${VIEW}/c/${r.id}/${f.sample}` : null, fox: f.fox ? { ...f.fox, file: `${VIEW}/c/${r.id}/${f.fox.file}` } : null,
       decision: up && up.state === 'rejected' ? null : ch?.decision || null,
       file: up?.file_name, uploadedAt: up?.created_at, checking: up?.state === 'checking', problem: up?.state === 'rejected' ? up.problem : null,
       covered: cover?.id || null, studioFont: (up && up.state !== 'rejected' ? up : cover) || null,
