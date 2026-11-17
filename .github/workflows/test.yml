@@ -47,6 +47,9 @@ jobs:
       - name: Background video addresses
         working-directory: harness
         run: node test-media-bg.mjs
+      - name: Things that move on a timer
+        working-directory: harness
+        run: node test-ticker.mjs
       - name: Viewer and quality check serve the same rules
         working-directory: harness
         run: node test-policy.mjs
