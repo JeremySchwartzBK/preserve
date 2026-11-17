@@ -443,7 +443,7 @@ function go(){[].slice.call(document.querySelectorAll('[data-pv-bgvideo]')).forE
 if(!c||!/^[0-9A-Za-z_-]+$/.test(c.id||''))return;var ar=c.ar>0?c.ar:16/9,yt=c.p==='youtube',f=document.createElement('iframe');
 f.src=yt?'https:/'+'/www.youtube-nocookie.com/embed/'+c.id+'?autoplay=1&mute=1&loop=1&playlist='+c.id+'&controls=0&playsinline=1&rel=0&disablekb=1&iv_load_policy=3&enablejsapi=1'
 :'https:/'+'/player.vimeo.com/video/'+c.id+'?background=1&autoplay=1&loop=1&muted=1&autopause=0&dnt=1'+(c.h&&/^[0-9a-f]+$/.test(c.h)?'&h='+c.h:'');
-f.setAttribute('allow','autoplay; encrypted-media; picture-in-picture');f.setAttribute('tabindex','-1');f.setAttribute('aria-hidden','true');f.title='';
+f.setAttribute('allow','autoplay; encrypted-media; picture-in-picture');f.setAttribute('data-pv-runtime','');f.setAttribute('tabindex','-1');f.setAttribute('aria-hidden','true');f.title='';
 f.setAttribute('style','position:absolute;border:0;pointer-events:none;opacity:0;transition:opacity .8s ease;max-width:none');
 box.style.overflow='hidden';if(getComputedStyle(box).position==='static')box.style.position='relative';
 function fit(){var W=box.clientWidth,H=box.clientHeight,w=W,h=W/ar;if(h<H){h=H;w=H*ar}f.style.width=w+'px';f.style.height=h+'px';f.style.left=((W-w)/2)+'px';f.style.top=((H-h)/2)+'px'}

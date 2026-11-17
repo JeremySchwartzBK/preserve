@@ -164,7 +164,9 @@ async function embedStills(layout, pageUrl) {
   }).filter(Boolean));
   const out = [];
   out.firstScreen = firstScreen;
-  const frames = await page.$$('iframe');
+  // Frames our own scripts add while the page runs (the background video player, build.mjs BGVIDEO_SCRIPT) aren't in
+  // the saved page: counting them put the n-th picture on the wrong frame (an 862px blank at the foot of chelsey arce).
+  const frames = await page.$$('iframe:not([data-pv-runtime])');
   for (const f of frames) {
     const src = (await f.getAttribute('src')) || '';
     // Saved as real content during capture (frames.mjs): no picture needed.
