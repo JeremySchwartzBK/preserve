@@ -639,6 +639,109 @@ export async function scrollLinked(page) {
   return keep.length;
 }
 
+// Things that move on their own, on a timer (2026-11-17, Chelsey Arce's logo strip: a plugin turns a list into a strip
+// that slides sideways forever and stops while the pointer is over it): the plugin's script is dropped, so the copy
+// froze the strip wherever it was. Find them by watching which elements get their style rewritten while the page sits
+// still, at each screen's worth down the page, and which run a stylesheet animation that never ends. Keep those that move steadily one way (sideways, up or down, or turning),
+// and work out where the motion repeats: for a strip, the distance at which its items start over (plugins copy the
+// items so the strip has no end); for a turn, a full circle. Then hover each one to see whether it stops. Each is
+// marked for our stand-in (build.mjs TICKER_SCRIPT): which way, how fast, how far before it repeats, and whether
+// hovering stops it. One that moves some other way stays frozen, as before.
+export async function timedMotion(page, { hover = true } = {}) {
+  await page.evaluate(() => {
+    window.__pvTM = new Set();
+    window.__pvTMo = new MutationObserver((ms) => { if (!window.__pvTMon) return; for (const m of ms) if (m.target.nodeType === 1) window.__pvTM.add(m.target); });
+    window.__pvTMo.observe(document.body, { attributes: true, attributeFilter: ['style'], subtree: true });
+  });
+  const { H, vh } = await page.evaluate(() => ({ H: document.documentElement.scrollHeight - innerHeight, vh: innerHeight }));
+  for (let y = 0; ; y += vh) {
+    await page.evaluate((y) => scrollTo(0, y), Math.min(y, H)); await sleep(400);
+    await page.evaluate(() => { window.__pvTMon = true; }); await sleep(700);
+    // Stylesheet animations that run forever move things too, with no style rewritten (plugins' own stylesheets).
+    await page.evaluate(() => { window.__pvTMon = false; for (const a of document.getAnimations()) { const t = a.effect && a.effect.target, tm = a.effect && a.effect.getComputedTiming && a.effect.getComputedTiming(); if (t && t.nodeType === 1 && tm && tm.iterations === Infinity && a.playState === 'running') window.__pvTM.add(t); } });
+    if (y >= H) break;
+  }
+  const n = await page.evaluate(() => {
+    window.__pvTMo.disconnect();
+    let k = 0;
+    for (const e of window.__pvTM) {
+      if (!e.isConnected || k >= 20) continue;
+      if (e.closest('header, [data-pv-gal], [data-pv-pointer], [data-pv-scrollshow], [data-pv-scroll], .gallery-slideshow, .sqs-block-marquee, [data-pv-tick]')) continue;
+      const r = e.getBoundingClientRect(); if (r.width < 8 || r.height < 8) continue;
+      e.setAttribute('data-preserve-tm', String(k++));
+    }
+    return k;
+  });
+  let kept = 0;
+  for (let i = 0; i < n; i++) {
+    const sel = `[data-preserve-tm="${i}"]`;
+    await page.evaluate((s) => { const e = document.querySelector(s); const r = e.getBoundingClientRect(); scrollTo(0, Math.max(0, r.top + scrollY - innerHeight / 3)); }, sel);
+    await sleep(500);
+    const read = () => page.evaluate((s) => { const e = document.querySelector(s); const m = (getComputedStyle(e).transform.match(/-?[\d.e-]+/g) || []).map(Number); return { t: performance.now(), m }; }, sel);
+    const pts = []; for (let j = 0; j < 12; j++) { pts.push(await read()); await sleep(150); }
+    const kind = motionKind(pts);
+    if (process.env.PV_DEBUG_TM) console.log("timedMotion sample", i, kind, pts.map((p) => p.m.join(",")).slice(0, 4));
+    if (!kind) continue;
+    const p = kind.k === 'r' ? 360 : await page.evaluate(([s, ax]) => {
+      // Where the items start over: the first child that looks like the first one.
+      const e = document.querySelector(s), kids = [...e.children]; if (kids.length < 2) return 0;
+      const sig = (c) => c.tagName + '|' + c.textContent.replace(/\s+/g, ' ').trim() + '|' + [...c.querySelectorAll('img')].map((im) => (im.currentSrc || im.src || '').split('?')[0]).join(',');
+      const s0 = sig(kids[0]);
+      for (let j = 1; j < kids.length; j++) if (sig(kids[j]) === s0) {
+        const a = kids[0].getBoundingClientRect(), b = kids[j].getBoundingClientRect();
+        return Math.round((ax === 'x' ? b.left - a.left : b.top - a.top) * 100) / 100;
+      }
+      return 0;
+    }, [sel, kind.k]);
+    if (!(p > 0)) continue;
+    let hp = 0;
+    if (hover) {
+      const box = await page.locator(sel).boundingBox().catch(() => null);
+      if (box) {
+        // The middle of the part on screen: a strip is often far wider than the window.
+        const vw = page.viewportSize()?.width || 1440, x0 = Math.max(0, box.x), x1 = Math.min(vw, box.x + box.width);
+        const hx = (x0 + x1) / 2, hy = box.y + box.height / 2;
+        // A popup or bar over it would take the hover: set aside whatever is on top there for the test.
+        await page.evaluate(([s, x, y]) => { const e = document.querySelector(s); let top = document.elementFromPoint(x, y);
+          for (let k = 0; k < 5 && top && !e.contains(top); k++) { let c = top; while (c.parentElement && c.parentElement !== document.body && getComputedStyle(c).position !== 'fixed') c = c.parentElement;
+            c.setAttribute('data-preserve-tm-aside', c.style.visibility || ''); c.style.visibility = 'hidden'; top = document.elementFromPoint(x, y); } }, [sel, hx, hy]);
+        await page.mouse.move(hx, hy); await sleep(400);
+        const a = await read(); await sleep(400); const b = await read();
+        hp = a.m.every((v, j) => Math.abs(v - b.m[j]) < 0.5) ? 1 : 0;
+        if (process.env.PV_DEBUG_TM) console.log("timedMotion hover", { box, a: a.m, b: b.m });
+        await page.mouse.move(1, 1); await sleep(200);
+        await page.evaluate(() => document.querySelectorAll('[data-preserve-tm-aside]').forEach((c) => { c.style.visibility = c.getAttribute('data-preserve-tm-aside'); c.removeAttribute('data-preserve-tm-aside'); }));
+      }
+    }
+    await page.evaluate(([s, c]) => document.querySelector(s).setAttribute('data-pv-tick', JSON.stringify(c)), [sel, { k: kind.k, v: Math.round(kind.v * 100) / 100, p, hp }]);
+    kept++;
+  }
+  await page.evaluate(() => { document.querySelectorAll('[data-preserve-tm]').forEach((e) => e.removeAttribute('data-preserve-tm')); scrollTo(0, 0); });
+  await sleep(400);
+  return kept;
+}
+
+// Steady motion one way from timed samples of a transform matrix: sideways (x), up or down (y) or turning (r), with its
+// speed in pixels or degrees a second. Null when it isn't steady (eases, stops, goes back and forth) or isn't one of those.
+export function motionKind(pts) {
+  const ok = pts.filter((p) => p.m.length === 6); if (ok.length < 6) return null;
+  const ang = (m) => Math.atan2(m[1], m[0]) * 180 / Math.PI;
+  const pure = ok.every((p) => Math.abs(Math.hypot(p.m[0], p.m[1]) - 1) < 0.01);
+  const series = { x: ok.map((p) => p.m[4]), y: ok.map((p) => p.m[5]), r: ok.map((p) => ang(p.m)) };
+  const ts = ok.map((p) => p.t / 1000);
+  const moving = Object.keys(series).filter((k) => Math.abs(series[k][series[k].length - 1] - series[k][0]) > 0.5 || series[k].some((v) => Math.abs(v - series[k][0]) > 0.5));
+  if (moving.length !== 1 || !pure) return null;
+  const k = moving[0], s = series[k];
+  if (k !== 'r' && ok.some((p) => Math.abs(p.m[0] - 1) > 0.001 || Math.abs(p.m[1]) > 0.001)) return null;
+  // Speeds between samples, leaving out one jump back where the motion starts over.
+  const v = []; for (let j = 1; j < s.length; j++) { let d = s[j] - s[j - 1]; if (k === 'r') { while (d > 180) d -= 360; while (d < -180) d += 360; } v.push(d / ((ts[j] - ts[j - 1]) || 1)); }
+  const sorted = [...v].sort((a, b) => a - b), med = sorted[Math.floor(sorted.length / 2)];
+  if (Math.abs(med) < 2) return null;
+  const off = v.filter((x) => Math.abs(x - med) > Math.abs(med) * 0.25 + 3).length;
+  if (off > 1) return null;
+  return { k, v: med };
+}
+
 // Pointer followers (2026-11-13: hello world studio's 3D cursor, not crispy enough's little pictures that follow the
 // pointer over some blocks): owner scripts hide the arrow and move a small fixed element with the pointer, everywhere
 // or only while it is over one block. Those scripts are dropped, so the copy showed the follower frozen where it sat
@@ -1012,6 +1115,7 @@ export async function capture(url, outDir) {
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);
     (info.scrollShown ||= {})[prof] = await scrollShown(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     (info.scrollLinked ||= {})[prof] = await scrollLinked(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
+    (info.timedMotion ||= {})[prof] = await timedMotion(page, { hover: prof === 'desktop' }).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     if (prof === 'desktop') (info.pointers ||= {})[prof] = await pointerFollowers(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await shadowStills(page, outDir, prof, info);
     await canvasStills(page, outDir, prof, info);

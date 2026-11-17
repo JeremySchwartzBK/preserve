@@ -438,6 +438,24 @@ function q(){if(!raf)raf=requestAnimationFrame(paint)}
 addEventListener('scroll',q,{passive:true});addEventListener('resize',q);paint();
 })();</script>`;
 
+// Things that move on their own on a timer (capture.mjs timedMotion, data-pv-tick: which way, how fast, how far before
+// it repeats, whether hovering stops it), such as a logo strip a plugin slides sideways forever. Ours keeps it moving
+// from where it was saved (in place of any stylesheet animation that drove it), the same way at the same speed, starting over where the live one does, and stops it under
+// the pointer where the live one stopped. Still for visitors who ask for less motion.
+const TICKER_SCRIPT = `<script id="preserve-ticker">(function(){
+if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+var hov=window.matchMedia&&matchMedia('(hover: hover)').matches;
+[].forEach.call(document.querySelectorAll('[data-pv-tick]'),function(e){var c;try{c=JSON.parse(e.getAttribute('data-pv-tick'))}catch(x){return}
+if(!c||!(c.p>0)||!c.v||!e.animate)return;
+var m=(getComputedStyle(e).transform.match(/-?[\\d.e-]+/g)||[]).map(Number),d=c.v<0?-1:1,f;
+if(c.k==='r'){var a=m.length===6?Math.atan2(m[1],m[0])*180/Math.PI:0;f=function(t){return'rotate('+(a+t)+'deg)'}}
+else{var o=m.length===6?(c.k==='x'?m[4]:m[5]):0,n=o%c.p;if(d<0&&n>0)n-=c.p;if(d>0&&n<0)n+=c.p;
+f=function(t){return(c.k==='x'?'translateX(':'translateY(')+(n+t)+'px)'}}
+e.style.setProperty('animation','none','important');var an=e.animate([{transform:f(0)},{transform:f(d*c.p)}],{duration:c.p/Math.abs(c.v)*1000,iterations:Infinity,easing:'linear'});
+if(c.hp&&hov){e.addEventListener('mouseenter',function(){an.pause()});e.addEventListener('mouseleave',function(){an.play()})}
+});
+})();</script>`;
+
 // Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
 // data-pv-scrollshow: how far down they show, how they display, whether clicking goes back to the top).
 const SCROLL_SHOW_SCRIPT = `<script id="preserve-scroll-show">(function(){
@@ -644,7 +662,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -735,6 +753,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
+      if ($('[data-pv-tick]').length) $('body').append(TICKER_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));
