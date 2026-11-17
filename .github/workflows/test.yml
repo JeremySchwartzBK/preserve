@@ -44,6 +44,9 @@ jobs:
       - name: Widgets saved as real content
         working-directory: harness
         run: node test-frames.mjs
+      - name: Background video addresses
+        working-directory: harness
+        run: node test-media-bg.mjs
       - name: Things that move on a timer
         working-directory: harness
         run: node test-ticker.mjs

@@ -467,3 +467,26 @@ Backbipoc's footer running off the screen, Myrtle Green's shapes, Margaret Rajic
 The false holds are Fireside Pilates (a stylesheet finding, as before), Little Ripper's Nov 10 copy (a drag from step 2)
 and Sisu Bar. Sisu Bar's live site changed after capture, and the Preserve matches the capture. Holds are still about
 70% of cases, mostly pixel and stylesheet findings: lowering that is step 4 (smarter pixel diff).
+
+## Parallax backgrounds, Vimeo/YouTube background video, blocks that appear on scroll (2026-11-17)
+
+From chelseyarce.com (Preserve vjw3zkg5), fixed for every site with the same features:
+
+- **Parallax section backgrounds** (Squarespace `BackgroundImageFXParallax`): live draws the picture with WebGL, which
+  paints only near the screen, so photographing the drawing (`canvasStills`) left most such sections black. Capture
+  (`mediaBackgrounds`) now keeps the section's own picture, notes the effect's settings (`data-pv-parallax`: zoom start/end,
+  intensity, angle, focal point) and drops the drawing; `PARALLAX_SCRIPT` zooms and drifts the picture with the scroll
+  using the same sums as Squarespace's shader. Other background effects whose drawing couldn't be photographed show
+  their picture instead of nothing (`afterCanvasStills`).
+- **Background videos on Vimeo/YouTube** (`.sqs-video-background[data-config-url]`; Squarespace's own videos still go
+  through `video.mjs`). Jeremy's rule: play them through the provider's own player, over a still that stays if the video
+  is taken down. Capture takes its own still from the playing video (the owner's chosen Vimeo still is often black),
+  falling back to the provider's; `BGVIDEO_SCRIPT` adds the muted, looping background player after load and fades it in
+  only once it reports that it is playing. Never during quality checks (`__pvStill`), never for reduced motion. The
+  viewer serves pages with such a video without the CSP sandbox (the player can't start sealed; Jeremy agreed
+  2026-11-17); `frame-src` allows `player.vimeo.com` and `www.youtube-nocookie.com`. Video addresses: `test-media-bg.mjs`.
+- **Block animations that play as a block comes into view** (`script[data-block-animations]`, trigger `appear`):
+  `markBlockAppears` keeps the start state; `APPEAR_SCRIPT` plays it, following the scroll for "scrolls" ones (never
+  backwards, as live) and over its duration otherwise.
+- **Refinement photos** (`shadowStills`) fade out pop-ups and fixed elements instead of hiding them: a pop-up's inner box
+  that set its own visibility showed through.

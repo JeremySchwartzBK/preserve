@@ -112,7 +112,10 @@ export function detect(siteDir, exportReport) {
   const html = ['rendered-desktop.html', 'rendered-mobile.html'].map((f) => { try { return fs.readFileSync(path.join(siteDir, f), 'utf8'); } catch { return ''; } }).join('\n');
   const body = html.replace(/[\s\S]*?<body/i, '<body');
   const found = {};
-  if (/(youtube(-nocookie)?\.com\/(embed|watch)|youtu\.be\/|player\.vimeo\.com|vimeo\.com\/\d)/i.test(body)) found[1] = 'YouTube/Vimeo video';
+  // Section background videos on Vimeo/YouTube play through the provider's player (capture.mjs mediaBackgrounds), so only
+  // the other ones (video blocks, embeds) still show a still.
+  const noBgVideo = body.replace(/\sdata-(config-url|pv-bgvideo)="[^"]*"/gi, '');
+  if (/(youtube(-nocookie)?\.com\/(embed|watch)|youtu\.be\/|player\.vimeo\.com|vimeo\.com\/\d)/i.test(noBgVideo)) found[1] = 'YouTube/Vimeo video';
   // Squarespace video blocks meant to be watched (not section backgrounds) lose sound and controls.
   if (/class="[^"]*sqs-block-video|data-block-type="32"|video-player-container/i.test(body)) found[3] = 'video block';
   // Owner code in the page body that relies on jQuery or Squarespace's scripts: dropped from the script-free copy.
