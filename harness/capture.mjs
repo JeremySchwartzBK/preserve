@@ -1146,7 +1146,7 @@ async function fontSamples(page, outDir, info) {
       const b = el.closest('[id^="block-"],[data-block-id],section[data-section-id]') || el.closest('header,footer');
       const block = !b ? 'el:body' : /^(HEADER|FOOTER)$/.test(b.tagName) && !b.id ? 'el:' + b.tagName.toLowerCase() : b.id || b.getAttribute('data-block-id') || 'section:' + b.getAttribute('data-section-id');
       el.setAttribute('data-pv-fsample', String(out.length));
-      out.push({ family: fam, text: t.slice(0, 60), block, weight: cs.fontWeight, style: cs.fontStyle, upper: cs.textTransform === 'uppercase' });
+      out.push({ family: fam, text: t.slice(0, 60), block, weight: cs.fontWeight, style: cs.fontStyle, upper: cs.textTransform === 'uppercase' || /[A-Z]/.test(t) && t === t.toUpperCase() });
     }
     return out;
   }, done).catch(() => []);
@@ -1180,7 +1180,7 @@ async function fontSamples(page, outDir, info) {
     const ok = await page.screenshot({ path: path.join(outDir, 'font-samples', file), clip }).then(() => true, () => false);
     await unhide();
     if (!ok) continue;
-    info.fontSamples[f.family] = { file, text: f.upper ? f.text.toUpperCase() : f.text, block: f.block, weight: f.weight, style: f.style };
+    info.fontSamples[f.family] = { file, text: f.upper ? f.text.toUpperCase() : f.text, block: f.block, weight: f.weight, style: f.style, caps: f.upper };
     const fox = await foxPicture(page, outDir, f);
     if (fox) info.fontSamples[f.family].fox = fox;
   }
@@ -1190,6 +1190,7 @@ async function fontSamples(page, outDir, info) {
 // FOX_TEXT in one font, in the weight and style the page uses it in, black on white at 34px (twice the size the app
 // shows it, so it stays sharp), with nothing of the page's own styling. The app sets the lookalike at the same size.
 async function foxPicture(page, outDir, f) {
+  // Text the site shows in capitals is compared in capitals (Jeremy, 2026-11-17).
   const box = await page.evaluate(async ([fam, weight, style, text]) => {
     // The font has to be the one drawing every letter. A subset that lacks one (a font sliced by language, or an Adobe
     // kit cut down to the letters the page uses) would let a fallback font draw it unseen: a letter it lacks measures
@@ -1205,7 +1206,7 @@ async function foxPicture(page, outDir, f) {
     document.documentElement.appendChild(el);
     const r = el.getBoundingClientRect();
     return { x: Math.ceil(r.left), y: Math.ceil(r.top), width: Math.floor(r.width), height: Math.floor(r.height) };
-  }, [f.family, f.weight, f.style, FOX_TEXT]).catch(() => null);
+  }, [f.family, f.weight, f.style, f.upper ? FOX_TEXT.toUpperCase() : FOX_TEXT]).catch(() => null);
   if (!box) return null;
   await sleep(100);
   const file = `${hash(f.family)}-fox.png`;

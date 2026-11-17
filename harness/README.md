@@ -210,6 +210,10 @@ from Squarespace's menu, fonts the owner uploaded, fonts from other hosts; open 
   subset), and the row then falls back to the second picture: the first words a visitor can see in that font,
   photographed tight at desktop width, plus the block they sit in. Hidden text (a "Skip to Content" link) is passed
   over, since its photo showed whatever covered it. Adobe's files can't ship; pictures can.
+- **Lookalike weight by look** (`google-fonts.py` `by_look`, 2026-11-17): each weight of the lookalike family is measured
+  (`font_style.py` stem) and the one that looks as heavy as the original is used, whatever weight number the original
+  claims (CA Negroni calls itself 400 and looks black). The review draws the lookalike in that weight, and in capitals
+  when the site shows the words in capitals or the original is a capitals-only face.
 - **A lookalike** for fonts kept on the designer's word (`google-fonts.py` `alt`), fetched and shipped unused beside the
   Preserve, with its license. Adobe fonts already ship as their lookalike.
 

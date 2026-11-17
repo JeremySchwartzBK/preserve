@@ -188,7 +188,9 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
 // Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
 // a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
-const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
+// Fonts the owner added to their site are kept with no question: the one confirmation at Accept covers them (Jeremy,
+// 2026-11-17). Adobe fonts from Squarespace's menu still ask.
+const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && f.holder !== 'user');
 const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
@@ -432,7 +434,7 @@ function panel(c, review) {
   } else if (view.tab === 'fonts') {
     loadLookalikes(c);
     P.innerHTML = `<h2>Fonts</h2>
-      <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Check each one below. Changing a font takes seconds and doesn’t use a refinement.</p>
+      <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Here’s what your Preserve uses for each one. Changing a font takes seconds and doesn’t use a refinement.</p>
       ${c.fonts.map((f) => fontRow(c, f)).join('')}
       <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>
       <input type="file" id="fontfile" accept=".woff2,.woff,.otf,.ttf" style="display:none">`;
@@ -513,6 +515,12 @@ function panel(c, review) {
 // One row per font (font licensing decisions, 2026-10-26): the original's name, a before/after sample, where it shows,
 // and the choices that fit who holds the license.
 const FOX = 'The quick brown fox';   // capture.mjs FOX_TEXT
+// The weight and capitals the lookalike is drawn in for the face the comparison shows (runner.mjs fontRows faces[].look).
+// Preserves made before 2026-11-17 have neither: the original's weight, as written.
+const lookOf = (f) => {
+  const face = (f.faces || []).find((x) => x.look && x.weight === f.fox?.weight && x.style === f.fox?.style) || (f.faces || []).find((x) => x.look);
+  return { weight: face?.look.weight || f.fox?.weight || '400', caps: !!(f.fox?.caps || face?.look.caps) };
+};
 const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 function fontRow(c, f) {
   const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
@@ -523,12 +531,13 @@ function fontRow(c, f) {
     : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
     : f.holder === 'platform' ? `Since ${esc(f.name)} is licensed from Adobe by Squarespace, you have the option of substituting the replacement font we’ve suggested or keeping ${esc(f.name)} by uploading your licensed files.`
     : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
-    : 'You uploaded this font to your site, so we kept it. Keep it only if your license covers this Preserve.';
+    : 'You uploaded this font to your site, so your Preserve keeps it. When you accept, you’ll confirm you have the rights to use it here.';
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
   const actions = view.fontBusy === f.id || f.checking ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
     : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
     : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
-    : `${chip('keep', 'I have the rights')}${chip('lookalike', 'I don’t have rights to this one')}<button class="link" data-upload="${f.id}">Replace the file</button>`;
+    : f.decision === 'lookalike' ? `<button class="link" data-font="keep" data-fid="${f.id}">Use my font instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
+    : `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`;
   // "The quick brown fox" in both fonts (Jeremy, 2026-11-16): a picture of it drawn by the live site in the original
   // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
   // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
@@ -541,17 +550,21 @@ function fontRow(c, f) {
   let site, alt = null;
   if (f.fox) {
     site = `<img class="fox" src="${esc(f.fox.file)}" alt="${FOX} in ${esc(f.name)}">`;
-    if (f.look) alt = `<span class="fsample fox" style="${fam(f.look)};font-weight:${esc(f.fox.weight)};font-style:${esc(f.fox.style)}">${FOX}</span>`;
+    // As the Preserve would draw it: in the weight that looks as heavy as the original (not the same number), and in
+    // capitals when the site shows these words in capitals or the lookalike stands in for a capitals-only face.
+    const lk = lookOf(f);
+    if (f.look) alt = `<span class="fsample fox" style="${fam(f.look)};font-weight:${esc(lk.weight)};font-style:${esc(f.fox.style)}${lk.caps ? ';text-transform:uppercase' : ''}">${FOX}</span>`;
   } else {
     // A font we couldn't photograph on the live site shows its name in place of the picture.
     const words = f.text || f.name;
     site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
     if (f.look) alt = `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>`;
   }
-  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Lookalike'}</span>${alt}`;
-  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
+  // A font kept as on the site says so on its first row, so the lookalike below can't be taken for what viewers see.
+  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Lookalike, only if you choose it'}</span>${alt}`;
+  return `<div class="font ${!f.decision && !saved && f.holder !== 'user' ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <p class="fine">${state}</p>
-    <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">On your site</span>${site}
+    <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">${look ? 'On your site' : 'On your site and in your Preserve'}</span>${site}
       ${second}</div>
     <div class="row wrap">${actions}</div>
     ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
@@ -573,7 +586,7 @@ function loadLookalikes(c) {
   // The weight and style each comparison sets the lookalike in, one family per request: Google refuses a whole request
   // that names a weight one family lacks, and the plain request above stays as the fallback.
   for (const fm of fams) {
-    const faces = [...new Set(c.fonts.filter((f) => f.look === fm && f.fox).map((f) => `${f.fox.style === 'normal' ? 0 : 1},${parseInt(f.fox.weight, 10) || 400}`))].sort();
+    const faces = [...new Set(c.fonts.filter((f) => f.look === fm && f.fox).map((f) => `${f.fox.style === 'normal' ? 0 : 1},${parseInt(lookOf(f).weight, 10) || 400}`))].sort();
     if (!faces.length || faces.join() === '0,400') continue;
     document.head.insertAdjacentHTML('beforeend', `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${fm.replace(/ /g, '+')}:ital,wght@${faces.join(';')}&display=swap">`);
   }

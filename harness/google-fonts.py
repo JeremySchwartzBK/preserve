@@ -328,6 +328,51 @@ def stand_in(gfam, weight, style, f):
         if rec: return rec
     return None
 
+# The lookalike's weight is the one that looks as heavy as the original, not the one with the same number: a display
+# face often calls itself 400 and is as heavy as a black (CA Negroni, jamesyworld.com, 2026-11-16, came out in a thin
+# Sora). Each weight the family has is fetched and measured the same way (font_style.py stem: the o's thick stroke
+# over the H height), and the closest wins; a tie goes to the weight nearest the original's number. A variable file is
+# pinned to the chosen weight, since the page's @font-face asks for the original's number.
+STEMS = {}  # (family, weight, style) -> (rec, stem)
+
+def stem_at(path, w):
+    t = TTFont(path)
+    if 'fvar' in t:
+        from fontTools.varLib import instancer
+        ax = next((a for a in t['fvar'].axes if a.axisTag == 'wght'), None)
+        if not ax or not ax.minValue <= w <= ax.maxValue: return None, t
+        t = instancer.instantiateVariableFont(t, {'wght': w})
+    return style_of(t).get('stem'), t
+
+def by_look(gfam, weight, style, f, orig_path):
+    w0 = int(float(weight.split()[0]))
+    try: target = stem_at(orig_path, w0)[0] if 'fvar' in TTFont(orig_path) else style_of(TTFont(orig_path)).get('stem')
+    except Exception: target = None
+    if not target: return None
+    best = None
+    for w in POOL.get(gfam, {}).get('weights') or range(100, 1000, 100):
+        for st in dict.fromkeys([style, 'normal']):
+            k = (gfam, w, st)
+            if k not in STEMS:
+                rec = take(gfam, load(gfam, {(1 if st == 'italic' else 0, str(w))}), f, str(w), st)
+                stem, inst = stem_at(os.path.join(OUT, rec['file']), w) if rec else (None, None)
+                STEMS[k] = (rec, stem, inst)
+            rec, stem, inst = STEMS[k]
+            if rec and stem: break
+        if not (rec and stem): continue
+        d = abs(stem - target) + 0.002 * abs(w - w0) / 100
+        if not best or d < best[0]: best = (d, dict(rec), w, inst)
+    if not best: return None
+    _, rec, w, inst = best
+    if 'fvar' in TTFont(os.path.join(OUT, rec['file'])):
+        inst.flavor = 'woff2'
+        buf = __import__('io').BytesIO(); inst.save(buf); body = buf.getvalue()
+        name = hashlib.sha1(body).hexdigest()[:12] + '.woff2'
+        open(os.path.join(OUT, name), 'wb').write(body)
+        rec.update(file=name, ct='font/woff2')
+    rec.update(weight=str(w), by_look=True)
+    return rec
+
 def lookalike(u, f, path=None):
     path = os.path.join(site, 'raw', wanted[u]['file']) if u else path
     kind = kind_of(path, f['family'])
@@ -339,7 +384,7 @@ def lookalike(u, f, path=None):
     if orig:
         if f['family'] not in PICKED: PICKED[f['family']] = pick_family(kind, orig, [int(float(f['weight'].split()[0]))])
         fam = PICKED[f['family']] or fam
-    rec = stand_in(fam, f['weight'], f['style'], f) if orig else None
+    rec = (by_look(fam, f['weight'], f['style'], f, path) or stand_in(fam, f['weight'], f['style'], f)) if orig else None
     if not rec:
         w = str(min(hi, max(lo, round(float(f['weight'].split()[0]) / 100) * 100)))
         style = f['style'] if italic else 'normal'
@@ -417,7 +462,7 @@ for family, faces_ in by_family.items():
             rec = take(gname, load(gname, {(1 if style == 'italic' else 0, weight)}), f, weight, style) if open_family(gname) else None
             if rec: action = 'open-equivalent'  # an open font Adobe also serves (Bebas Neue): the same family from Google
             elif ADOBE_LOOKALIKES.get(family):
-                rec = stand_in(ADOBE_LOOKALIKES[family], weight, style, f); action = 'lookalike'
+                rec = (path and by_look(ADOBE_LOOKALIKES[family], weight, style, f, path)) or stand_in(ADOBE_LOOKALIKES[family], weight, style, f); action = 'lookalike'
                 if rec and path: fit(rec, path)
             if not rec:
                 rec = lookalike(None, f, path); action = 'lookalike'
@@ -430,7 +475,7 @@ for family, faces_ in by_family.items():
             # Never Adobe's file: the face is left out and its text shows in the next font the site's styles list.
             result['missing'].append({'url': sorted(urls)[0], 'family': family, 'weight': weight, 'style': style, 'reason': 'Adobe font licensed to Squarespace; no lookalike'})
         result['record'].append({'family': family, 'weight': weight, 'style': style, 'holder': 'platform', 'source': 'adobe-via-squarespace',
-                                 'action': action if rec else 'left-out', **({'served_as': rec['family']} if rec else {})})
+                                 'action': action if rec else 'left-out', **({'served_as': rec['family'], 'served_weight': rec['weight'], 'caps_only': bool(rec.get('caps_only'))} if rec else {})})
 
 # Everything else the page loaded: the owner's uploads (kept on the designer's word), Google Fonts the page linked
 # itself (open), and fonts from other hosts. Served as captured; recorded with what the font says about itself.
@@ -450,7 +495,7 @@ for u, e in fonts_loaded.items():
     if holder != 'anyone':
         try:
             rec = lookalike(None, {'family': fam, 'weight': str(weight).replace('normal', '400').replace('bold', '700'), 'style': style, 'range': None, 'label': 'latin', 'cmap': set()}, path)
-            if rec: alt = {'family': rec['family'], 'file': rec['file'], 'weight': rec['weight'], 'style': rec['style']}
+            if rec: alt = {'family': rec['family'], 'file': rec['file'], 'weight': rec['weight'], 'style': rec['style'], 'caps_only': bool(rec.get('caps_only'))}
         except Exception as ex: print('ALT', fam, weight, style, ex)
     result['record'].append({'family': fam, 'weight': weight, 'style': style, 'holder': holder, 'source': source, 'action': 'kept',
                              **(name_lines(path) if holder != 'anyone' else {}), **({'alt': alt} if alt else {})})

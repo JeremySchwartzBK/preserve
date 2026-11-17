@@ -290,7 +290,7 @@ for (const [fam, s] of Object.entries(capInfo.fontSamples || {})) {
     const fb = fs.readFileSync(fox);
     const fn = 'fs-' + crypto.createHash('sha1').update(fb).digest('hex').slice(0, 12) + '.png';
     fs.writeFileSync(path.join(assetDir, fn), fb);
-    Object.assign(fontReview.samples[fam], { fox: fn, weight: s.weight, style: s.style });
+    Object.assign(fontReview.samples[fam], { fox: fn, weight: s.weight, style: s.style, caps: !!s.caps });
   }
 }
 for (const r of (fs.existsSync(gf) ? JSON.parse(fs.readFileSync(gf, 'utf8')).record || [] : [])) {

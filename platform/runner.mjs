@@ -148,9 +148,13 @@ async function main() {
       const row = rows.get(id) || { id, name: fontName(r), holder: r.holder === 'platform' ? 'platform' : 'user', source: r.source, look: null, sample: null, text: null, block: null, fox: null, shown: [], faces: [], trial: false };
       row.look ||= (r.holder === 'platform' ? r.served_as : r.alt?.family) || null;
       if (r.sample && !row.sample) Object.assign(row, { sample: 'a/' + r.sample.file, text: r.sample.text, block: r.sample.block,
-        fox: r.sample.fox ? { file: 'a/' + r.sample.fox, weight: String(r.sample.weight || r.weight), style: r.sample.style || r.style || 'normal' } : null });
+        fox: r.sample.fox ? { file: 'a/' + r.sample.fox, weight: String(r.sample.weight || r.weight), style: r.sample.style || r.style || 'normal', caps: !!r.sample.caps } : null });
       row.shown = [...new Set([...row.shown, ...r.shown])];
-      row.faces.push({ family: r.family, weight: String(r.weight), style: r.style || 'normal', alt: r.alt?.file || null });
+      // look: the weight the lookalike is drawn in for this face, chosen by how heavy it looks (google-fonts.py by_look),
+      // and whether it draws capitals only, so the review shows the lookalike as the Preserve would.
+      const lw = r.holder === 'platform' ? r.served_weight : r.alt?.weight;
+      row.faces.push({ family: r.family, weight: String(r.weight), style: r.style || 'normal', alt: r.alt?.file || null,
+        ...(lw ? { look: { weight: String(lw), caps: !!(r.holder === 'platform' ? r.caps_only : r.alt?.caps_only) } } : {}) });
       if (r.trial_hint) row.trial = true;
       rows.set(id, row);
     }
