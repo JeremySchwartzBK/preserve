@@ -1289,6 +1289,22 @@ export async function capture(url, outDir) {
       const h = document.querySelector('header#header') || document.querySelector('header');
       if (h) h.setAttribute('data-pv-h0', String(Math.round(h.getBoundingClientRect().height * 100) / 100));
     }).catch(() => {});
+    // The site's own layers pinned over most of the window (a full-screen background, a frame, a closed menu panel)
+    // are part of its design, not a popup: marked so the quality check doesn't count them as a popup left on the page
+    // (check.mjs; six of seven such holds in the Nov 16 showcase re-run). Looked for with the marketing overlays
+    // hidden, and never anything with an email box or popup wording, so a signup popup is still caught.
+    (info.fixedLayers ||= {})[prof] = await page.evaluate((sels) => {
+      const st = document.createElement('style'); st.textContent = sels.join(',') + '{display:none!important}'; document.head.appendChild(st);
+      const vis = (e) => { const s = getComputedStyle(e), r = e.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.05 && r.width > 0 && r.height > 0; };
+      let n = 0;
+      for (const e of document.querySelectorAll('body *')) {
+        if (getComputedStyle(e).position !== 'fixed' || !vis(e)) continue;
+        const r = e.getBoundingClientRect(); if (r.width * r.height <= innerWidth * innerHeight * 0.3) continue;
+        if (/popup|modal|klaviyo|newsletter|signup|subscribe|cookie|promo/i.test(e.className.toString() + ' ' + e.id) || e.querySelector('input[type=email]')) continue;
+        e.setAttribute('data-pv-fixed', ''); n++;
+      }
+      st.remove(); return n;
+    }, OVERLAY_SELECTORS).catch(() => 0);
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });
