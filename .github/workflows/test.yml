@@ -44,6 +44,9 @@ jobs:
       - name: Widgets saved as real content
         working-directory: harness
         run: node test-frames.mjs
+      - name: Things that move on a timer
+        working-directory: harness
+        run: node test-ticker.mjs
       - name: Viewer and quality check serve the same rules
         working-directory: harness
         run: node test-policy.mjs
