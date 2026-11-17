@@ -414,6 +414,76 @@ if(!on){on=true;paint();d.style.opacity='1';im.style.visibility='hidden'}if(!raf
 addEventListener('resize',function(){if(on)paint()})});
 })();</script>`;
 
+// Squarespace's parallax background effect (capture.mjs mediaBackgrounds, data-pv-parallax): the section's picture
+// zooms by zoomStart..zoomEnd percent around its focal point, and drifts by "intensity" along "rotation", as the section
+// travels up the screen. Live draws it with WebGL; we move the picture itself with the same sums.
+const PARALLAX_SCRIPT = `<script id="preserve-parallax">(function(){
+var L=[].slice.call(document.querySelectorAll('img[data-pv-parallax]')).map(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-parallax'))}catch(e){}
+var fx=c.fx==null?0.5:c.fx,fy=c.fy==null?0.5:c.fy;im.style.transformOrigin=(fx*100)+'% '+(fy*100)+'%';im.style.willChange='transform';
+var box=im.parentElement;if(box)box.style.overflow='hidden';return{im:im,c:c,fx:fx,fy:fy,box:box||im}});
+if(!L.length)return;
+function upd(){var vh=innerHeight;L.forEach(function(o){var r=o.box.getBoundingClientRect();if(r.bottom<-100||r.top>vh+100)return;
+var p=Math.min(1,Math.max(0,(vh-r.top)/(vh+r.height))),c=o.c,a=(c.a||0)*0.005,z0=(c.z0||0)*0.01,z1=(c.z1||0)*0.01;
+var k=Math.max(0.05,1-a-(z0+(z1-z0)*p)),t=(c.r||0)*Math.PI/180,ox=o.fx,oy=1-o.fy;
+var dx=Math.cos(t)*((1-ox)*-a+(ox*a-(1-ox)*-a)*p),dy=Math.sin(t)*((1-oy)*-a+(oy*a-(1-oy)*-a)*p);
+o.im.style.transform='translate('+(dx/k*r.width).toFixed(2)+'px,'+(-dy/k*r.height).toFixed(2)+'px) scale('+(1/k).toFixed(4)+')'})}
+var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(function(){q=0;upd()})}},{passive:true});addEventListener('resize',upd);upd();
+})();</script>`;
+
+// Background videos hosted on Vimeo or YouTube (capture.mjs mediaBackgrounds, data-pv-bgvideo; Jeremy 2026-11-17): the
+// still from the video shows first; once the page has loaded, the provider's own background player (muted, looping, no
+// controls) goes in over it, sized to cover the section as live, and fades in only when it reports that it is playing.
+// A video taken down, or a player that can't start, leaves the still. (Addresses are split so the build's address
+// rewriting leaves them alone.) Not while our checks compare pictures (they
+// allow no outside requests), not in a sealed page (the provider's player can't start there: the still stays), and not
+// for visitors who ask for less motion.
+const BGVIDEO_SCRIPT = `<script id="preserve-bgvideo">(function(){
+if(window.__pvStill||self.origin==='null'||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))return;
+function go(){[].slice.call(document.querySelectorAll('[data-pv-bgvideo]')).forEach(function(box){var c;try{c=JSON.parse(box.getAttribute('data-pv-bgvideo'))}catch(e){return}
+if(!c||!/^[0-9A-Za-z_-]+$/.test(c.id||''))return;var ar=c.ar>0?c.ar:16/9,yt=c.p==='youtube',f=document.createElement('iframe');
+f.src=yt?'https:/'+'/www.youtube-nocookie.com/embed/'+c.id+'?autoplay=1&mute=1&loop=1&playlist='+c.id+'&controls=0&playsinline=1&rel=0&disablekb=1&iv_load_policy=3&enablejsapi=1'
+:'https:/'+'/player.vimeo.com/video/'+c.id+'?background=1&autoplay=1&loop=1&muted=1&autopause=0&dnt=1'+(c.h&&/^[0-9a-f]+$/.test(c.h)?'&h='+c.h:'');
+f.setAttribute('allow','autoplay; encrypted-media; picture-in-picture');f.setAttribute('tabindex','-1');f.setAttribute('aria-hidden','true');f.title='';
+f.setAttribute('style','position:absolute;border:0;pointer-events:none;opacity:0;transition:opacity .8s ease;max-width:none');
+box.style.overflow='hidden';if(getComputedStyle(box).position==='static')box.style.position='relative';
+function fit(){var W=box.clientWidth,H=box.clientHeight,w=W,h=W/ar;if(h<H){h=H;w=H*ar}f.style.width=w+'px';f.style.height=h+'px';f.style.left=((W-w)/2)+'px';f.style.top=((H-h)/2)+'px'}
+fit();addEventListener('resize',fit);
+function shown(){f.style.opacity='1'}
+addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}if(!d)return;
+if(yt){var s=d.info&&d.info.playerState;if(d.event==='onStateChange'?d.info===1:s===1)shown();return}
+if(d.event==='ready'){['play','playProgress','timeupdate'].forEach(function(v){f.contentWindow.postMessage(JSON.stringify({method:'addEventListener',value:v}),'*')})}
+if(d.event==='play'||d.event==='playProgress'||d.event==='timeupdate')shown()});
+if(yt)f.addEventListener('load',function(){var n=0,t=setInterval(function(){if(++n>20||f.style.opacity==='1')return clearInterval(t);f.contentWindow.postMessage(JSON.stringify({event:'listening',id:1,channel:'widget'}),'*')},500)});
+box.appendChild(f)})}
+if(document.readyState==='complete')setTimeout(go,300);else addEventListener('load',function(){setTimeout(go,300)});
+})();</script>`;
+
+// Squarespace block animations that play as the block comes into view (capture.mjs markBlockAppears, data-pv-appear):
+// the block starts from the saved start state (turn, size, move, fade) and comes to rest. "Scrolls" ones follow the
+// scroll between the two points Squarespace names (the block's entry onto the screen, or how far it has crossed it) and
+// never go back, as live; the rest play over their duration once the block reaches the trigger line. At rest while our
+// checks compare pictures and for visitors who ask for less motion.
+const APPEAR_SCRIPT = `<script id="preserve-appear">(function(){
+if(window.__pvStill||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))return;
+function num(v,i){return parseFloat(String(v||'').split(' ')[i]||String(v||'').split(' ')[0])}
+var L=[].slice.call(document.querySelectorAll('[data-pv-appear]')).map(function(el){var c={};try{c=JSON.parse(el.getAttribute('data-pv-appear'))}catch(e){}
+var cs=getComputedStyle(el),s0=cs.getPropertyValue('--pv-as').trim(),t0=cs.getPropertyValue('--pv-at').trim().split(/ +/);
+var o={el:el,c:c,p:0,done:false,r:parseFloat(cs.getPropertyValue('--pv-ar'))||0,sx:num(s0,0),sy:num(s0,1),tx:t0[0]||'0px',ty:t0[1]||t0[0]||'0px',op:parseFloat(cs.getPropertyValue('--pv-ao'))};
+if(isNaN(o.sx))o.sx=1;if(isNaN(o.sy))o.sy=o.sx;if(isNaN(o.op))o.op=1;el.style.transformOrigin=cs.getPropertyValue('--pv-aog').trim()||'50% 50%';set(o,0);return o});
+if(!L.length)return;
+function mix(a,b,p){return a+(b-a)*p}
+function len(v,p){var m=/^(-?[0-9.]+)([a-z%]*)$/.exec(v);if(!m)return '0px';return (parseFloat(m[1])*(1-p)).toFixed(3)+(m[2]||'px')}
+function set(o,p){var e=o.el.style;e.rotate=(o.r*(1-p)).toFixed(3)+'deg';e.scale=Math.max(1e-6,mix(o.sx,1,p)).toFixed(5)+' '+Math.max(1e-6,mix(o.sy,1,p)).toFixed(5);
+e.translate=len(o.tx,p)+' '+len(o.ty,p);e.opacity=String(mix(o.op,1,p))}
+function at(q,vh,h){var m=q&&q[0],v=q?q[1]:0;if(m==='cover')return v*(vh+h);if(m==='contain')return Math.min(h,vh)+v*Math.abs(vh-h);if(m==='exit')return Math.max(h,vh)+v*Math.min(h,vh);return v*Math.min(h,vh)}
+function ease(p){return 1-Math.pow(1-p,3)}
+function upd(){var vh=innerHeight;L.forEach(function(o){if(o.done)return;var el=o.el,c=o.c,b=(el.parentElement||el).getBoundingClientRect(),h=el.offsetHeight||b.height;
+var r=el.getBoundingClientRect(),top=r.top+r.height/2-h/2,gone=vh-top;
+if(c.s){var a=at(c.rs,vh,h),z=at(c.re,vh,h),p=z>a?(gone-a)/(z-a):(gone>=a?1:0);p=Math.min(1,Math.max(0,p));if(p>o.p){o.p=p;set(o,ease(p))}if(p>=1)o.done=true;return}
+var line=c.ap==='top'?0:c.ap==='bottom'?vh:vh/2;if(top<line||top+h<vh){o.done=true;var e=o.el.style;e.transition='rotate '+c.d+'s ease '+c.dl+'s,scale '+c.d+'s cubic-bezier(.34,1.3,.64,1) '+c.dl+'s,translate '+c.d+'s ease '+c.dl+'s,opacity '+c.d+'s ease '+c.dl+'s';requestAnimationFrame(function(){set(o,1)})}})}
+var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(function(){q=0;upd()})}},{passive:true});addEventListener('resize',upd);upd();
+})();</script>`;
+
 // Effects tied to the scroll position (capture.mjs scrollLinked, data-pv-scroll: the element's transform and opacity at
 // scroll positions measured from the top of its box). Ours sets the in-between look as the page scrolls: a 2D transform
 // is taken apart into move, turn and size so a half turn passes through the angles between, as live, rather than
@@ -735,6 +805,9 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
+      if ($('img[data-pv-parallax]').length) $('body').append(PARALLAX_SCRIPT);
+      if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);
+      if ($('[data-pv-appear]').length) $('body').append(APPEAR_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));

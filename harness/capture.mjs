@@ -747,6 +747,155 @@ function markBlockHovers() {
   return n;
 }
 
+// Squarespace's block animations set to play as the block comes into view (chelsey arce's posters grow from nothing as
+// you scroll to them, 2026-11-17). Settings sit in the same JSON script as the hover ones (markBlockHovers); the copy
+// drops Squarespace's code and so showed every block at rest from the start. Keep the start state on the block (CSS
+// variables) and when it plays (data-pv-appear) for our stand-in (build.mjs APPEAR_SCRIPT). "scrolls" ones follow the
+// scroll between two points of the block's way up the screen and, as live, don't go back once played.
+function markBlockAppears() {
+  let n = 0;
+  for (const t of document.querySelectorAll('script[data-block-animations]')) {
+    let j; try { j = JSON.parse(t.textContent); } catch { continue; }
+    const a = (j.animations || []).find((x) => x.trigger === 'appear' && (x.triggerElement || 'self') === 'self' && x.transforms && x.transforms[0]);
+    const el = t.closest('.fe-block') || t.closest('.sqs-block');
+    if (!a || !el || el.hasAttribute('data-pv-hover')) continue;
+    const x = a.transforms[0], v = (o, d) => (o && o.value != null ? o.value : d), u = (o, d) => (o && o.unit) || d;
+    const sx = v(x.scale && x.scale.x, 100) / 100, sy = v(x.scale && x.scale.y, 100) / 100, r = v(x.rotation && x.rotation.z, 0);
+    const tx = `${v(x.offset && x.offset.x, 0)}${u(x.offset && x.offset.x, 'px')}`, ty = `${v(x.offset && x.offset.y, 0)}${u(x.offset && x.offset.y, 'px')}`;
+    const op = v(x.opacity, 100) / 100;
+    if (sx === 1 && sy === 1 && !r && /^0[a-z%]*$/.test(tx) && /^0[a-z%]*$/.test(ty) && op === 1) continue;  // starts at rest: nothing to play
+    el.style.setProperty('--pv-ar', `${r}deg`);
+    el.style.setProperty('--pv-as', `${Math.max(sx, 0.000001)} ${Math.max(sy, 0.000001)}`);
+    el.style.setProperty('--pv-at', `${tx} ${ty}`);
+    el.style.setProperty('--pv-ao', String(op));
+    const o = j.transforms && j.transforms.origin;
+    if (o) el.style.setProperty('--pv-aog', `${v(o.x, 50)}${u(o.x, '%')} ${v(o.y, 50)}${u(o.y, '%')}`);
+    const rng = (q, m, d) => [(q && q.mode) || m, v(q && q.value, d) / 100];
+    el.setAttribute('data-pv-appear', JSON.stringify({
+      s: a.action === 'scrolls' ? 1 : 0, rs: rng(a.rangeStart, 'entry', 0), re: rng(a.rangeEnd, 'cover', 50),
+      ap: a.appearPoint || 'middle', d: Math.max(0.05, Math.min(4, v(a.duration, 1))), dl: Math.max(0, Math.min(4, v(a.delay, 0))), e: a.ease || 'ease',
+    }));
+    n++;
+  }
+  return n;
+}
+
+// Section backgrounds Squarespace draws with a script, which the copy drops (chelsey arce, 2026-11-17):
+// - Background images with an effect (parallax, film grain, liquid...) live as a hidden picture under a WebGL drawing.
+//   The drawing only paints near the screen, so photographing it (canvasStills) left most such sections black. For
+//   parallax (a zoom and drift with the scroll) we keep the picture itself and our stand-in redoes the movement from the
+//   section's own settings (build.mjs PARALLAX_SCRIPT). Other effects keep their photo when it took (afterCanvasStills).
+// - Background videos hosted on Vimeo or YouTube (Squarespace's own are clipped to MP4 by video.mjs). Jeremy
+//   (2026-11-17): play them through the provider's own player, over a still from the video that stays if the video is
+//   ever taken down. Here we put the still in (so it is saved like any picture) and note the video for
+//   build.mjs BGVIDEO_SCRIPT. Their player is never saved.
+export function bgVideoId(u) {
+  let m;
+  if ((m = /vimeo\.com\/(?:video\/)?(\d+)(?:\/([0-9a-f]{6,}))?/i.exec(u))) {
+    const h = m[2] || (/[?&]h=([0-9a-f]+)/i.exec(u) || [])[1];
+    return { p: 'vimeo', id: m[1], ...(h ? { h } : {}) };
+  }
+  if ((m = /(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i.exec(u))) return { p: 'youtube', id: m[1] };
+  return null;
+}
+// A frame of the playing video, drawn from inside the provider's player: the still owners pick on Vimeo is often the
+// black first frame (chelsey arce's reel). Watch a few seconds and keep the brightest, busiest frame.
+async function grabVideoFrame(page, v) {
+  const fr = page.frames().find((f) => f.url().includes(v.id) && (v.p === 'vimeo' ? /player\.vimeo\.com\/video\//.test(f.url()) : /youtube(-nocookie)?\.com\/embed\//.test(f.url())));
+  if (!fr) return null;
+  return fr.evaluate(async () => {
+    const vid = document.querySelector('video'); if (!vid) return null;
+    vid.muted = true; try { await vid.play(); } catch {}
+    const c = document.createElement('canvas'); let best = null, bestS = -1;
+    for (let k = 0; k < 8; k++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!vid.videoWidth || vid.readyState < 2) continue;
+      const w = Math.min(1920, vid.videoWidth), h = Math.round(w * vid.videoHeight / vid.videoWidth);
+      c.width = w; c.height = h; const x = c.getContext('2d'); x.drawImage(vid, 0, 0, w, h);
+      let d; try { d = x.getImageData(0, 0, w, h).data; } catch { return null; }  // a video from another site can't be read
+      let s = 0, s2 = 0, n = 0; for (let i = 0; i < d.length; i += 4 * 97) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; s += l; s2 += l * l; n++; }
+      const mean = s / n, sd = Math.sqrt(Math.max(0, s2 / n - mean * mean)), score = mean + sd;
+      if (score > bestS) { bestS = score; best = c.toDataURL('image/jpeg', 0.85); }
+      if (mean > 40 && sd > 30) break;
+    }
+    return best && bestS > 12 ? best : null;
+  }).catch(() => null);
+}
+async function mediaBackgrounds(page, request, outDir, manifest) {
+  const found = { parallax: 0, videos: [] };
+  found.parallax = await page.evaluate(() => {
+    let n = 0;
+    for (const c of document.querySelectorAll('[data-controller="BackgroundImageFXParallax"]')) {
+      const im = c.querySelector('img.background-image-fx'); if (!im) continue;
+      let fx = {};
+      try { fx = JSON.parse(c.closest('[data-current-context]').getAttribute('data-current-context')).backgroundMediaEffect || {}; } catch {}
+      const f = (im.getAttribute('data-image-focal-point') || '0.5,0.5').split(',').map(Number);
+      im.setAttribute('data-pv-parallax', JSON.stringify({ a: +fx.intensity || 0, r: +fx.rotation || 0, z0: +fx.zoomStart || 0, z1: +fx.zoomEnd || 0, fx: Number.isFinite(f[0]) ? f[0] : 0.5, fy: Number.isFinite(f[1]) ? f[1] : 0.5 }));
+      c.querySelectorAll('canvas').forEach((cv) => (cv.closest('.background-fx-canvas') || cv).remove());
+      im.style.visibility = 'visible';
+      n++;
+    }
+    return n;
+  }).catch(() => 0);
+  const vids = await page.evaluate(() => [...document.querySelectorAll('.sqs-video-background[data-config-url]:not([data-config-video])')].map((e, i) => { e.setAttribute('data-preserve-bgv', String(i)); return e.getAttribute('data-config-url'); })).catch(() => []);
+  for (let i = 0; i < vids.length; i++) {
+    const v = bgVideoId(vids[i] || '');
+    if (!v) continue;
+    let poster = null, ar = 16 / 9;  // the provider's still, if we can't take our own
+    try {
+      if (v.p === 'vimeo') {
+        const r = await request.get(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(`https://vimeo.com/${v.id}${v.h ? `/${v.h}` : ''}`)}&width=1920`, { timeout: 20000 });
+        if (r.ok()) { const j = await r.json(); poster = j.thumbnail_url || null; if (j.width && j.height) ar = j.width / j.height; }
+      } else {
+        for (const n of ['maxresdefault', 'sddefault', 'hqdefault']) {
+          const u = `https://i.ytimg.com/vi/${v.id}/${n}.jpg`;
+          const r = await request.get(u, { timeout: 20000 });
+          // A missing size comes back as a small grey picture with a 404.
+          if (r.ok()) { poster = u; break; }
+        }
+      }
+    } catch {}
+    // Our own frame of the video, saved as the picture the page asks for (the export finds it like any other).
+    const frame = await grabVideoFrame(page, v);
+    if (frame) {
+      const u = `https://preserve.invalid/video-still/${v.p}-${v.id}.jpg`, body = Buffer.from(frame.split(',')[1], 'base64'), file = hash(u);
+      fs.writeFileSync(path.join(outDir, 'raw', file), body);
+      manifest[u] = { status: 200, ct: 'image/jpeg', file, size: body.length, type: 'image' };
+      poster = u;
+    }
+    const ok = await page.evaluate(async ([i, v, poster, ar, own]) => {
+      const box = document.querySelector(`[data-preserve-bgv="${i}"]`); if (!box) return false;
+      box.removeAttribute('data-preserve-bgv');
+      box.setAttribute('data-pv-bgvideo', JSON.stringify({ ...v, ar: Math.round(ar * 1000) / 1000 }));
+      box.querySelectorAll('iframe, #player > *').forEach((e) => e.remove());
+      if (!poster) return true;
+      const im = document.createElement('img');
+      im.alt = ''; im.className = 'pv-bgvideo-poster'; im.setAttribute('aria-hidden', 'true');
+      im.setAttribute('style', 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none');
+      box.prepend(im);
+      if (own) { im.src = poster; return true; }  // saved already; nothing to load from there
+      await new Promise((res) => { im.onload = im.onerror = res; im.src = poster; setTimeout(res, 15000); });
+      return im.naturalWidth > 0;
+    }, [i, v, poster, ar, !!frame]).catch(() => false);
+    found.videos.push({ ...v, poster: !!poster && ok, frame: !!frame });
+  }
+  await page.evaluate(() => document.querySelectorAll('[data-preserve-bgv]').forEach((e) => e.removeAttribute('data-preserve-bgv'))).catch(() => {});
+  return found;
+}
+// Other background effects whose drawing couldn't be photographed (off screen, or blank): show their picture instead of
+// an empty section.
+function afterCanvasStills() {
+  let n = 0;
+  for (const c of document.querySelectorAll('[data-controller^="BackgroundImageFX"]')) {
+    const im = c.querySelector('img.background-image-fx'), cv = c.querySelector('canvas');
+    if (!im || !cv || cv.hasAttribute('data-preserve-canvas')) continue;
+    (cv.closest('.background-fx-canvas') || cv).remove();
+    im.style.visibility = 'visible';
+    n++;
+  }
+  return n;
+}
+
 // Widgets built as web components (e.g. a third-party search box) draw inside a shadow root, which a DOM snapshot can't
 // keep, so the copy would show nothing there. Photograph each visible one now, as the visitor sees it, and mark the
 // element so the export puts the picture in its place (same size; clicking it shows the replica note).
@@ -772,12 +921,19 @@ async function shadowStills(page, outDir, prof, info) {
     const el = await page.$(`[data-preserve-still="${i}"]`);
     if (!el) continue;
     await el.scrollIntoViewIfNeeded().catch(() => {}); await sleep(600);
-    // Fixed headers and badges that don't contain the widget would otherwise land in the photo.
-    await page.evaluate((i) => { const w = document.querySelector(`[data-preserve-still="${i}"]`); for (const e of document.querySelectorAll('body *')) if (getComputedStyle(e).position === 'fixed' && !e.contains(w)) { e.dataset.preserveHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }, i);
+    // Fixed headers and badges that don't contain the widget would otherwise land in the photo, and so would marketing
+    // pop-ups (the copy drops them). Faded out rather than made invisible: a pop-up's inner box that sets its own
+    // visibility showed through and landed in a refinement's photo (chelsey arce's newsletter pop-up, 2026-11-17).
+    await page.evaluate(([i, sel]) => {
+      const w = document.querySelector(`[data-preserve-still="${i}"]`);
+      const hide = (e) => { if (e.hasAttribute('data-preserve-hid') || e.contains(w)) return; e.setAttribute('data-preserve-hid', e.style.getPropertyValue('opacity') + '|' + e.style.getPropertyPriority('opacity')); e.style.setProperty('opacity', '0', 'important'); };
+      for (const e of document.querySelectorAll(sel)) hide(e);
+      for (const e of document.querySelectorAll('body *')) if (getComputedStyle(e).position === 'fixed') hide(e);
+    }, [i, OVERLAY_SELECTORS.join(',')]);
     const box = await el.boundingBox();
     const file = `${prof}-${i}.png`;
     const ok = box && await el.screenshot({ path: path.join(outDir, 'stills', file), timeout: 15000 }).then(() => true, () => false);
-    await page.evaluate(() => { for (const e of document.querySelectorAll('[data-preserve-hid]')) { e.style.visibility = e.dataset.preserveHid === '-' ? '' : e.dataset.preserveHid; delete e.dataset.preserveHid; } });
+    await page.evaluate(() => { for (const e of document.querySelectorAll('[data-preserve-hid]')) { const [v, pr] = e.getAttribute('data-preserve-hid').split('|'); if (v) e.style.setProperty('opacity', v, pr); else e.style.removeProperty('opacity'); e.removeAttribute('data-preserve-hid'); } });
     await el.evaluate((e, f) => { if (f) e.setAttribute('data-preserve-still', f); else e.removeAttribute('data-preserve-still'); }, ok ? file : null);
     if (ok) info.shadowStills[file] = { tag: await el.evaluate((e) => e.tagName.toLowerCase()), w: Math.round(box.width), h: Math.round(box.height) };
   }
@@ -1014,11 +1170,14 @@ export async function capture(url, outDir) {
     (info.scrollLinked ||= {})[prof] = await scrollLinked(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     if (prof === 'desktop') (info.pointers ||= {})[prof] = await pointerFollowers(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await shadowStills(page, outDir, prof, info);
+    (info.mediaBackgrounds ||= {})[prof] = await mediaBackgrounds(page, ctx.request, outDir, manifest).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await canvasStills(page, outDir, prof, info);
+    (info.fxPictures ||= {})[prof] = await page.evaluate(afterCanvasStills).catch(() => 0);
     // Widgets from other sites in frames, saved as real content with each of their views (frames.mjs).
     await saveFrames(page, outDir, prof, info, manifest, ctx.request).catch((e) => info.errors.push(`${prof}: frames: ${String(e.message).split('\n')[0]}`));
     info.promos = (info.promos || 0) + await page.evaluate(markPromos).catch(() => 0);
     (info.blockHovers ||= {})[prof] = await page.evaluate(markBlockHovers).catch(() => 0);
+    (info.blockAppears ||= {})[prof] = await page.evaluate(markBlockAppears).catch(() => 0);
     // Squarespace pads the first section (and the menu overlay) by the header's height, in pixels, for the width it
     // saw. The copy redoes that sum at other widths (build.mjs HEADER_PAD_SCRIPT), so it needs the header's height that
     // the padding was worked out from: measured here as Squarespace saw it, announcement bar included.

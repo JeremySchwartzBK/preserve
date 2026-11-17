@@ -28,7 +28,7 @@ const AI_BOTS = ['GPTBot', 'ChatGPT-User', 'CCBot', 'ClaudeBot', 'anthropic-ai',
 
 // Every Preserve page is served with these rules: no network, and sealed off from other Preserves (custom code stage
 // one). Same text as harness/policy.mjs, which the quality check serves copies with (harness/test-policy.mjs checks).
-const PRESERVE_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self'; connect-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
+const PRESERVE_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self' https://player.vimeo.com https://www.youtube-nocookie.com; connect-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
 
 const url = (req) => new URL(req.url);
 
@@ -165,7 +165,9 @@ async function serveCopy(req, env, ctx, id, rest) {
   // Pages made before stage one (no preserve-steady script) point at SVG icon files, which a sealed page can't use:
   // they keep the no-network rules without the seal, so they look exactly as they did when accepted.
   const text = asset ? null : await obj.text();
-  if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
+  // Sealed (sandboxed) when it runs the owner's kept code, except where a background video plays through Vimeo's or
+  // YouTube's player, which can't start in a sealed page (Jeremy 2026-11-17). The rest of the policy still applies.
+  if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') && !text.includes('data-pv-bgvideo=') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
   else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);

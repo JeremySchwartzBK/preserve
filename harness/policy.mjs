@@ -14,7 +14,10 @@ export const PRESERVE_CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
   "media-src 'self' blob:",
-  "frame-src 'self'",
+  // Section background videos on Vimeo/YouTube play through the provider's own player (Jeremy 2026-11-17; build.mjs
+  // BGVIDEO_SCRIPT). The viewer serves pages with such a video unsealed (the player can't start in a sealed page); the
+  // quality check never starts the player (it runs with __pvStill), so its pages keep the seal.
+  "frame-src 'self' https://player.vimeo.com https://www.youtube-nocookie.com",
   "connect-src 'none'",
   "worker-src 'none'",
   "object-src 'none'",
