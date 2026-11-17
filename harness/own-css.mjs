@@ -336,19 +336,38 @@ async function layoutCss(base, stage, layout, report) {
     // counts too: not crispy enough's bobbing "Take the quiz" sign lost its keyframes, 2026-11-13.)
     const used = [...new Set([...css.matchAll(/animation(?:-name)?:([^;}]*)/g)].flatMap((m) => m[1].replace(/!\s*important/g, ' ').split(/[\s,]+/)).filter((x) => /^[a-zA-Z_][\w-]*$/.test(x)))];
     const kf = await page.evaluate((u) => window.__oc.keyframes(u), used);
+    // Keyframes that use var() take their values from the element playing them (a logo or project strip moves by its
+    // own --animation-distance), which our classes don't carry: chelsey arce's project strip stood still, 2026-11-17.
+    // They're kept as written, and each element playing one gets those custom properties with its own values.
+    const varKf = Object.keys(kf).filter((n) => /var\(/.test(kf[n]));
+    if (varKf.length) {
+      const want = Object.fromEntries(varKf.map((n) => [n, [...new Set([...kf[n].matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]))]]));
+      const vals = await page.evaluate((want) => {
+        const out = {};
+        for (const e of document.querySelectorAll('[data-pz]')) {
+          const cs = getComputedStyle(e), d = {};
+          for (const n of cs.animationName.split(',').map((x) => x.trim())) for (const p of want[n] || []) { const v = cs.getPropertyValue(p).trim(); if (v) d[p] = v; }
+          if (Object.keys(d).length) out[e.getAttribute('data-pz')] = d;
+        }
+        return out;
+      }, want);
+      for (const [i, d] of Object.entries(vals)) { unique.add(+i); css += `.u${i}{${Object.entries(d).map(([k, v]) => `${k}:${v}`).join(';')}}\n`; }
+    }
     let kfCss = '', kn = 0;
     const nextName = () => 'k' + (kn++).toString(36);
     let names;
     if (OWN_FORMS) {
       // Written from measurements (own-forms.mjs); one we can't write keeps the original, renamed.
-      const m = await ownMotions(page, kf, nextName);
+      const m = await ownMotions(page, Object.fromEntries(Object.entries(kf).filter(([n]) => !varKf.includes(n))), nextName);
       kfCss = m.css; names = m.rename; report.motions = m.report;
+      for (const n of varKf) { names[n] = nextName(); kfCss += kf[n].replace(/^@(-webkit-)?keyframes\s+\S+/, `@keyframes ${names[n]}`) + '\n'; m.report.kept.push(`${n}: uses var()`); }
     } else {
       names = {};
       for (const [name, text] of Object.entries(kf)) { names[name] = nextName(); kfCss += text.replace(/^@(-webkit-)?keyframes\s+\S+/, `@keyframes ${names[name]}`) + '\n'; }
     }
     for (const [name, nn] of Object.entries(names)) {
-      css = css.replace(new RegExp(`(animation(?:-name)?:[^;}]*?)(^|[\\s,:])${name.replace(/[-]/g, '\\-')}(?=[\\s,;}!]|$)`, 'g'), `$1$2${nn}`);
+      // The name can come first, right after the colon ("animation:logos-scrolling 36s"): that one was missed until 2026-11-17.
+      css = css.replace(new RegExp(`(animation(?:-name)?:(?:[^;}]*?[\\s,])?)${name.replace(/[-]/g, '\\-')}(?=[\\s,;}!]|$)`, 'g'), `$1${nn}`);
     }
     // Fonts the exported page couldn't load either (a file the capture never got) are left out: same look, no address.
     const loadable = (f) => [...f.matchAll(/url\(\s*["']?([^"')]+)/g)].some((m) => m[1].startsWith('data:') || (m[1].startsWith(base + '/') && fs.existsSync(path.join(stage, decodeURIComponent(m[1].slice(base.length + 1).split(/[?#]/)[0])))));
