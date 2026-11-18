@@ -274,7 +274,16 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
         const liveM = info.liveSelfDiff[prof]?.motion || {};
         const copyM = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
         info.motion = { ...(info.motion || {}), [prof]: { live: Object.values(liveM).filter((m) => m?.moving).length, copy: Object.values(copyM).filter((m) => m?.moving).length } };
-        const frozen = Object.entries(liveM).filter(([k, m]) => m?.moving && copyM[k] && !copyM[k].moving).map(([, m]) => m.at);
+        let frozen = Object.entries(liveM).filter(([k, m]) => m?.moving && copyM[k] && !copyM[k].moving);
+        // Confirm before holding: a second look at both pages. Small changes that come and go (a block caught mid
+        // entrance, a blinking caret, a picture still loading) made this flaky: in the Nov 16 showcase re-run the same
+        // seven sites flagged different blocks, or none, when looked at again (2026-11-18).
+        if (frozen.length) {
+          const live2 = await withBrowser((b) => probeMotion(b, url, prof));
+          const copy2 = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+          frozen = frozen.filter(([k]) => live2[k]?.moving && copy2[k] && !copy2[k].moving);
+        }
+        frozen = frozen.map(([, m]) => m.at);
         if (frozen.length) { layoutSpots['widget-frozen'] = frozen.slice(0, 3); fail('widget-frozen', L(`${frozen.length} part(s) move by themselves on the live page but stay still: ${frozen.map((f) => f.blockId).slice(0, 3).join(', ')}`), 5); }
       }
       // What the live page does when hovered, dragged or scrolled, the copy must do too (behavior.mjs).
