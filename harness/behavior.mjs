@@ -156,9 +156,6 @@ export async function probeBehavior(browser, url, profileName, { isCopy = false 
       const seen = new Set(), list = [];
       for (const e of document.querySelectorAll('body *')) {
         const r = e.getBoundingClientRect(); if (r.width < 200 || r.height < 80) continue;
-        // A wrapper around the whole page is no strip, even when off-screen drawers make it wider than the window (store
-        // themes): dragging the page only changes hover states and sticky bars.
-        if (r.height > innerHeight * 2) continue;
         const s = getComputedStyle(e);
         const scrolls = e.scrollWidth > e.clientWidth + 40 && /hidden|auto|scroll|clip/.test(s.overflowX);
         if (!scrolls && !re.test(e.className?.toString() || '')) continue;
