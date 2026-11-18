@@ -217,10 +217,11 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
 // Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
 // a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
-// Fonts the owner added to their site are kept with no question: the one confirmation at Accept covers them (Jeremy,
-// 2026-11-17). Adobe fonts from Squarespace's menu still ask.
-const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && f.holder !== 'user');
-const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? f.decision !== 'lookalike' : f.decision === 'upload' || (!!f.covered && !f.decision));
+// Every font that needs a license asks in the Fonts step (Jeremy, 2026-11-18): a font the owner added to their site
+// is confirmed there ("I have the rights to use it here") or swapped for its lookalike. Until then it stays as on the
+// site, and the confirmation at Accept covers whatever is still unanswered or uploaded.
+const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered);
+const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? !f.decision || f.decision === 'upload' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
@@ -563,13 +564,14 @@ function fontRow(c, f) {
     : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
     : f.holder === 'platform' ? `Since ${esc(f.name)} is licensed from Adobe by Squarespace, you have the option of substituting the replacement font we’ve suggested or keeping ${esc(f.name)} by uploading your licensed files.`
     : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
-    : 'You uploaded this font to your site, so your Preserve keeps it. When you accept, you’ll confirm you have the rights to use it here.';
+    : f.decision === 'keep' ? 'You confirmed you have the rights to use this font here, so your Preserve keeps it.'
+    : `You uploaded this font to your site. Confirm you have the rights to use it in this Preserve, or use the lookalike, ${lookName}.`;
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
   const actions = view.fontBusy === f.id || f.checking ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
     : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
     : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
-    : f.decision === 'lookalike' ? `<button class="link" data-font="keep" data-fid="${f.id}">Use my font instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
-    : `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`;
+    // Uploading a licensed copy (a license for a different file than the site's) is rare, so it's a small link.
+    : `${chip('keep', 'I have the rights to use it here')}${chip('lookalike', 'Use the lookalike')}<button class="link" data-upload="${f.id}">Upload a licensed copy instead</button>`;
   // "The quick brown fox" in both fonts (Jeremy, 2026-11-16): a picture of it drawn by the live site in the original
   // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
   // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
@@ -594,7 +596,7 @@ function fontRow(c, f) {
   }
   // A font kept as on the site says so on its first row, so the lookalike below can't be taken for what viewers see.
   const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Lookalike, only if you choose it'}</span>${alt}`;
-  return `<div class="font ${!f.decision && !saved && f.holder !== 'user' ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
+  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <p class="fine">${state}</p>
     <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">${look ? 'On your site' : 'On your site and in your Preserve'}</span>${site}
       ${second}</div>
