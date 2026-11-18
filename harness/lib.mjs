@@ -75,6 +75,7 @@ export const OVERLAY_SELECTORS = [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
     '[class*="omnisend-form"]', '[id*="omnisend"]', '.needsclick.kl-private-reset-css-Xuajs1', '[class*="klaviyo-form"]', '[id^="privy"]', '[class*="privy-"]', '[id^="attentive_overlay"]', '#attentive_creative', '[id^="justuno"]', '[class*="ju_"]',
     '#shopify-pc__banner', '.shopify-pc__banner__dialog', '#shopify-chat', 'inbox-online-store-chat', '#gorgias-chat-container', '#tidio-chat', '[id*="smile-ui"]', '#locale-popup', '[class*="geolocation"]', 'localization-popup',
+    'iframe[src*="referralcorner"]', 'iframe[src*="smile.io"]', '#smile-ui-lite-container', 'iframe[src*="rivo"]', '[id*="gw-"][class*="floating"]', '.cc-popup', '[class*="age_modal"]', '[class*="age-verif"]', '[id*="age-verif"]', '[class*="wheelio"]', '[class*="scratch"][class*="popup"]', '[id*="popup"][role="dialog"]',
   ] : []),
 ];
 

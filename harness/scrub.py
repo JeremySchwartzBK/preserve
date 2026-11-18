@@ -7,7 +7,8 @@
 import sys, os, re, glob
 site = sys.argv[1]
 orig_url = sys.argv[2] if len(sys.argv) > 2 else ''
-SQ = re.compile(r'squarespace|sqspcdn|typekit|/frozen-opt/', re.I)
+SHOP = os.environ.get('PRESERVE_PLATFORM') == 'shopify'  # prototype Shopify adapter
+SQ = re.compile(r'squarespace|sqspcdn|typekit|/frozen-opt/' + (r'|cdn\.shopify\.com|myshopify\.com|shopifycloud' if SHOP else ''), re.I)
 FACE = re.compile(r'@font-face\s*\{[^}]*\}', re.I)
 URL = re.compile(r'url\(\s*([\'"]?)([^\'")]*)\1\s*\)', re.I)
 bad = lambda u: bool(SQ.search(u)) or u.startswith('http') or u.startswith('//')
@@ -55,6 +56,9 @@ for f in htmls:
     # Attributes still naming Squarespace (data-block-css, data-src, links to squarespace.com...): links go nowhere, the rest go.
     h = re.sub(r'\s(href)="[^"]*(?:squarespace|sqspcdn)[^"]*"', r' \1="#"', h, flags=re.I)
     h = re.sub(r'\s(?!class=|id=|href=)([\w:-]+)="[^"]*(?:squarespace\.com|squarespace-cdn|sqspcdn|/frozen-opt/)[^"]*"', '', h, flags=re.I)
+    if SHOP:
+        h = re.sub(r'\s(href)="[^"]*(?:myshopify\.com|cdn\.shopify\.com|shopifycloud)[^"]*"', r' \1="#"', h, flags=re.I)
+        h = re.sub(r'\s(?!class=|id=|href=)([\w:-]+)="[^"]*(?:myshopify\.com|cdn\.shopify\.com|shopifycloud)[^"]*"', '', h, flags=re.I)
     after += len(SQ.findall(h))
     open(f, 'w', encoding='utf8').write(h)
 print('squarespace/typekit mentions', before, '->', after)
