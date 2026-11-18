@@ -1306,6 +1306,11 @@ export async function capture(url, outDir) {
       }
       st.remove(); return n;
     }, OVERLAY_SELECTORS).catch(() => 0);
+    // Every recorded gallery back on its first slide, as recorded, just before the page is saved. Putting it back once
+    // after the swipe test is not enough: a carousel still gliding after the drag (Flickity) keeps writing its own
+    // position on the next frames, so Ela House's blog carousel was saved scrolled to its last slide (-3600 px) with
+    // the first one still marked as shown.
+    await page.evaluate(() => { for (const h of Object.values(window.__pvHome || {})) { try { h(); } catch {} } }).catch(() => {});
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });
