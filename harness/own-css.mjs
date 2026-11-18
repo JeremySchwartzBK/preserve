@@ -391,6 +391,8 @@ async function layoutCss(base, stage, layout, report) {
     $('link[rel~=stylesheet], link[rel=preload][as=style]').each((_, el) => { const h = $(el).attr('href'); if (h && fs.existsSync(path.join(stage, h))) report.origCssBytes += fs.statSync(path.join(stage, h)).size; });
     $('style').each((_, el) => { report.origCssBytes += Buffer.byteLength($(el).html() || ''); });
     $('link[rel~=stylesheet], link[rel=preload][as=style], style').remove();
+    // Hints to fetch stylesheets later (rel=prefetch as=style, how Shopify themes queue their section styles): ours replaces them.
+    $('link[rel~=prefetch][as=style]').remove();
     $('noscript').filter((_, el) => /stylesheet/.test($(el).html() || '')).remove();
     list.forEach((el, i) => {
       const e = $(el);
@@ -537,7 +539,8 @@ export async function ownCss(stage) {
   let removed = 0;
   // Stylesheets and fonts nothing uses any more (Squarespace's, copied at export; its icon font, now redrawn). Lookalikes
   // for the review's Fonts step (alt-...) stay: the viewer swaps them in when chosen.
-  for (const f of fs.readdirSync(path.join(stage, 'a'))) if (/\.(css|woff2?|ttf|otf)$/.test(f) && !f.startsWith('alt-') && !html.includes(f)) { fs.rmSync(path.join(stage, 'a', f)); removed++; }
+  const DEAD = process.env.PRESERVE_PLATFORM === 'shopify' ? /\.(css|woff2?|ttf|otf|js|mjs)$/ : /\.(css|woff2?|ttf|otf)$/; // Shopify prototype: the theme's scripts too
+  for (const f of fs.readdirSync(path.join(stage, 'a'))) if (DEAD.test(f) && !f.startsWith('alt-') && !html.includes(f)) { fs.rmSync(path.join(stage, 'a', f)); removed++; }
   report.removedFiles = removed;
   return report;
 }

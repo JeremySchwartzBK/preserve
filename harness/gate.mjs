@@ -178,6 +178,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     if (!/\.(html|css|js|svg)$/.test(f)) continue;
     const t = fs.readFileSync(path.join(copyDir, f), 'utf8');
     for (const m of t.matchAll(/[\w.-]*(squarespace(-cdn)?\.com|sqspcdn\.com|typekit\.net|googleapis\.com|gstatic\.com)/gi)) left.push(`${f}: ${m[0]}`);
+    if (process.env.PRESERVE_PLATFORM === 'shopify') for (const m of t.matchAll(/[\w.-]*(cdn\.shopify\.com|myshopify\.com|shopifycloud|shopifycdn\.net)/gi)) left.push(`${f}: ${m[0]}`);
   }
   // Our own capture machine's addresses must never reach a copy (they point at nothing for visitors).
   const ours = [];
