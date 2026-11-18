@@ -276,6 +276,20 @@ async function layoutCss(base, stage, layout, report) {
       report.states[`gallery-${gi}`] = { steps: runs.length, rules, orphans };
     }
 
+    // Clicks and hovers plugins drive (build.mjs ACT_SCRIPT replays the class names and attributes the plugin changed):
+    // each state shown once and its look written as rules keyed on what the plugin changed, as for the phone menu.
+    const nActs = await page.evaluate(() => (window.__pvAct ? window.__pvActN : 0));
+    if (nActs) {
+      let rules = 0, orphans = 0, shown = 0;
+      for (let i = 0; i < nActs; i++) {
+        await startObs(); await page.evaluate((i) => window.__pvAct(i, 1), i); await sleep(60);
+        const ch = await endObs();
+        if (Object.keys(ch).length) { addState(`act-${i}`, diffAll(rest, await capture()), ch); rules += report.states[`act-${i}`].rules; orphans += report.states[`act-${i}`].orphans; delete report.states[`act-${i}`]; shown++; }
+        await page.evaluate((i) => window.__pvAct(i, 0), i); await revert(ch);
+      }
+      report.states.acts = { states: nActs, shown, rules, orphans };
+    }
+
     // Hover: each element a :hover rule can apply to, hovered in turn (it and its ancestors match :hover).
     const targets = await page.evaluate(() => window.__oc.hoverTargets(400));
     const cdp = await ctx.newCDPSession(page); await cdp.send('DOM.enable'); await cdp.send('CSS.enable');

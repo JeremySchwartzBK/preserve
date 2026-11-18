@@ -34,7 +34,7 @@ const DROP_INLINE = [/gtag\(|dataLayer|fbq\(|_gaq|ga\(\s*['"]create|hotjar|_hjSe
 const REPLICA_SCRIPT = `<script id="preserve-replica">(function(){
 var t,LINK='You\\u2019re viewing a snapshot of how this page looks and feels. Links to other pages have been disabled.',FORM='You\\u2019re viewing a snapshot of how this page looks and feels. Forms and checkout have been disabled.';function toast(msg){if(!t){t=document.createElement('div');t.setAttribute('role','status');t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:all .25s;z-index:2147483647;background:#111;color:#fff;font:500 14px/1.4 system-ui,sans-serif;padding:12px 18px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none;max-width:90vw;text-align:center';document.body.appendChild(t)}t.textContent=msg||FORM;var bg=document.elementFromPoint(innerWidth/2,innerHeight-40),c='';for(;bg&&bg.nodeType===1;bg=bg.parentElement){c=getComputedStyle(bg).backgroundColor;if(c&&!/rgba\\(.*,\\s*0\\)|transparent/.test(c))break;c=''}var m=(c||'rgb(255,255,255)').match(/\\d+/g)||[255,255,255],dark=(+m[0]*299+ +m[1]*587+ +m[2]*114)/1000<128;t.style.background=dark?'#fff':'#111';t.style.color=dark?'#111':'#fff';requestAnimationFrame(function(){t.style.opacity=1;t.style.transform='translateX(-50%)'});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity=0;t.style.transform='translateX(-50%) translateY(20px)'},2600)}
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href],button[type=submit],input[type=submit],form button,[class*="klaviyo-form"] button,button[class*="form-button"],.sqs-add-to-cart-button,[data-add-to-cart],.sqs-block-button-element');if(!a)return;
-if(a.matches('[data-folder-id],[data-folder],.header-nav-folder-title,[data-action],[aria-controls]'))return;
+if(a.matches('[data-folder-id],[data-folder],.header-nav-folder-title,[data-action],[aria-controls]')||a.closest('[data-pv-actc]'))return;
 if(a.tagName==='A'){if(a.hasAttribute('data-pv-internal'))return;var h=a.getAttribute('href')||'';if(h===''||h[0]==='#'||/^javascript:/i.test(h))return;var u=new URL(h,location.href);if(u.origin===location.origin&&u.pathname===location.pathname&&u.hash)return}
 e.preventDefault();e.stopImmediatePropagation();toast(a.tagName==='A'?LINK:FORM)},true);
 document.addEventListener('submit',function(e){e.preventDefault();e.stopImmediatePropagation();toast(FORM)},true);
@@ -526,6 +526,36 @@ if(c.hp&&hov){e.addEventListener('mouseenter',function(){an.pause()});e.addEvent
 });
 })();</script>`;
 
+// Clicks and hovers that plugins drive (capture.mjs via interact.mjs: script#preserve-acts-data, elements numbered
+// data-pv-at, ones a plugin added kept hidden by an inline display:none, their own display in data-pv-hide). Each state is the plugin's own changes (class names,
+// attributes, inline style properties, added elements shown), made on the same gesture and undone the way live undid
+// them: the pointer leaving the trigger and what it opened, a second click, Escape, or a click elsewhere. Hover states
+// only where there is a pointer. window.__pvAct(i, on) shows a state (our own stylesheet records each one).
+const ACT_SCRIPT = `<script id="preserve-acts">(function(){
+var D;try{D=JSON.parse(document.getElementById('preserve-acts-data').textContent)}catch(x){return}if(!D||!D.length)return;
+function at(id){return document.querySelector('[data-pv-at="'+id+'"]')}
+var on=[];
+function set(i,v){var d=D[i];if(!d||!!on[i]===!!v)return;on[i]=!!v;
+for(var id in d.ch){var e=at(id),c=d.ch[id];if(!e)continue;
+if(c.c){var a=v?c.c[0]:c.c[1],r=v?c.c[1]:c.c[0];a.forEach(function(x){e.classList.add(x)});r.forEach(function(x){e.classList.remove(x)})}
+if(c.s)for(var k in c.s){var w=c.s[k][v?1:0];if(w==null)e.style.removeProperty(k);else{var im=/!\\s*important\\s*$/i.test(w);e.style.setProperty(k,w.replace(/!\\s*important\\s*$/i,'').trim(),im?'important':'')}}
+if(c.a)for(var n in c.a){var y=c.a[n][v?1:0];if(y==null)e.removeAttribute(n);else e.setAttribute(n,y)}}
+(d.add||[]).forEach(function(id){var e=at(id);if(!e)return;var h=e.getAttribute('data-pv-hide')||'';if(!v)e.style.setProperty('display','none','important');else if(h)e.style.setProperty('display',h.replace('!',''),/!$/.test(h)?'important':'');else e.style.removeProperty('display')})}
+window.__pvAct=set;window.__pvActN=D.length;
+var hov=window.matchMedia&&matchMedia('(hover: hover)').matches;
+function parts(d){var l=[];d.t.concat(Object.keys(d.ch),d.add||[]).forEach(function(id){var e=at(id);if(e&&l.indexOf(e)<0)l.push(e)});return l}
+function inside(d,n){return parts(d).some(function(e){return e!==document.body&&e!==document.documentElement&&e.contains(n)})}
+D.forEach(function(d,i){var u=d.u||{};d.t.forEach(function(id){var t=at(id);if(!t)return;
+if(d.k==='h'){if(!hov)return;var tm;
+t.addEventListener('mouseenter',function(){clearTimeout(tm);set(i,1)});
+if(u.leave){var leave=function(){clearTimeout(tm);tm=setTimeout(function(){var over=parts(d).some(function(e){return e!==document.body&&e!==document.documentElement&&e.matches(':hover')});if(!over)set(i,0)},120)};
+parts(d).forEach(function(e){if(e!==document.body&&e!==document.documentElement)e.addEventListener('mouseleave',leave)})}}
+else{t.setAttribute('data-pv-actc','');t.style.cursor='pointer';
+t.addEventListener('click',function(e){e.preventDefault();if(!on[i]){D.forEach(function(o,j){if(j!==i&&on[j]&&o.k==='c'&&(o.u||{}).again)set(j,0)});set(i,1)}else if(u.again)set(i,0)})}})});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')D.forEach(function(d,i){if(on[i]&&d.k==='c'&&(d.u||{}).esc)set(i,0)})});
+document.addEventListener('click',function(e){D.forEach(function(d,i){var u=d.u||{};if(on[i]&&d.k==='c'&&(u.esc||u.again)&&!inside(d,e.target))set(i,0)})},true);
+})();</script>`;
+
 // Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
 // data-pv-scrollshow: how far down they show, how they display, whether clicking goes back to the top).
 const SCROLL_SHOW_SCRIPT = `<script id="preserve-scroll-show">(function(){
@@ -732,7 +762,7 @@ var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -827,6 +857,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);
       if ($('[data-pv-appear]').length) $('body').append(APPEAR_SCRIPT);
       if ($('[data-pv-tick]').length) $('body').append(TICKER_SCRIPT);
+      if ($('#preserve-acts-data').length) $('body').append(ACT_SCRIPT);
       if ($('canvas[data-preserve-fx="film-grain"], img[data-pv-fx="film-grain"]').length) $('body').append(GRAIN_SCRIPT);
       if ($('.portfolio-hover .portfolio-hover-item').length) $('body').append(HOVER_SCRIPT);
       if (outName !== 'index.html' && $('[class*="rte-scaled-text"]').length) $('body').append(fitScript(PROFILES[outName === 'mobile.html' ? 'mobile' : 'desktop'].context.viewport.width));

@@ -66,3 +66,6 @@ jobs:
       - name: Our own stylesheet's cascade
         working-directory: harness
         run: npm ci --ignore-scripts && npx playwright install --with-deps chromium && node test-own-css-cascade.mjs
+      - name: Clicks and hovers plugins drive, recorded and replayed
+        working-directory: harness
+        run: node test-acts.mjs
