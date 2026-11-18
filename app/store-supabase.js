@@ -111,7 +111,7 @@ export const store = {
   // Tested on Jeremy's Squarespace page 2026-11-03 (thread "Fix embed height on Squarespace", v5). layout: 'auto' picks by
   // the frame's width (v5); 'desktop' always shows the 1440 layout scaled to fit, 'phone' always the 390 one (v6, so a
   // case-study page can show both whatever the visitor's device).
-  embed(c, layout = 'auto') {
+  embed(c, layout = 'desktop') {   // 'auto' is no longer offered in the app but still builds the old code
     const pick = layout === 'desktop' ? "'desktop'" : layout === 'phone' ? "'mobile'" : "w>=1024?'desktop':'mobile'", kind = layout === 'auto' ? '' : `${layout} `;
     // Desktop on a phone or tablet: a live 1440-wide page in a frame runs them out of memory (Jeremy's iPhone, 2026-11-10),
     // so it shows the desktop still and opens the full-screen desktop view when tapped.

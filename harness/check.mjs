@@ -205,7 +205,7 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
       // Its arrow: right after an autoplay step (or any time, if it is still), so the next step can't be mistaken for it.
       if (g.arrow) {
         const before = await shot(g.i);
-        await page.locator(`[data-pv-gn="${g.i}"]`).click({ timeout: 3000 }).catch(() => {});
+        { const nb = page.locator(`[data-pv-gn="${g.i}"]`); await nb.click({ timeout: 3000 }).catch(async () => { const r = await nb.boundingBox().catch(() => null); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }); }
         await sleep(1200);
         await page.evaluate(() => document.activeElement?.blur()); await page.mouse.move(0, 0); await sleep(200);
         const after = await shot(g.i);
@@ -376,7 +376,10 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   if (profileName === 'mobile') {
     const btn = page.locator('.header-burger-btn, .burger, [class*="burger"] button, button[aria-label*="menu" i]').filter({ visible: true }).first();
     if (await btn.count()) {
-      await btn.click({ timeout: 3000 }).catch(() => {});
+      // A tap where the button is, if Playwright won't click it: it waits for the button to stand still, and a burger
+      // inside a block that keeps animating never does (Breathpod, held as "burger menu does not open" while it opens
+      // fine for a visitor, 2026-11-18).
+      await btn.click({ timeout: 3000 }).catch(async () => { const r = await btn.boundingBox().catch(() => null); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); });
       await sleep(1000);
       out.mobileMenu = await page.evaluate(() => {
         if (/menu-open|menu--open|open-menu/.test(document.body.className + ' ' + (document.querySelector('header')?.className || ''))) return 'pass';
@@ -387,7 +390,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       });
       if (out.mobileMenu === 'fail') spot('phone-menu-broken', [await btn.evaluate((e) => window.__preserveAnchor(e)).catch(() => null)].filter(Boolean));
       await page.screenshot({ path: `${shotPrefix}-menu-${profileName}.png` });
-      await btn.click({ timeout: 2000 }).catch(() => {}); await sleep(600);
+      await btn.click({ timeout: 2000 }).catch(async () => { const r = await btn.boundingBox().catch(() => null); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }); await sleep(600);
     } else out.mobileMenu = 'n/a';
   } else {
     const folder = page.locator('.header-nav-folder-title').filter({ visible: true }).first();
