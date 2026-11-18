@@ -209,7 +209,11 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     // Closed again = most of what changed on screen is back as it was (attributes such as tabindex can stay changed).
     const closed = async () => { await sleep(500); await settle(); return changedPixels(a, b, await shot()) < seen * 0.3; };
     if (keep) {
-      if (c.k === 'h') { await page.mouse.move(away.x, away.y, { steps: 3 }); undo.leave = await closed(); }
+      if (c.k === 'h') {
+        await page.mouse.move(away.x, away.y, { steps: 3 }); undo.leave = await closed();
+        // One that stays changed once the pointer has gone isn't a hover effect we can tell apart from noise: left out.
+        if (!undo.leave) { skip('hover that does not undo'); keep = false; }
+      }
       else {
         const q = await where(c.i);
         if (q) { await press(q); undo.again = await closed(); }
