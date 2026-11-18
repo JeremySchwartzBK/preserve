@@ -88,7 +88,7 @@
         if (t === 'CSSLayerStatementRule') { for (const n of r.nameList) if (!layerRank.has(n)) layerRank.set(n, layerRank.size); continue; }
         if (t === 'CSSKeyframesRule') { KEYFRAMES.push({ name: r.name, text: absUrls(r.cssText, base), conds }); continue; }
         if (t === 'CSSFontFaceRule') { FONTFACES.push(absUrls(r.cssText, base)); continue; }
-        if (t === 'CSSContainerRule') { walk(r.cssRules, base, conds, layer, parent); continue; }
+        if (t === 'CSSContainerRule') { walk(r.cssRules, base, [...conds, ['container', r.containerName || '', r.containerQuery || '']], layer, parent); continue; }
         if (t !== 'CSSStyleRule' && t !== 'CSSNestedDeclarations') continue;
         const ds = decls(r.style).map(([n, v, i]) => [n, absUrls(v, base), i]);
         const pos = order++;
@@ -112,10 +112,43 @@
     return { rules: RULES.length, keyframes: KEYFRAMES.length, fontFaces: FONTFACES.length };
   }
   const active = (conds) => conds.every(([k, v]) => k !== 'media' || matchMedia(v).matches);
+  // Container queries (@container) hold for an element when its nearest container (an ancestor with container-type,
+  // and the name if one is given) is the size the query asks for. They were taken as always holding, so The Dial's
+  // book box took its narrow layout (written for boxes under 900px) on a 1320px-wide desktop, 2026-11-18. Width and
+  // height in px, em or rem, with and / or / not; anything else is taken as holding, as before.
+  function containerOk(e, conds) {
+    for (const c of conds) {
+      if (c[0] !== 'container') continue;
+      const name = c[1], q = c[2];
+      let box = null;
+      for (let a = e.parentElement; a; a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        if (!cs.containerType || cs.containerType === 'normal') continue;
+        if (name && !cs.containerName.split(/\s+/).includes(name)) continue;
+        box = a; break;
+      }
+      if (!box) { if (/width|height|inline-size|block-size/.test(q)) return false; continue; }
+      const bs = getComputedStyle(box), rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16, em = parseFloat(bs.fontSize) || 16;
+      const W = box.clientWidth - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight), H = box.clientHeight - parseFloat(bs.paddingTop) - parseFloat(bs.paddingBottom);
+      const px = (n, u) => +n * (u === 'em' ? em : u === 'rem' ? rem : 1);
+      let bad = false;
+      const expr = q.replace(/\(\s*(min-|max-)?(width|height|inline-size|block-size)\s*(:|<=|>=|<|>|=)\s*([\d.]+)(px|em|rem)\s*\)/g, (m, mm, f, op, n, u) => {
+        const v = /width|inline/.test(f) ? W : H, x = px(n, u);
+        if (mm === 'min-') return String(v >= x); if (mm === 'max-') return String(v <= x);
+        return String(op === '<=' ? v <= x : op === '>=' ? v >= x : op === '<' ? v < x : op === '>' ? v > x : v === x);
+      }).replace(/\band\b/g, '&&').replace(/\bor\b/g, '||').replace(/\bnot\b/g, '!');
+      if (!/^[\s()!&|truefals]*$/.test(expr)) bad = true;
+      let ok = true; if (!bad) { try { ok = !!Function('return (' + expr + ')')(); } catch { ok = true; } }
+      if (!ok) return false;
+    }
+    return true;
+  }
 
   // Cascade one element's matched rules (already sorted) into its winning declarations, in cascade order.
   // Properties whose names start like a shorthand's but that the shorthand doesn't set. (`flex` wiped out a later
-  // `flex-flow: wrap` on margaret rajic's centred header, so the logo and links fell out of place, 2026-11-13.)
+  // `flex-flow: wrap` on margaret rajic's centred header, so the logo and links fell out of place, 2026-11-13; and
+  // `transform` wiped out `transform-origin`, so her turned captions turned about their middle and sat on the pictures,
+  // 2026-11-18.)
   const SH_KEEP = {
     border: ['border-radius', 'border-collapse', 'border-spacing', 'border-image'],
     flex: ['flex-flow', 'flex-direction', 'flex-wrap'],
@@ -125,6 +158,7 @@
     grid: ['grid-row', 'grid-column', 'grid-area', 'grid-gap', 'grid-row-gap', 'grid-column-gap'],
     mask: ['mask-type'],
     'text-decoration': ['text-decoration-skip'],
+    transform: ['transform-origin', 'transform-style', 'transform-box'],
   };
   function cascade(list) {
     const m = new Map(), imp = new Map();
@@ -158,7 +192,8 @@
       if (!active(r.conds)) continue;
       const sel = r.sel;
       let hits; try { hits = document.querySelectorAll(sel); } catch { continue; }
-      for (const e of hits) { const o = byEl.get(e); if (!o) continue; (o[r.pseudo] ||= []).push(r); }
+      const cq = r.conds.some((c) => c[0] === 'container');
+      for (const e of hits) { const o = byEl.get(e); if (!o || (cq && !containerOk(e, r.conds))) continue; (o[r.pseudo] ||= []).push(r); }
     }
     const out = {};
     for (const [e, o] of byEl) {
