@@ -7,7 +7,23 @@ import { GOOGLE } from './config.js';
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const app = $('#app');
-const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200); };
+// Confirmations. On the review screen they show at the top of the side panel, where the person is working, not at the
+// bottom of the window under the Preserve (user testing, 2026-11-17). Elsewhere, and on narrow screens, bottom centre.
+const toast = (t) => {
+  const el = $('#toast'), side = $('.side'), r = side?.getBoundingClientRect();
+  const inSide = !!(r && r.width && innerWidth > 860 && r.bottom > 0);
+  el.textContent = t; el.classList.toggle('in-side', inSide);
+  el.style.left = inSide ? `${r.left + r.width / 2}px` : ''; el.style.top = inSide ? `${Math.max(r.top, 0) + 14}px` : '';
+  el.style.maxWidth = inSide ? `${r.width - 24}px` : '';
+  el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2600);
+};
+// A "Saved" tick next to the item just saved in the panel's lists (a pin, tour stop or answer). It fades by itself.
+const SAVED_TICK = '<small class="saved" aria-live="polite">✓ Saved</small>';
+const markSaved = (m) => { view.saved = { ...m, until: Date.now() + 3200 }; };
+const isSaved = (p) => !!(view.saved && Date.now() < view.saved.until
+  && (view.saved.id ? String(view.saved.id) === String(p.id) : p.kind === view.saved.kind && p.body === view.saved.body));
+const COPY_ICON = '<svg class="ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+const CHECK_ICON = '<svg class="ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const copyText = async (t, what) => { try { await navigator.clipboard.writeText(t); toast(`${what} copied`); } catch { prompt(`Copy the ${what.toLowerCase()}:`, t); } };
 const when = (iso) => { const d = (Date.now() - Date.parse(iso)) / 1000; return d < 60 ? 'just now' : d < 3600 ? `${Math.round(d / 60)} min ago` : d < 86400 ? `${Math.round(d / 3600)} h ago` : `${Math.round(d / 86400)} d ago`; };
 const day = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -76,11 +92,22 @@ function confirmCard({ title, body, ok, cancel = 'Cancel', danger }) {
 // picks by the frame's width.
 function embedCard(c) {
   const dlg = $('#cdlg');
+  const LABEL = { desktop: 'Desktop embed', phone: 'Phone embed', auto: 'Auto embed' };
   dlg.innerHTML = `<form method="dialog"><h2>Copy embed code</h2><p class="sub">Paste it where you want the Preserve to appear. Desktop and Phone always show that layout, scaled to fit, whatever the visitor’s screen. Auto shows desktop in wide spaces and phone in narrow ones.</p>
-    <div class="row" style="flex-wrap:wrap"><button class="btn small" value="desktop">Desktop embed</button><button class="btn small" value="phone">Phone embed</button><button class="btn small secondary" value="auto">Auto embed</button></div>
-    <div class="row end"><button class="btn secondary" value="">Cancel</button></div></form>`;
+    <div class="row" style="flex-wrap:wrap">${Object.entries(LABEL).map(([l, t]) => `<button type="button" class="btn small ${l === 'auto' ? 'secondary' : ''}" data-emb="${l}">${COPY_ICON}<span>${t}</span></button>`).join('')}</div>
+    <p class="fine copied" id="copied" aria-live="polite"></p>
+    <div class="row end"><button class="btn secondary" value="">Done</button></div></form>`;
+  // Copying keeps the card open: the button turns into a tick for a moment and the line below says what to do next.
+  dlg.querySelectorAll('[data-emb]').forEach((b) => (b.onclick = async () => {
+    const l = b.dataset.emb, code = store.embed(c, l);
+    try { await navigator.clipboard.writeText(code); } catch { prompt(`Copy the ${LABEL[l].toLowerCase()} code:`, code); return; }
+    dlg.querySelectorAll('[data-emb]').forEach((x) => { x.classList.remove('done'); x.innerHTML = `${COPY_ICON}<span>${LABEL[x.dataset.emb]}</span>`; });
+    b.classList.add('done'); b.innerHTML = `${CHECK_ICON}<span>Copied</span>`;
+    $('#copied', dlg).textContent = `${LABEL[l]} code copied. Paste it into a Code Block on your site.`;
+    clearTimeout(b._t); b._t = setTimeout(() => { b.classList.remove('done'); b.innerHTML = `${COPY_ICON}<span>${LABEL[l]}</span>`; }, 2500);
+  }));
   dlg.returnValue = '';
-  dlg.onclose = () => { const l = dlg.returnValue; if (l) copyText(store.embed(c, l), `${l[0].toUpperCase()}${l.slice(1)} embed code`); if (routeWaiting) { routeWaiting = false; setTimeout(route); } };
+  dlg.onclose = () => { if (routeWaiting) { routeWaiting = false; setTimeout(route); } };
   dlg.showModal();
 }
 const confirmDelete = () => confirmCard({ title: 'Confirm Deletion', body: 'Once a Preserve is deleted it can’t be recovered and its links and embed codes will stop working.', ok: 'Delete', danger: true });
@@ -324,7 +351,7 @@ function onFrameMessage(m, id) {
   if (d.type === 'preserve-pin' && view.pinFor?.startsWith('move:')) {
     const p = c.pins.find((x) => String(x.id) === view.pinFor.slice(5));
     view.pinFor = null; sendMode();
-    if (p) store.updatePin(id, p.id, { body: p.body, meta: p.meta, blockId: d.blockId, x: d.x, y: d.y });
+    if (p) { markSaved({ id: p.id }); store.updatePin(id, p.id, { body: p.body, meta: p.meta, blockId: d.blockId, x: d.x, y: d.y }).then(() => toast('Stop moved')); }
     copyPage(id); return;
   }
   if (d.type === 'preserve-pin' && view.pinFor) {
@@ -332,8 +359,10 @@ function onFrameMessage(m, id) {
     view.pinFor = null; sendMode(); $('#hint').textContent = '';
     noteDialog(forWhat, null, async (vals) => {
       const pin = { blockId: d.blockId, x: d.x, y: d.y, layout: d.layout, label: d.label };
+      markSaved({ kind: forWhat === 'tour' ? 'tour' : 'issue', body: vals.body });
       if (forWhat === 'tour') await store.addPin(id, { ...pin, kind: 'tour', body: vals.body, meta: { title: vals.title } });
       else await store.addPin(id, { ...pin, kind: 'issue', body: vals.body, meta: {} });
+      toast(forWhat === 'tour' ? 'Tour stop saved' : 'Issue saved');
     });
     copyPage(id);
   }
@@ -368,7 +397,7 @@ const pinList = (c, tab, opts = {}) => {
     <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
     ${tab === 'check' && p.meta?.round_result ? roundResult(p) + aiNote(p) : ''}
     ${tab === 'tour' && view.missing.includes(p.blockId) ? '<small class="warn">This stop no longer lands on the page. Move it to the right spot.</small>' : ''}
-    <span class="row"><button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
+    <span class="row">${isSaved(p) ? SAVED_TICK : ''}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
 };
 
 // How a pin came out in the last refinement (the check compares the pinned spot with the live site).
@@ -423,7 +452,7 @@ function panel(c, review) {
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
         <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button></span></li>`).join('')}</ol>` : ''}
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}</ol>` : ''}
       ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
       ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
       <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
@@ -472,9 +501,10 @@ function panel(c, review) {
   P.querySelectorAll('[data-verdict]').forEach((b) => (b.onclick = () => {
     const p = c.pins.find((x) => String(x.id) === b.dataset.fid);
     const v = verdictOf(p) === b.dataset.verdict ? null : b.dataset.verdict;   // clicking the chosen answer again clears it
+    markSaved({ id: p.id });
     store.updatePin(id, p.id, { body: p.body, meta: { ...p.meta, verdict: v, marked_at: v ? new Date().toISOString() : null } });
   }));
-  P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, (v) => store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } })); }));
+  P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, async (v) => { markSaved({ id: p.id }); await store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } }); toast('Tour stop saved'); }); }));
   P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; view.pinFor = null; sendMode(); copyPage(id); }));
   on('#acc', () => accept(id));
   const cert = P.querySelector('#cert'); if (cert) cert.onchange = () => { P.querySelector('#acc').disabled = !cert.checked; };
@@ -622,6 +652,7 @@ function wireCred(id) {
       if (pid) await store.updatePin(id, pid, { body: name, meta: { role, url: url || null } });
       else { row.dataset.cid = 'saving'; await store.addPin(id, { kind: 'credit', body: name, meta: { role, url: url || null } }); }
       toast('Credit saved');
+      row.querySelector('.saved')?.remove(); row.insertAdjacentHTML('beforeend', SAVED_TICK);
     };
     row.querySelectorAll('input').forEach((i) => { i.onchange = save; });
     row.querySelector('[data-crm]').onclick = () => { const pid = row.dataset.cid; row.remove(); if (pid && pid !== 'saving') store.removePin(id, pid); };
