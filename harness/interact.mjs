@@ -45,6 +45,8 @@ export const LISTEN_INIT = `(() => {
   };
 })();`;
 
+import { OVERLAY_SELECTORS } from './lib.mjs';
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PX = 48;
 // Attributes a picture's loader sets when it comes into view.
@@ -91,6 +93,8 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
   const skip = (why) => { out.skipped[why] = (out.skipped[why] || 0) + 1; };
   // Candidates: elements plugin code listens on, then (when a plugin listens on the whole page) buttons and other
   // things that look clickable. Visible, a sensible size, and not inside something we already handle.
+  // Marketing popups and bars are dropped from the copy (their close buttons have nothing to close there).
+  const SKIP = SKIP_IN + ',' + OVERLAY_SELECTORS.join(',');
   const cands = await page.evaluate(([prof, SKIP_IN, maxCand]) => {
     const L = window.__pvL; if (!L) return [];
     const vis = (e) => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width >= 8 && r.height >= 8 && r.width * r.height < innerWidth * innerHeight * 0.8 && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
@@ -110,7 +114,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     // Nested candidates on the same element tree with the same gesture: keep the outermost (one hover, one state).
     const keep = list.filter((x) => !list.some((y) => y !== x && y.k === x.k && y.e !== x.e && y.e.contains(x.e)));
     return keep.map((x, i) => { x.e.setAttribute('data-preserve-ic', String(i)); return { i, k: x.k, why: x.why, tag: x.e.tagName.toLowerCase(), cls: (x.e.className && x.e.className.toString() || '').slice(0, 60) }; });
-  }, [prof, SKIP_IN, maxCand]).catch(() => []);
+  }, [prof, SKIP, maxCand]).catch(() => []);
   out.candidates = cands.length;
   if (!cands.length) return out;
 
