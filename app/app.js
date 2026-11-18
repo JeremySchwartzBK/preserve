@@ -565,13 +565,13 @@ function fontRow(c, f) {
     : f.holder === 'platform' ? `Since ${esc(f.name)} is licensed from Adobe by Squarespace, you have the option of substituting the replacement font we’ve suggested or keeping ${esc(f.name)} by uploading your licensed files.`
     : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
     : f.decision === 'keep' ? 'You confirmed you have the rights to use this font here, so your Preserve keeps it.'
-    : `You uploaded this font to your site. Confirm you have the rights to use it in this Preserve, or use the lookalike, ${lookName}.`;
+    : `You uploaded this font to your site. Use it if you have the rights to use it in this Preserve; otherwise use the substitute, ${lookName}.`;
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
   const actions = view.fontBusy === f.id || f.checking ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
     : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
     : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
-    // Uploading a licensed copy (a license for a different file than the site's) is rare, so it's a small link.
-    : `${chip('keep', 'I have the rights to use it here')}${chip('lookalike', 'Use the lookalike')}<button class="link" data-upload="${f.id}">Upload a licensed copy instead</button>`;
+    // Two choices only (Jeremy, 2026-11-18): uploading a different licensed copy was too rare to be worth the confusion.
+    : `${chip('keep', 'Use the font (I have the rights)')}${chip('lookalike', 'Use the substitute')}`;
   // "The quick brown fox" in both fonts (Jeremy, 2026-11-16): a picture of it drawn by the live site in the original
   // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
   // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
@@ -595,7 +595,7 @@ function fontRow(c, f) {
     if (f.look) alt = `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>`;
   }
   // A font kept as on the site says so on its first row, so the lookalike below can't be taken for what viewers see.
-  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Lookalike, only if you choose it'}</span>${alt}`;
+  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : 'Substitute, only if you choose it'}</span>${alt}`;
   return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <p class="fine">${state}</p>
     <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">${look ? 'On your site' : 'On your site and in your Preserve'}</span>${site}
