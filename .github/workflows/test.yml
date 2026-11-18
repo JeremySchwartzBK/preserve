@@ -47,9 +47,6 @@ jobs:
       - name: Background video addresses
         working-directory: harness
         run: node test-media-bg.mjs
-      - name: Our own stylesheet's cascade
-        working-directory: harness
-        run: npx playwright install --with-deps chromium && node test-own-css-cascade.mjs
       - name: Things that move on a timer
         working-directory: harness
         run: node test-ticker.mjs
@@ -58,3 +55,14 @@ jobs:
         run: node test-policy.mjs
       - name: Scripts parse
         run: for f in platform/*.mjs platform/worker/*.mjs harness/*.mjs app/*.js; do node --check "$f" || exit 1; done
+  # Tests that need a browser. Pinned to Ubuntu 24.04: Playwright can't install Chromium on ubuntu-latest (26.04) yet.
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Our own stylesheet's cascade
+        working-directory: harness
+        run: npm ci --ignore-scripts && npx playwright install --with-deps chromium && node test-own-css-cascade.mjs
