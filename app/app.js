@@ -103,7 +103,7 @@ function embedCard(c) {
     try { await navigator.clipboard.writeText(code); } catch { prompt(`Copy the ${LABEL[l].toLowerCase()} code:`, code); return; }
     dlg.querySelectorAll('[data-emb]').forEach((x) => { x.classList.remove('done'); x.innerHTML = `${COPY_ICON}<span>${LABEL[x.dataset.emb]}</span>`; });
     b.classList.add('done'); b.innerHTML = `${CHECK_ICON}<span>Copied</span>`;
-    $('#copied', dlg).textContent = `${LABEL[l]} code copied. Paste it into a Code Block on your site.`;
+    $('#copied', dlg).textContent = `${LABEL[l]} code copied. Paste it where your site lets you add HTML or embed code.`;
     clearTimeout(b._t); b._t = setTimeout(() => { b.classList.remove('done'); b.innerHTML = `${COPY_ICON}<span>${LABEL[l]}</span>`; }, 2500);
   }));
   dlg.returnValue = '';
