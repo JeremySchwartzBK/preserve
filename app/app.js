@@ -92,9 +92,11 @@ function confirmCard({ title, body, ok, cancel = 'Cancel', danger }) {
 // picks by the frame's width.
 function embedCard(c) {
   const dlg = $('#cdlg');
-  const LABEL = { desktop: 'Desktop embed', phone: 'Phone embed', auto: 'Auto embed' };
-  dlg.innerHTML = `<form method="dialog"><h2>Copy embed code</h2><p class="sub">Paste it where you want the Preserve to appear. Desktop and Phone always show that layout, scaled to fit, whatever the visitor’s screen. Auto shows desktop in wide spaces and phone in narrow ones.</p>
-    <div class="row" style="flex-wrap:wrap">${Object.entries(LABEL).map(([l, t]) => `<button type="button" class="btn small ${l === 'auto' ? 'secondary' : ''}" data-emb="${l}">${COPY_ICON}<span>${t}</span></button>`).join('')}</div>
+  // Auto (layout by frame width) was dropped 2026-11-18 (Jeremy: a Preserve shouldn't switch layout by device). Auto codes
+  // already pasted on sites keep working: the code itself picks the layout, and the viewer serves both.
+  const LABEL = { desktop: 'Desktop embed', phone: 'Phone embed' };
+  dlg.innerHTML = `<form method="dialog"><h2>Copy embed code</h2><p class="sub">Paste it where you want the Preserve to appear. Desktop and Phone always show that layout, scaled to fit, whatever the visitor’s screen.</p>
+    <div class="row" style="flex-wrap:wrap">${Object.entries(LABEL).map(([l, t]) => `<button type="button" class="btn small" data-emb="${l}">${COPY_ICON}<span>${t}</span></button>`).join('')}</div>
     <p class="fine copied" id="copied" aria-live="polite"></p>
     <div class="row end"><button class="btn secondary" value="">Done</button></div></form>`;
   // Copying keeps the card open: the button turns into a tick for a moment and the line below says what to do next.
