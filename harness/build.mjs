@@ -529,7 +529,7 @@ if(c.hp&&hov){e.addEventListener('mouseenter',function(){an.pause()});e.addEvent
 // Clicks and hovers that plugins drive (capture.mjs via interact.mjs: script#preserve-acts-data, elements numbered
 // data-pv-at, ones a plugin added kept hidden by an inline display:none, their own display in data-pv-hide). Each state is the plugin's own changes (class names,
 // attributes, inline style properties, added elements shown), made on the same gesture and undone the way live undid
-// them: the pointer leaving the trigger and what it opened, a second click, Escape, or a click elsewhere. Hover states
+// them: the pointer leaving the trigger and what it opened, a second click, Escape, its close button, or a click elsewhere. Hover states
 // only where there is a pointer. window.__pvAct(i, on) shows a state (our own stylesheet records each one).
 const ACT_SCRIPT = `<script id="preserve-acts">(function(){
 var D;try{D=JSON.parse(document.getElementById('preserve-acts-data').textContent)}catch(x){return}if(!D||!D.length)return;
@@ -553,7 +553,8 @@ parts(d).forEach(function(e){if(e!==document.body&&e!==document.documentElement)
 else{t.setAttribute('data-pv-actc','');t.style.cursor='pointer';
 t.addEventListener('click',function(e){e.preventDefault();if(!on[i]){D.forEach(function(o,j){if(j!==i&&on[j]&&o.k==='c'&&(o.u||{}).again)set(j,0)});set(i,1)}else if(u.again)set(i,0)})}})});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')D.forEach(function(d,i){if(on[i]&&d.k==='c'&&(d.u||{}).esc)set(i,0)})});
-document.addEventListener('click',function(e){D.forEach(function(d,i){var u=d.u||{};if(on[i]&&d.k==='c'&&(u.esc||u.again)&&!inside(d,e.target))set(i,0)})},true);
+D.forEach(function(d,i){var c=(d.u||{}).close,b=c&&at(c);if(b)b.addEventListener('click',function(e){e.preventDefault();set(i,0)})});
+document.addEventListener('click',function(e){D.forEach(function(d,i){var u=d.u||{};if(on[i]&&d.k==='c'&&(u.esc||u.again||u.out)&&!inside(d,e.target))set(i,0)})},true);
 })();</script>`;
 
 // Pieces that show once the visitor scrolls down, such as "back to top" buttons (capture.mjs scrollShown,
@@ -784,7 +785,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     // Scripts.
     let owners = 0;
     $('script').each((_, el) => {
-      const c = v.scripts === 'none' ? (/ld\+json|application\/json/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : isOwnerScript($, el) ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
+      const c = v.scripts === 'none' ? (/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : isOwnerScript($, el) ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
       if (c.kind === 'site owner code (self-contained)') { $(el).html(ownerWrap($(el).html())).attr('data-pv-owner', String(owners++)); }
       if (outName !== 'mobile.html') report.scripts.push({ keep: c.keep, kind: c.kind, what: (c.what || '').slice(0, 140) });
       if (!c.keep) $(el).remove();

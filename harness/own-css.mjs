@@ -284,7 +284,12 @@ async function layoutCss(base, stage, layout, report) {
       for (let i = 0; i < nActs; i++) {
         await startObs(); await page.evaluate((i) => window.__pvAct(i, 1), i); await sleep(60);
         const ch = await endObs();
-        if (Object.keys(ch).length) { addState(`act-${i}`, diffAll(rest, await capture()), ch); rules += report.states[`act-${i}`].rules; orphans += report.states[`act-${i}`].orphans; delete report.states[`act-${i}`]; shown++; }
+        // Inline style the plugin changed is put back by our script itself (no rule needed): those elements' own
+        // differences are left out unless one of their attributes changed too.
+        const inl = await page.evaluate((i) => { const d = JSON.parse(document.getElementById('preserve-acts-data').textContent)[i] || { ch: {} };
+          return Object.keys(d.ch).filter((id) => d.ch[id].s).map((id) => document.querySelector(`[data-pv-at="${id}"]`)?.getAttribute('data-pz')).filter(Boolean); }, i);
+        const dd = diffAll(rest, await capture()); for (const k of inl) if (!ch[k]) delete dd[k];
+        if (Object.keys(ch).length) { addState(`act-${i}`, dd, ch); rules += report.states[`act-${i}`].rules; orphans += report.states[`act-${i}`].orphans; delete report.states[`act-${i}`]; shown++; }
         await page.evaluate((i) => window.__pvAct(i, 0), i); await revert(ch);
       }
       report.states.acts = { states: nActs, shown, rules, orphans };

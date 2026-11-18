@@ -10,7 +10,7 @@
 // and inline styles on elements already there, and elements it added. Only changes that show on screen are kept, and
 // nothing that changes by itself while we wait (a slideshow) counts. We also note how each one closes again: when the
 // pointer leaves, a second click, Escape, or a click elsewhere. The elements involved are numbered (data-pv-at), the
-// recorded states go in the page as data (script#preserve-acts-data), elements a plugin added go back in the page
+// recorded states go in the page as data (script#preserve-acts-data, of a type of our own: the scrub step drops JSON data), elements a plugin added go back in the page
 // hidden (inline display:none, its own display kept in data-pv-hide) so every later step (pictures, our own stylesheet) treats them as part of the page, and our
 // stand-in (build.mjs ACT_SCRIPT) makes the same changes on the same gestures. Our own stylesheet (own-css.mjs) shows
 // each state once and writes its look as rules, as it does for galleries.
@@ -50,9 +50,10 @@ const PX = 48;
 // Attributes a picture's loader sets when it comes into view.
 const LAZY_ATTR = /^(src|srcset|sizes|loading|data-src|data-srcset|data-loader|data-load|data-loaded|data-image-.*|data-image)$/; // a pixel counts as changed past this sum of channel differences (behavior.mjs)
 
-// Already replayed by our own stand-ins, or never touched: galleries, sliders, tickers, followers, scroll effects,
+// Already replayed by our own stand-ins, or not this step's job: galleries, plugin carousels (one click is one step of
+// many, a later step's job), video players, sliders, tickers, followers, scroll effects,
 // forms, checkout, and Squarespace's own header menus (MENU_SCRIPT).
-const SKIP_IN = '[data-pv-gal],[data-pv-swiper],[data-pv-tick],[data-pv-pointer],[data-pv-scroll],[data-pv-scrollshow],form,.sqs-add-to-cart-button,[data-add-to-cart],.header-burger,.header-menu,iframe';
+const SKIP_IN = '.flickity-enabled,.slick-slider,.swiper,.splide,.glide,.owl-carousel,.sqs-video-icon,.sqs-video-wrapper,.video-player,[data-pv-gal],[data-pv-swiper],[data-pv-tick],[data-pv-pointer],[data-pv-scroll],[data-pv-scrollshow],form,.sqs-add-to-cart-button,[data-add-to-cart],.header-burger,.header-menu,iframe';
 
 // The changes between two attribute records, per element: class names added and removed, inline style properties,
 // other attributes.
@@ -198,7 +199,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     const seen = changedPixels(a, b, cshot);
     if (!s.n && !s.added) { skip('nothing changed'); }
     else if (seen < 0.0015) { skip('nothing visible changed'); }
-    const keep = (s.n || s.added) && seen >= 0.0015;
+    let keep = (s.n || s.added) && seen >= 0.0015;
     // How it closes again, as the visitor would close it.
     const undo = {};
     // Closed again = most of what changed on screen is back as it was (attributes such as tabindex can stay changed).
@@ -209,6 +210,24 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
         const q = await where(c.i);
         if (q) { await press(q); undo.again = await closed(); }
         if (!undo.again) { await page.keyboard.press('Escape'); undo.esc = await closed(); }
+        // A close button in what opened (a slide-out's "x"), then a click well away from it.
+        if (!undo.again && !undo.esc) {
+          const btn = await page.evaluate(() => {
+            const L = window.__pvLast, roots = [...L.added, ...L.ch.map(([e]) => e)].filter((e) => e !== document.body && e !== document.documentElement);
+            for (const r of roots) for (const e of [r, ...r.querySelectorAll('*')]) {
+              const lab = ((e.getAttribute('aria-label') || '') + ' ' + (e.className && e.className.toString()) + ' ' + (e.children.length ? '' : e.textContent)).toLowerCase();
+              if (!/(^|[\s_-])close|^\s*[×✕✖x]\s*$|dismiss/.test(lab)) continue;
+              const b = e.getBoundingClientRect(); if (b.width < 6 || b.height < 6) continue;
+              const x = b.left + b.width / 2, y = b.top + b.height / 2, top = document.elementFromPoint(x, y);
+              if (top && (top === e || e.contains(top))) { e.setAttribute('data-preserve-close', ''); return { x, y }; }
+            }
+            return null;
+          });
+          if (btn) { await press(btn); undo.close = await closed(); }
+          if (!undo.close) { await press(away); undo.out = await closed(); }
+        }
+        // One that can't be closed again and covers much of the screen would trap the visitor: left out.
+        if (!undo.again && !undo.esc && !undo.close && !undo.out && seen > 0.25) { skip('opens over the page and does not close'); keep = false; }
       }
     }
     if (keep) {
@@ -219,9 +238,11 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
         const t = document.querySelector(`[data-preserve-ic="${trig}"]`);
         const ch = window.__pvLast.ch.map(([e, d]) => [id(e), d]);
         const added = window.__pvLast.added.map((n) => { S.hold.push(n); return S.hold.length - 1; });
+        const cb = document.querySelector('[data-preserve-close]'); const close = cb ? id(cb) : null; if (cb) cb.removeAttribute('data-preserve-close');
         const tags = Object.fromEntries(ch.map(([i]) => [i, document.querySelector(`[data-pv-at="${i}"]`).tagName.toLowerCase()]));
-        return { t: id(t), k: kind, ch, added, tags };
+        return { t: id(t), k: kind, ch, added, tags, close };
       }, [c.i, c.k]);
+      if (undo.close && st.close) undo.close = st.close; else delete undo.close;
       states.push({ ...st, u: undo, why: c.why, what: `${c.tag}.${c.cls}`.slice(0, 70), seen: Math.round(seen * 1000) / 1000 });
     }
     await revert(); await page.mouse.move(away.x, away.y); await sleep(250);
@@ -267,7 +288,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
       res.push({ k: d.k, t: d.t, ch: d.ch, add, u: d.u });
     }
     let el = document.getElementById('preserve-acts-data');
-    if (!el) { el = document.createElement('script'); el.type = 'application/json'; el.id = 'preserve-acts-data'; document.body.appendChild(el); }
+    if (!el) { el = document.createElement('script'); el.type = 'application/x-preserve-acts'; el.id = 'preserve-acts-data'; document.body.appendChild(el); }
     el.textContent = JSON.stringify(res);
     return res.map((r) => ({ k: r.k, triggers: r.t.length, changes: Object.keys(r.ch).length, added: r.add.length, u: r.u }));
   }, [data, permanent]);
