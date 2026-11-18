@@ -47,6 +47,9 @@ jobs:
       - name: Background video addresses
         working-directory: harness
         run: node test-media-bg.mjs
+      - name: Our own stylesheet's cascade
+        working-directory: harness
+        run: npx playwright install --with-deps chromium && node test-own-css-cascade.mjs
       - name: Things that move on a timer
         working-directory: harness
         run: node test-ticker.mjs
