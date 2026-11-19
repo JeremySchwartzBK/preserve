@@ -16,6 +16,7 @@ body{margin:0;font:16px sans-serif} nav{height:60px;background:#eee} .menu{displ
 <button id="toggle" type="button">More</button><div class="panel" id="panel">Panel</div>
 <button id="tipper" type="button">Tip</button><div id="tipbox"></div>
 <button id="dead" type="button">Does nothing</button>
+<button id="away" type="button">Goes to another page</button>
 <div class="quiet"></div>
 <script src="https://plugin.test/p.js"></script></body></html>`;
 const PLUGIN = `
@@ -26,6 +27,7 @@ menu.addEventListener('mouseleave', () => menu.classList.remove('open'));
 document.getElementById('toggle').addEventListener('click', () => document.getElementById('panel').classList.toggle('is-open'));
 document.getElementById('tipper').addEventListener('click', () => { const b = document.getElementById('tipbox'); if (b.firstChild) b.firstChild.remove(); else { const t = document.createElement('div'); t.className = 'tip'; t.textContent = 'Hello'; b.appendChild(t); } });
 document.getElementById('dead').addEventListener('click', () => {});
+document.getElementById('away').addEventListener('click', () => { location.href = '/elsewhere'; });
 `;
 
 const browser = await launch();
@@ -38,6 +40,7 @@ try {
   await page.goto('https://site.test/');
   const rec = await recordInteractions(page, 'desktop');
   assert.equal(page.url(), 'https://site.test/', 'the recorder never leaves the page');
+  assert.ok(await page.evaluate(() => !!document.getElementById('toggle')), 'a script sending the page elsewhere leaves it in place');
   const kinds = rec.states.map((s) => s.k).sort().join('');
   assert.equal(rec.kept, 3, JSON.stringify(rec));
   assert.equal(kinds, 'cch', JSON.stringify(rec));

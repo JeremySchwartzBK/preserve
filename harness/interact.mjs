@@ -55,7 +55,7 @@ const LAZY_ATTR = /^(src|srcset|sizes|loading|data-src|data-srcset|data-loader|d
 // Already replayed by our own stand-ins, or not this step's job: galleries, plugin carousels (one click is one step of
 // many, a later step's job), video players, sliders, tickers, followers, scroll effects,
 // forms, checkout, and Squarespace's own header menus (MENU_SCRIPT).
-const SKIP_IN = '.flickity-enabled,.slick-slider,.swiper,.splide,.glide,.owl-carousel,.sqs-video-icon,.sqs-video-wrapper,.video-player,[data-pv-gal],[data-pv-swiper],[data-pv-tick],[data-pv-pointer],[data-pv-scroll],[data-pv-scrollshow],form,.sqs-add-to-cart-button,[data-add-to-cart],.header-burger,.header-menu,iframe';
+const SKIP_IN = '.accordion-items-container,.flickity-enabled,.slick-slider,.swiper,.splide,.glide,.owl-carousel,.sqs-video-icon,.sqs-video-wrapper,.video-player,[data-pv-gal],[data-pv-swiper],[data-pv-tick],[data-pv-pointer],[data-pv-scroll],[data-pv-scrollshow],form,.sqs-add-to-cart-button,[data-add-to-cart],.header-burger,.header-menu,iframe';
 
 // The changes between two attribute records, per element: class names added and removed, inline style properties,
 // other attributes.
@@ -118,16 +118,27 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
   out.candidates = cands.length;
   if (!cands.length) return out;
 
-  // Nothing leaves the page while we click: navigations are refused, new windows don't open, forms don't send.
-  const block = (route) => (route.request().isNavigationRequest() && route.request().frame() === page.mainFrame() ? route.abort() : route.fallback());
+  // Nothing leaves the page while we click: navigations get an empty "no content" answer (the browser then stays on the
+  // page; refusing them outright would swap the page for an error page), new windows don't open, forms don't send.
+  const block = (route) => (route.request().isNavigationRequest() && route.request().frame() === page.mainFrame() ? route.fulfill({ status: 204, body: '' }) : route.fallback());
   await page.route('**/*', block);
+  try { return await record(); } finally {
+    await page.unroute('**/*', block).catch(() => {});
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-preserve-ic]').forEach((e) => e.removeAttribute('data-preserve-ic'));
+      if (window.__pvOpen) { window.open = window.__pvOpen; removeEventListener('click', window.__pvStopNav, true); removeEventListener('submit', window.__pvStopSub, true); }
+    }).catch(() => {});
+  }
+  async function record() {
   await page.evaluate(() => {
     window.__pvOpen = window.open; window.open = () => null;
     window.__pvStopNav = (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (a && !/^#/.test(a.getAttribute('href') || '')) e.preventDefault(); };
     addEventListener('click', window.__pvStopNav, true);
     window.__pvStopSub = (e) => e.preventDefault(); addEventListener('submit', window.__pvStopSub, true);
   });
-  const y0 = await page.evaluate(() => scrollY);
+  const y0 = await page.evaluate(() => { window.__pvRec = 1; return scrollY; });
+  // The page itself can still start over (a script that rewrites the document): then nothing recorded is kept.
+  const alive = () => page.evaluate(() => window.__pvRec === 1).catch(() => false);
 
   // Attribute changes and added elements under the whole page, from start() to stop().
   const start = () => page.evaluate(() => {
@@ -187,6 +198,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
   const states = [];
   for (const c of cands) {
     if (Date.now() - t0 > budgetMs) { skip('out of time'); continue; }
+    if (!(await alive())) { out.error = 'the page started over while we clicked'; break; }
     const p = await where(c.i); if (!p) { skip('covered or off screen'); continue; }
     // Somewhere far from it (not the top corner: that is often the header, with menus of its own).
     const away = { x: Math.round(vw / 2), y: p.y < vh / 2 ? vh - 3 : Math.max(3, Math.round(p.y - vh * 0.45)) };
@@ -238,6 +250,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
         if (!undo.again && !undo.esc && !undo.close && !undo.out && seen > 0.25) { skip('opens over the page and does not close'); keep = false; }
       }
     }
+    if (keep && !(await alive())) { out.error = 'the page started over while we clicked'; break; }
     if (keep) {
       // Number what took part, keep the change (the elements a plugin added stay aside until the end).
       const st = await page.evaluate(([trig, kind]) => {
@@ -245,9 +258,9 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
         const id = (e) => { if (!e.hasAttribute('data-pv-at')) e.setAttribute('data-pv-at', String(S.n++)); return e.getAttribute('data-pv-at'); };
         const t = document.querySelector(`[data-preserve-ic="${trig}"]`);
         const ch = window.__pvLast.ch.map(([e, d]) => [id(e), d]);
+        const tags = Object.fromEntries(window.__pvLast.ch.map(([e]) => [e.getAttribute('data-pv-at'), e.tagName.toLowerCase()]));
         const added = window.__pvLast.added.map((n) => { S.hold.push(n); return S.hold.length - 1; });
         const cb = document.querySelector('[data-preserve-close]'); const close = cb ? id(cb) : null; if (cb) cb.removeAttribute('data-preserve-close');
-        const tags = Object.fromEntries(ch.map(([i]) => [i, document.querySelector(`[data-pv-at="${i}"]`).tagName.toLowerCase()]));
         return { t: id(t), k: kind, ch, added, tags, close };
       }, [c.i, c.k]);
       if (undo.close && st.close) undo.close = st.close; else delete undo.close;
@@ -257,6 +270,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     await page.evaluate(() => document.querySelectorAll('[data-preserve-noise]').forEach((e) => e.removeAttribute('data-preserve-noise')));
   }
 
+  if (out.error) return out;
   // Into the page: the states as data for our stand-in (one change list per state, same triggers merged), elements a
   // plugin added back in their place, hidden.
   const data = [], permanent = {};
@@ -303,11 +317,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
   out.kept = kept.length;
   out.states = kept.map((k, i) => ({ ...k, what: data[i].what, seen: data[i].seen }));
 
-  await page.evaluate(() => {
-    document.querySelectorAll('[data-preserve-ic]').forEach((e) => e.removeAttribute('data-preserve-ic'));
-    window.open = window.__pvOpen; removeEventListener('click', window.__pvStopNav, true); removeEventListener('submit', window.__pvStopSub, true);
-  });
-  await page.unroute('**/*', block);
   await page.evaluate((y) => scrollTo(0, y), y0); await sleep(400);
   return out;
+  }
 }
