@@ -13,8 +13,6 @@ h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--sub
 .brand{font-weight:700;font-size:1.1rem;color:var(--ink);text-decoration:none;letter-spacing:-.01em}
 .top nav{display:flex;align-items:center;gap:14px;font-size:.9rem}
 .top nav a{text-decoration:none}
-.bell{position:relative;background:none;border:0;font-size:1.1rem;cursor:pointer;padding:4px}
-.bell span{position:absolute;top:-2px;right:-6px;background:var(--bad);color:#fff;border-radius:9px;font-size:.68rem;padding:0 5px;line-height:16px}
 .pop{position:fixed;right:16px;top:56px;width:min(340px,calc(100vw - 32px));background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:20;padding:6px}
 .pop a{display:block;padding:10px;border-radius:8px;color:var(--ink);text-decoration:none;font-size:.9rem}
 .pop a:hover{background:var(--bg)}.pop a.unread{font-weight:600}
@@ -196,3 +194,14 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 .top nav{white-space:nowrap;min-width:0}
 @media (max-width:370px){.top{gap:8px}.top nav{gap:8px}.top nav .wide-only{display:none}}
 @media (max-width:340px){.top nav .back{font-size:0}.top nav .back::before{content:"←";font-size:.95rem}}
+
+/* Ready-to-review dot on dashboard cards; Delete pushed to the far end, away from the Live/Archived switch. */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--attn);margin-right:6px;vertical-align:middle}
+.actions .push{flex:1}
+/* Undo inside a confirmation. */
+#toast.act{pointer-events:auto}#toast .undo{background:none;border:0;color:inherit;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer;margin-left:8px;padding:0}
+/* "…" menu next to a Preserve's title. */
+.ttlrow{display:flex;align-items:center;gap:8px}.morewrap{position:relative}.more{font-size:1.3rem;line-height:1;padding:2px 6px;text-decoration:none}
+.pop.menu{position:absolute;left:0;right:auto;top:100%;width:max-content;padding:8px 12px}
+/* Pin hint as a banner inside the preview. */
+.pinbar{position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:.88rem;box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:none;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis}
