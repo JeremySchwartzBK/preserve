@@ -153,12 +153,16 @@ export async function probeBehavior(browser, url, profileName, { isCopy = false 
     // swallowed, so a drag that ends on a link doesn't leave the page.
     const strips = await page.evaluate((max) => {
       const re = /carousel|slider|swiper|slick|flickity|splide|glide|user-items-list|reel|marquee|gallery-strip/i;
+      const MAPS = '.gm-style,.sqs-block-map,.ps-block-map,.leaflet-container,.mapboxgl-map,iframe[src*="google.com/maps"]';
       const seen = new Set(), list = [];
       for (const e of document.querySelectorAll('body *')) {
         const r = e.getBoundingClientRect(); if (r.width < 200 || r.height < 80) continue;
         const s = getComputedStyle(e);
         const scrolls = e.scrollWidth > e.clientWidth + 40 && /hidden|auto|scroll|clip/.test(s.overflowX);
         if (!scrolls && !re.test(e.className?.toString() || '')) continue;
+        // Maps are saved as still pictures on purpose (a live map would call Google), so panning one is not a drag
+        // the copy lost (Little Ripper's Google map, Nov 18 showcase re-run).
+        if (e.closest(MAPS) || e.querySelector(MAPS)) continue;
         const at = window.__preserveAnchor(e); if (seen.has(at.blockId)) continue;
         seen.add(at.blockId); e.dataset.pvStrip = list.length; list.push(at);
         if (list.length >= max) break;
