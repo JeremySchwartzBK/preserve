@@ -410,7 +410,8 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       await btn.click({ timeout: 3000 }).catch(async () => { const r = await btn.boundingBox().catch(() => null); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); });
       await sleep(1000);
       out.mobileMenu = await page.evaluate(() => {
-        if (/menu-open|menu--open|open-menu/.test(document.body.className + ' ' + (document.querySelector('header')?.className || ''))) return 'pass';
+        // Squarespace 7.1 marks the header or body with menu-open; 7.0 templates with is-mobile-overlay-active (One Mag).
+        if (/menu-open|menu--open|open-menu|mobile-overlay-active/.test(document.body.className + ' ' + (document.querySelector('header')?.className || ''))) return 'pass';
         const m = document.querySelector('.header-menu, [class*="mobile-menu"], [class*="menu-overlay"]');
         if (!m) return 'fail';
         const s = getComputedStyle(m); const r = m.getBoundingClientRect();

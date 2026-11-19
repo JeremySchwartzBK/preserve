@@ -211,6 +211,25 @@ async function layoutCss(base, stage, layout, report) {
       await page.evaluate(() => document.querySelector('.header-burger-btn').click()); await sleep(800);
       await revert(ch);
     }
+    // Phone menu open on 7.0 templates (Brine and its family): a body class shows the full-screen overlay, and a class
+    // on a folder slides it in (One Mag, Nov 18 showcase re-run, where the copy's burger did nothing). Set directly,
+    // then given time for the overlay's slide to finish before its look is read.
+    if (await page.evaluate(() => !!document.querySelector('[data-controller-overlay="menu"]') && !!document.querySelector('.Mobile-overlay') && !document.querySelector('.header-burger-btn'))) {
+      await startObs();
+      await page.evaluate(() => document.body.classList.add('is-mobile-overlay-active')); await sleep(1000);
+      const ch = await endObs(); const open = await capture(); addState('menu70', diffAll(rest, open), ch);
+      const bodyKey = Object.keys(ch).find((k) => ch[k].class);
+      const folders = await page.evaluate(() => [...document.querySelectorAll('.Mobile-overlay-folder[data-controller-folder]')].map((f) => f.getAttribute('data-pz')).filter(Boolean));
+      for (const f of folders) {
+        await startObs();
+        await page.evaluate((f) => { document.querySelector(`[data-pz="${f}"]`).classList.add('is-active-folder'); const m = document.querySelector('.Mobile-overlay-menu'); if (m) m.classList.add('has-active-folder'); }, f); await sleep(800);
+        const fc = await endObs();
+        addState('menu70-folder-' + f, diffAll(open, await capture()), fc, bodyKey ? stateSel0(bodyKey, ch[bodyKey]) + ' ' : '');
+        if (bodyKey) unique.add(+bodyKey);
+        await revert(fc); await sleep(300);
+      }
+      await revert(ch); await sleep(800);
+    }
     // Accordions open.
     if (await page.evaluate(() => !!document.querySelector('.accordion-item'))) {
       await startObs();
@@ -483,7 +502,7 @@ async function shots(base, layout, name) {
       out.widths[w] = s;
     }
     await page.setViewportSize({ width: W0, height: H0 }); await sleep(400);
-    if (await page.evaluate(() => { const b = [...document.querySelectorAll('.header-burger-btn')].find((x) => x.getBoundingClientRect().width > 0); if (b) b.click(); return !!b; })) { await sleep(800); out.menu = await page.screenshot(); }
+    if (await page.evaluate(() => { const b = [...document.querySelectorAll('.header-burger-btn,[data-controller-overlay="menu"]')].find((x) => x.getBoundingClientRect().width > 0); if (b) b.click(); return !!b; })) { await sleep(1000); out.menu = await page.screenshot(); }
     return out;
   } finally { await browser.close(); }
 }
