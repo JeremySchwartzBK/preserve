@@ -30,12 +30,13 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 
 ## Review feedback round 1 (Jeremy, 2026-10-16)
 - Desktop preview renders at a real 1440px width, scaled to fit; phone at 390px.
-- The preview frame is built once per copy and layout; saving notes/tour/credits only redraws the side panel.
+- The preview frame is built once per copy and layout; saving notes/Tour/Talent only redraws the side panel.
 - Pin mode puts a clear layer over the page (bridge in worker/src/index.js), so taps never press buttons or follow
   links; the block under the pointer is outlined. Spots outside blocks fall back to header, footer or page.
-- Copy page tabs: in review "1. Check the copy · 2. Tour · 3. Credits"; live "Share · Tour · Credits · Report · Manage".
-  Publishing lands on Tour with a note that Tour and Credits are optional.
-- Tour stops = copy_pin kind tour (meta.title); credits = kind credit (body name, meta.role/url). The runner writes
+- Copy page tabs: in review "1. Check the copy · 2. Tour · 3. Talent"; live "Share · Tour · Talent · Report · Manage".
+  Publishing lands on Tour with a note that Tour and Talent are optional.
+- Tour stops = copy_pin kind tour (meta.title); Talent = kind credit (body name, meta.role/url; the
+  database and KV keep the older name `credit`/`credits`). The runner writes
   them to KV tour:<id>; the Worker adds them plus /_p/tour.js (R2 platform/tour.js, visitor-only build of the demo
   tour script, source platform/tour/tour.js) to visitor pages.
 - Link name is edited inline in the link; Enter or leaving the field saves; old names redirect.
@@ -70,11 +71,11 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 
 ## Review flow feedback (Jeremy, 2026-10-26, pins on the flow markup page)
 - Say "Preserve", never "copy", in anything people read ("copy" reads as page text). Code names stay `copy`.
-- Review steps: 1. Look and Feel, 2. Tour, 3. Credits, then Accept Preserve. "+ Issue" drops a pin. Suspected
+- Review steps: 1. Look and Feel, 2. Tour, 3. Talent, then Accept Preserve. "+ Issue" drops a pin. Suspected
   issues from our check are answered Fix issue / Not an issue (two answers since user testing, 2026-11-12; older "Ignore issue" answers show as Not an issue). Refine Preserve appears once anything
   is marked to fix (a pin of their own, or Fix issue). Accept asks for confirmation ("cannot be refined"; Review
   Preserve goes back to step 1), then goes live if the plan has a free live spot, otherwise starts Archived.
-- Tour and credits stay editable after accepting. Tour stops can be moved; a stop whose block is gone after a
+- Tour and Talent stay editable after accepting. Tour stops can be moved; a stop whose block is gone after a
   refinement is flagged to move (the review bridge reports pins it couldn't place).
 - Dashboard: "Your Preserves", newest first, 20 a page, search on site name and address, filter All / Live / Ready
   to review / Pending / Archived. Cards show the capture date and Copy link, Copy embed code, a Live/Archived switch,
@@ -83,8 +84,14 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 - Round 2 (2026-10-27): house style is numbers under 10 spelled out in sentences (digits in labels and counters) and
   status names capitalized in sentences (Live, Archived, Archiving). Live Preserves lose the Manage tab (card actions
   cover it).
-- Accepted Preserves can never be modified (Jeremy, 2026-10-28): the "Report an issue" tab is gone. The Tour, Credits,
+- Accepted Preserves can never be modified (Jeremy, 2026-10-28): the "Report an issue" tab is gone. The Tour, Talent,
   link name and Live/Archived stay editable. The only exception is an admin-only, recorded removal for legal reasons.
+
+## Credits renamed Talent (Jeremy, 2026-11-18)
+- "Credits" now reads as AI currency, so the feature is "Talent" everywhere people read it: the app's step and tab,
+  the visitor pill and panel ("Tour & Talent"), confirmations and plan blurbs. Code and data keep the old name
+  (copy_pin kind `credit`, KV `tour.credits`), so accepted Preserves need no data change; their visitor label
+  changes because the viewer draws the panel from /_p/tour.js.
 
 ## Fonts step (review, 2026-10-27)
 

@@ -268,7 +268,7 @@
       pill.innerHTML = '';
       pill.appendChild(el('i'));
       // One label, so it reads as one button that opens the panel (user testing, 2026-11-12).
-      pill.appendChild(document.createTextNode(hidden ? 'Show tour' : n && c ? 'Tour & Credits' : n ? 'Tour' : 'Credits'));
+      pill.appendChild(document.createTextNode(hidden ? 'Show tour' : n && c ? 'Tour & Talent' : n ? 'Tour' : 'Talent'));
       pill.setAttribute('aria-expanded', panel ? 'true' : 'false');
       pill.classList.toggle('pt-pill-off', hidden);
     };
@@ -284,12 +284,12 @@
     // One pill, two tabs: the tour's stop list, and the people who made the site.
     var openPanel = function (tab) {
       close();
-      panel = el('div', 'pt-panel' + (phone() ? ' pt-sheet' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Tour and credits');
+      panel = el('div', 'pt-panel' + (phone() ? ' pt-sheet' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Tour and Talent');
       var tabs = el('div', 'pt-tabs'); tabs.setAttribute('role', 'tablist');
       var body = el('div');
       var names = [];
       if (tour.spots.length) names.push(['tour', 'Tour']);
-      if ((tour.credits || []).length) names.push(['credits', 'Credits']);
+      if ((tour.credits || []).length) names.push(['credits', 'Talent']);
       names.forEach(function (t) {
         var b = btn(t[1], '', function () { show(t[0]); }); b.className = 'pt-tab'; b.setAttribute('role', 'tab'); b.dataset.tab = t[0]; tabs.appendChild(b);
       });
@@ -329,7 +329,7 @@
       pill.update();
       requestAnimationFrame(function () { panel && panel.classList.add('pt-show'); });
     };
-    // Credit links are real links out. Keep the copy's "this is a preview" guard from swallowing them.
+    // Talent links are real links out. Keep the copy's "this is a preview" guard from swallowing them.
     window.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('.pt-layer a[href]');
       if (a) e.stopImmediatePropagation();
@@ -391,8 +391,8 @@
 
   function editCredits() {
     showCard(-1, function (c) {
-      c.appendChild(el('p', 'pt-step', 'Credits'));
-      c.appendChild(el('p', 'pt-body', 'Who else worked on this site? Visitors see these under Credits.'));
+      c.appendChild(el('p', 'pt-step', 'Talent'));
+      c.appendChild(el('p', 'pt-body', 'Who else worked on this site? Visitors see these under Talent.'));
       var list = el('div'); c.appendChild(list);
       function addRow(v) {
         v = v || {};
@@ -413,7 +413,7 @@
           if (!o.url) delete o.url;
           return o;
         }).filter(function (o) { return o.name; });
-        save(); close(); flash('Credits saved');
+        save(); close(); flash('Talent saved');
       }));
       c.appendChild(row);
       c.style.width = '440px';
@@ -428,7 +428,7 @@
   var phoneBtn = btn('Phone preview', '', togglePhone);
   if (innerWidth >= 900) bar.appendChild(phoneBtn);
   bar.appendChild(btn('Preview as visitor', '', function () { location.href = location.pathname; }));
-  bar.appendChild(btn('Credits', '', editCredits));
+  bar.appendChild(btn('Talent', '', editCredits));
   bar.appendChild(btn('Copy tour data', '', function () {
     var json = JSON.stringify(tour, null, 2);
     (navigator.clipboard ? navigator.clipboard.writeText(json) : Promise.reject()).then(function () { flash('Copied'); }, function () { prompt('Tour data', json); });

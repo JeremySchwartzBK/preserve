@@ -41,7 +41,7 @@ r = await get(`/c/abcd1234/desktop?review=${old}`, { REVIEW_SECRET: S }); ok('ex
 r = await get(`/c/abcd1234/desktop?review=${mintReviewToken(S, 'live5678', 3600)}`, { REVIEW_SECRET: S }); ok('token for another Preserve: refused', r.status === 403);
 r = await get(`/c/abcd1234/desktop?review=${fresh}`, { REVIEW_SECRET: S }); ok('good token: shown with the pin tools', r.status === 200 && r.text.includes('review page') && r.text.includes('preserve-review'));
 r = await get('/c/live5678/desktop', { REVIEW_SECRET: S }); ok('live Preserve needs no token', r.status === 200 && r.text.includes('live page'));
-r = await get('/c/live5678/desktop?review=1', { REVIEW_SECRET: S }); ok('live Preserve in the app frame (Tour, Credits) needs no token', r.status === 200 && r.text.includes('preserve-review'));
+r = await get('/c/live5678/desktop?review=1', { REVIEW_SECRET: S }); ok('live Preserve in the app frame (Tour, Talent) needs no token', r.status === 200 && r.text.includes('preserve-review'));
 
 const failed = results.filter((x) => !x).length;
 console.log(failed ? `${failed} FAILED` : `all ${results.length} passed`);

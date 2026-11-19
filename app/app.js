@@ -1,4 +1,4 @@
-// Preserve app screens: sign in, dashboard, new Preserve, review (look and feel, tour, credits, accept), Preserve details, plan.
+// Preserve app screens: sign in, dashboard, new Preserve, review (look and feel, Tour, Talent, accept), Preserve details, plan.
 // (A "Preserve" is what the code calls a copy; the word copy stays out of what people read, where it reads as page text.)
 // Plain JS, no build step. Routes: #/ dashboard, #/new, #/copy/<id>, #/plan.
 import { store, PLANS } from './store.js';
@@ -243,11 +243,11 @@ function copyPage(id) {
     return;
   }
   const review = c.status === 'review';
-  const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['credits', 'Credits']] : [];
+  const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['talent', 'Talent']] : [];
   const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
     // Accepted: the captured page can never change again (Jeremy, 2026-10-28), so there is no issue reporting here;
-    // only the Tour, Credits, link name and Live/Archived stay editable.
-    : [['share', 'Share'], ['tour', 'Tour'], ['credits', 'Credits']];
+    // only the Tour, Talent, link name and Live/Archived stay editable.
+    : [['share', 'Share'], ['tour', 'Tour'], ['talent', 'Talent']];
   if (!tabs.some((t) => t[0] === view.tab)) view.tab = tabs[0][0];
   const key = `${id}|${view.layout}`;
   // A Preserve in review opens only with a signed link from the database, good for 12 hours; ask again after six.
@@ -341,7 +341,7 @@ const letter = (i) => String.fromCharCode(65 + (i % 26));
 // stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
 const VERDICTS = [['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
 const verdictOf = (p) => (['fine', 'ignore'].includes(p.meta.verdict) ? 'not-a-problem' : p.meta.verdict);
-const pinsFor = (c, tab) => c.pins.filter((p) => tab === 'tour' ? p.kind === 'tour' : tab === 'credits' ? p.kind === 'credit'
+const pinsFor = (c, tab) => c.pins.filter((p) => tab === 'tour' ? p.kind === 'tour' : tab === 'talent' ? p.kind === 'credit'
   : p.kind === 'issue' && !p.meta?.report);
 
 function onFrameMessage(m, id) {
@@ -431,16 +431,16 @@ function panel(c, review) {
   const id = c.id, P = $('#panel');
   const flash = view.flash ? `<p class="note ok">${view.flash}</p>` : '';
   const fix = review ? toFix(c) : 0;
-  // Credits are typed straight into the panel: once drawn, the rows are left alone (only new rows get their ids), so a
+  // Talent is typed straight into the panel (stored as copy_pin kind 'credit'): once drawn, the rows are left alone (only new rows get their ids), so a
   // save when a field loses focus never redraws the panel under the next click.
   const key = `${id}|${view.tab}|${c.status}|${view.flash || ''}`;
-  if (view.tab === 'credits' && P.dataset.k === key) {
+  if (view.tab === 'talent' && P.dataset.k === key) {
     const shown = new Set([...P.querySelectorAll('.cred')].map((r) => r.dataset.cid));
-    const added = pinsFor(c, 'credits').filter((p) => !shown.has(String(p.id)));
+    const added = pinsFor(c, 'talent').filter((p) => !shown.has(String(p.id)));
     P.querySelectorAll('.cred[data-cid="saving"]').forEach((r, i) => { if (added[i]) r.dataset.cid = added[i].id; });
     return;
   }
-  P.dataset.k = view.tab === 'credits' ? key : '';
+  P.dataset.k = view.tab === 'talent' ? key : '';
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
     const found = findingsOf(c);
@@ -477,12 +477,12 @@ function panel(c, review) {
       ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', '+ Add a stop')}</p>
       ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
-      ${review ? '<div class="stack"><button class="btn wide" data-t2="credits">Next: Create Credits</button></div>' : ''}`;
-  } else if (view.tab === 'credits') {
-    const cr = pinsFor(c, 'credits');
-    P.innerHTML = `${flash}<h2>Credits <span class="opt">optional</span></h2><p class="sub">The people behind the site. Visitors see them under “Credits”.</p>
+      ${review ? '<div class="stack"><button class="btn wide" data-t2="talent">Next: Add Talent</button></div>' : ''}`;
+  } else if (view.tab === 'talent') {
+    const cr = pinsFor(c, 'talent');
+    P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The people behind the site. Visitors see them under “Talent”.</p>
       <div id="crl">${cr.map((p) => credRow(p)).join('')}</div>
-      <p><button class="btn small secondary" id="addcr">+ Add a credit</button></p>
+      <p><button class="btn small secondary" id="addcr">+ Add a person</button></p>
       ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
@@ -631,7 +631,7 @@ function loadLookalikes(c) {
 async function accept(id) {
   const fix = toFix(store.copy(id));
   const yes = await confirmCard({ title: 'Accept this Preserve?',
-    body: `After you accept, you won’t be able to change the content or structure of this Preserve, but you will still be able to edit its Tour, Credits, and custom link.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
+    body: `After you accept, you won’t be able to change the content or structure of this Preserve, but you will still be able to edit its Tour, Talent, and custom link.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
     ok: 'Accept Preserve', cancel: 'Review Preserve' });
   if (!yes) { view.tab = 'check'; copyPage(id); return; }
   const kept = keptFonts(store.copy(id));
@@ -641,7 +641,7 @@ async function accept(id) {
   view.tab = 'share';
   view.flash = c.status === 'archived'
     ? `Accepted. ${planFull()} This Preserve is currently Archived but can be made Live by Archiving a Live Preserve or by upgrading your plan.`
-    : 'Accepted and Live. Your link and embed code are below. You can change the tour and credits any time.';
+    : 'Accepted and Live. Your link and embed code are below. You can change the Tour and Talent any time.';
   copyPage(id);
 }
 
@@ -655,7 +655,7 @@ function wireCred(id) {
       if (!name) return;
       if (pid) await store.updatePin(id, pid, { body: name, meta: { role, url: url || null } });
       else { row.dataset.cid = 'saving'; await store.addPin(id, { kind: 'credit', body: name, meta: { role, url: url || null } }); }
-      toast('Credit saved');
+      toast('Talent saved');
       row.querySelector('.saved')?.remove(); row.insertAdjacentHTML('beforeend', SAVED_TICK);
     };
     row.querySelectorAll('input').forEach((i) => { i.onchange = save; });

@@ -40,7 +40,7 @@ const squash = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 export const PLANS = [
   { id: 'free', name: 'Starter', price: 0, copies: 1, blurb: 'One Live Preserve to try it out.' },
-  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten Live Preserves, Tour and Credits on every one.' },
+  { id: 'studio', name: 'Studio', price: 12, copies: 10, blurb: 'Ten Live Preserves, Tour and Talent on every one.' },
   { id: 'agency', name: 'Agency', price: 39, copies: 50, blurb: 'Fifty Live Preserves for a whole portfolio.' },
 ];
 
