@@ -122,20 +122,23 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
 
   // Nothing leaves the page while we click: navigations get an empty "no content" answer (the browser then stays on the
   // page; refusing them outright would swap the page for an error page), new windows don't open, forms don't send.
-  const block = (route) => (route.request().isNavigationRequest() && route.request().frame() === page.mainFrame() ? route.fulfill({ status: 204, body: '' }) : route.fallback());
+  let navs = 0;
+  const block = (route) => (route.request().isNavigationRequest() && route.request().frame() === page.mainFrame() ? (navs++, route.fulfill({ status: 204, body: '' })) : route.fallback());
   await page.route('**/*', block);
   try { return await record(); } finally {
     await page.unroute('**/*', block).catch(() => {});
     await page.evaluate(() => {
       document.querySelectorAll('[data-preserve-ic]').forEach((e) => e.removeAttribute('data-preserve-ic'));
-      if (window.__pvOpen) { window.open = window.__pvOpen; removeEventListener('click', window.__pvStopNav, true); removeEventListener('submit', window.__pvStopSub, true); }
+      if (window.__pvOpen) { window.open = window.__pvOpen; removeEventListener('click', window.__pvStopNav); removeEventListener('submit', window.__pvStopSub, true); }
     }).catch(() => {});
   }
   async function record() {
   await page.evaluate(() => {
-    window.__pvOpen = window.open; window.open = () => null;
-    window.__pvStopNav = (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (a && !/^#/.test(a.getAttribute('href') || '')) e.preventDefault(); };
-    addEventListener('click', window.__pvStopNav, true);
+    window.__pvOpen = window.open; window.open = () => { window.__pvNavs++; return null; };
+    window.__pvNavs = 0;
+    // Last in line: a link click no script took over would have gone to another page (counted, then stopped).
+    window.__pvStopNav = (e) => { const a = e.target.closest && e.target.closest('a[href]'); if (a && !/^#/.test(a.getAttribute('href') || '') && !e.defaultPrevented) { window.__pvNavs++; e.preventDefault(); } };
+    addEventListener('click', window.__pvStopNav);
     window.__pvStopSub = (e) => e.preventDefault(); addEventListener('submit', window.__pvStopSub, true);
   });
   const y0 = await page.evaluate(() => { window.__pvRec = 1; return scrollY; });
@@ -210,14 +213,18 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     // What changes by itself, first, so it doesn't count.
     await start(); const a = await shot(); await sleep(500); const b = await shot(); await stop(false); await markNoise();
     await start();
+    const nav0 = navs + (await page.evaluate(() => window.__pvNavs));
     if (c.k === 'h') await page.mouse.move(p.x, p.y, { steps: 4 }); else await press(p);
     await sleep(450); await settle();
     const s = await stop(true);
     const cshot = await shot();
+    // A click that sends the visitor to another page: the "snapshot" note covers it, whatever else it did on the way.
+    const left = c.k === 'c' && navs + (await page.evaluate(() => window.__pvNavs)) > nav0;
     const seen = changedPixels(a, b, cshot);
-    if (!s.n && !s.added) { skip('nothing changed'); }
+    if (left) skip('goes to another page');
+    else if (!s.n && !s.added) { skip('nothing changed'); }
     else if (seen < 0.0015) { skip('nothing visible changed'); }
-    let keep = (s.n || s.added) && seen >= 0.0015;
+    let keep = !left && (s.n || s.added) && seen >= 0.0015;
     // How it closes again, as the visitor would close it.
     const undo = {};
     // Closed again = most of what changed on screen is back as it was (attributes such as tabindex can stay changed).
