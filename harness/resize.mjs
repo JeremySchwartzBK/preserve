@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { diffPct } from './check.mjs';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, FREEZE_ANIMATED_IMAGES } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, FREEZE_ANIMATED_IMAGES, PAUSE_LOOPS } from './lib.mjs';
 
 // One extra width per layout in the quality check (each costs two live loads and three copy loads); tests can pass more.
 export const WIDTHS = { desktop: [1024], mobile: [360] };
@@ -61,6 +61,9 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
     // The copy's animated pictures on their first frame, the same in both of its photos (opened at the width and
     // resized to it), so a moving GIF doesn't read as a resize fault (Ken Edits, Nov 18 showcase re-run).
     if (copy) await page.evaluate(FREEZE_ANIMATED_IMAGES).catch(() => 0);
+    // Endless animations (Second Story's sliding strip of pictures) at their start, on the live page and in the copy:
+    // otherwise each photo catches them at a different moment and the pages read as different (Nov 18 showcase re-run).
+    await page.evaluate(PAUSE_LOOPS, 'start').catch(() => null);
     if (!copy) { await page.evaluate(markPromos).catch(() => 0); await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300); }
     // Anything pinned to the window other than the header (chat bubbles, cookie and promo bars that came late) is left
     // out of both pictures: the width comparison is about the page.
