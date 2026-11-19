@@ -310,7 +310,6 @@
           row.appendChild(btn('Start tour', 'pt-primary', function () { open(0); }));
           body.appendChild(row);
         } else {
-          body.appendChild(el('p', 'pt-lead', 'The talent behind this site.'));
           // Two groups (2026-11-18): people (individuals, agencies) and tools (type 'tool'). Older entries are people.
           // Headings only when both groups have entries.
           var groups = [['People', tour.credits.filter(function (c) { return c.type !== 'tool'; })], ['Tools', tour.credits.filter(function (c) { return c.type === 'tool'; })]];
