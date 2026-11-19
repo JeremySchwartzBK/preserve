@@ -119,3 +119,26 @@ export const PREV_SEL = '.gallery-slideshow-control-btn[data-previous], button[d
 // with Flickity (elahousestudio's "recent work" carousel never advanced in a Preserve; recorded like any other since
 // 2026-11-14: the steps are what the page looked like, none of the site's code is kept).
 export const SQS_GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .summary-carousel, .summary-block-wrapper, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .flickity-enabled';
+
+// Puts each animated picture on the page on its first frame (ImageDecoder), as a still in its place.
+export const FREEZE_ANIMATED_IMAGES = async () => {
+  if (!('ImageDecoder' in window)) return 0;
+  const TYPES = { webp: 'image/webp', gif: 'image/gif', png: 'image/png', apng: 'image/apng', avif: 'image/avif' };
+  let n = 0;
+  await Promise.all([...document.images].map(async (i) => {
+    const u = i.currentSrc || i.src; const ext = (u.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+    if (!TYPES[ext]) return;
+    try {
+      const r = await fetch(u); const type = /^image\//.test(r.headers.get('content-type') || '') ? r.headers.get('content-type').split(';')[0] : TYPES[ext];
+      const d = new ImageDecoder({ data: r.body, type }); await d.tracks.ready;
+      if (!d.tracks.selectedTrack || !d.tracks.selectedTrack.animated) { d.close(); return; }
+      const { image } = await d.decode({ frameIndex: 0 });
+      const c = document.createElement('canvas'); c.width = image.displayWidth; c.height = image.displayHeight; c.getContext('2d').drawImage(image, 0, 0); image.close(); d.close();
+      const blob = await new Promise((res) => c.toBlob(res));
+      const pic = i.parentElement && i.parentElement.tagName === 'PICTURE' ? i.parentElement : null;
+      if (pic) pic.querySelectorAll('source').forEach((s) => s.remove());
+      i.removeAttribute('srcset'); i.src = URL.createObjectURL(blob); await i.decode().catch(() => {}); n++;
+    } catch {}
+  }));
+  return n;
+};
