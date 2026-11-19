@@ -8,6 +8,7 @@ import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL
 import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
+import { LISTEN_INIT, recordInteractions } from './interact.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -1245,6 +1246,8 @@ export async function capture(url, outDir) {
         return get.call(this, type, opts);
       };
     });
+    // Which elements plugins listen on for clicks and the pointer (interact.mjs), noted before the page's scripts run.
+    if (process.env.PRESERVE_INTERACT !== '0') await ctx.addInitScript(LISTEN_INIT);
     const page = await ctx.newPage();
     record(page);
     page.on('pageerror', (e) => info.errors.push(`${prof}: ${e.message.slice(0, 200)}`));
@@ -1274,6 +1277,8 @@ export async function capture(url, outDir) {
     (info.scrollLinked ||= {})[prof] = await scrollLinked(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     (info.timedMotion ||= {})[prof] = await timedMotion(page, { hover: prof === 'desktop' }).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     if (prof === 'desktop') (info.pointers ||= {})[prof] = await pointerFollowers(page).catch((e) => ({ error: String(e.message).split('\n')[0] }));
+    // Clicks and hovers that plugins drive, recorded for our stand-in (interact.mjs, build.mjs ACT_SCRIPT).
+    if (process.env.PRESERVE_INTERACT !== '0') (info.interactions ||= {})[prof] = await recordInteractions(page, prof).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await shadowStills(page, outDir, prof, info);
     (info.mediaBackgrounds ||= {})[prof] = await mediaBackgrounds(page, ctx.request, outDir, manifest).catch((e) => ({ error: String(e.message).split('\n')[0] }));
     await canvasStills(page, outDir, prof, info);
