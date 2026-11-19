@@ -272,6 +272,55 @@ export async function probeMotion(browser, url, profileName, { isCopy = false } 
   return out;
 }
 
+// Blocks that stay invisible: marked when seen invisible on screen while scrolling through, listed if still invisible
+// after the page has had time to animate. Shared by the copy's check and the live page's (probeStuck).
+const MARK_HIDDEN = () => {
+  for (const e of document.querySelectorAll('[class*="preFade"],[class*="preScale"],[class*="preSlide"],[class*="preClip"],[data-animation-role],.sqs-block-image,.sqs-block-html,.sqs-block-gallery,.ps-block-image,.ps-block-html,.ps-block-gallery')) {
+    const r = e.getBoundingClientRect();
+    if (r.top < innerHeight * 0.8 && r.bottom > innerHeight * 0.2 && r.left < innerWidth && r.right > 0 && r.height > 10 && +getComputedStyle(e).opacity < 0.1) e.setAttribute('data-preserve-was-hidden', '');
+  }
+};
+const STUCK = () => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => {
+  // Hidden on purpose by an ancestor (closed menus, inactive slides) is not an animation that failed.
+  for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; }
+  // Nor is a carousel's next slide, sticking out past the edge its carousel cuts at: Squarespace keeps those faded
+  // out live too until they slide in (colorize's summary carousels, 2026-11-10).
+  window.__pvOutside = window.__pvOutside || ((el) => { const r = el.getBoundingClientRect();
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const s = getComputedStyle(a);
+      if (/hidden|clip/.test(s.overflowX)) { const ar = a.getBoundingClientRect(); if (r.left < ar.left - 1 || r.right > ar.right + 1) return true; } }
+    return false; });
+  if (window.__pvOutside(e)) return false;
+  let o = 1; for (let a = e; a; a = a.parentElement) o *= +getComputedStyle(a).opacity;
+  return o < 0.1;
+});
+async function scanStuck(page, h, vh) {
+  for (let y = 0; y < h; y += Math.round(vh * 0.7)) {
+    await page.evaluate((y) => scrollTo(0, y), y);
+    await sleep(500);
+    await page.evaluate(MARK_HIDDEN);
+  }
+  await sleep(2500);
+  return page.evaluate(`(${STUCK})().map((e) => window.__preserveAnchor(e))`);
+}
+
+// The same scan on the live page: a block that stays invisible there too (a title shown only on hover, a button
+// Squarespace never fades in) is the page as it is, not an animation the copy lost (Radhia Rahman, Margaret Rajic,
+// Nov 18 showcase re-run).
+export async function probeStuck(browser, url, profileName) {
+  const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true });
+  await ctx.addInitScript(ANCHOR);
+  const page = await ctx.newPage();
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }).catch(() => {});
+    await page.mouse.move(0, 0);
+    const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
+    return await scanStuck(page, h, vh);
+  } catch (e) { return { error: String(e.message).split('\n')[0] }; }
+  finally { await ctx.close(); }
+}
+
 export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const prof = PROFILES[profileName];
   const browser = await launch();
@@ -320,37 +369,16 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const vh = prof.context.viewport.height;
   // An element counts as stuck only if it was invisible while on screen and is still invisible after the whole page
   // has been scrolled through and given time to animate (an entrance fade caught mid-way is not stuck).
-  for (let y = 0; y < h; y += Math.round(vh * 0.7)) {
-    await page.evaluate((y) => scrollTo(0, y), y);
-    await sleep(500);
-    await page.evaluate(() => {
-      for (const e of document.querySelectorAll('[class*="preFade"],[class*="preScale"],[class*="preSlide"],[class*="preClip"],[data-animation-role],.sqs-block-image,.sqs-block-html,.sqs-block-gallery,.ps-block-image,.ps-block-html,.ps-block-gallery')) {
-        const r = e.getBoundingClientRect();
-        if (r.top < innerHeight * 0.8 && r.bottom > innerHeight * 0.2 && r.left < innerWidth && r.right > 0 && r.height > 10 && +getComputedStyle(e).opacity < 0.1) e.setAttribute('data-preserve-was-hidden', '');
-      }
-    });
-  }
-  await sleep(2500);
-  const stuckList = await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => {
-    // Hidden on purpose by an ancestor (closed menus, inactive slides) is not an animation that failed.
-    for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; }
-    // Nor is a carousel's next slide, sticking out past the edge its carousel cuts at: Squarespace keeps those faded
-    // out live too until they slide in (colorize's summary carousels, 2026-11-10).
-    window.__pvOutside = window.__pvOutside || ((el) => { const r = el.getBoundingClientRect();
-      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const s = getComputedStyle(a);
-        if (/hidden|clip/.test(s.overflowX)) { const ar = a.getBoundingClientRect(); if (r.left < ar.left - 1 || r.right > ar.right + 1) return true; } }
-      return false; });
-    if (window.__pvOutside(e)) return false;
-    let o = 1; for (let a = e; a; a = a.parentElement) o *= +getComputedStyle(a).opacity;
-    return o < 0.1;
-  }).map((e) => (e.className.toString() || e.tagName).slice(0, 60)));
+  const stuckAt = await scanStuck(page, h, vh);
+  const stuckList = stuckAt.map((a) => a.blockId);
+  out.stuckAt = stuckAt;
   const stuck = stuckList.length;
   out.stuckInvisible = stuck; out.stuckSamples = stuckList.slice(0, 4);
   // Faces the page actually drew with, once scrolled through (a browser loads a face only when text needs it), so the
   // review lists only fonts a visitor sees.
   out.fontsUsed = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => ({ family: f.family.replace(/^["']|["']$/g, ''), weight: f.weight, style: f.style })));
   // Positions are taken at the top of the page; block-relative positions don't depend on the scroll.
-  if (stuck) spot('blocks-stay-invisible', await page.evaluate(() => [...document.querySelectorAll('[data-preserve-was-hidden]')].filter((e) => { if (window.__pvOutside && window.__pvOutside(e)) return false; let o = 1; for (let a = e; a; a = a.parentElement) { const s = getComputedStyle(a); if (s.display === 'none' || s.visibility === 'hidden') return false; o *= +s.opacity; } return o < 0.1; }).slice(0, 3).map((e) => window.__preserveAnchor(e))));
+  if (stuck) spot('blocks-stay-invisible', stuckAt.slice(0, 3));
   spot('broken-images', await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').slice(0, 3).map((i) => window.__preserveAnchor(i))));
   // Blocks with their page positions, to place picture differences (measured later, after the browser closes).
   out.pageSize = await page.evaluate(() => ({ w: document.body.scrollWidth, h: document.body.scrollHeight }));

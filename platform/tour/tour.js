@@ -60,6 +60,7 @@
     '.pt-num{flex:0 0 22px;height:22px;border-radius:50%;background:#111;color:#fff;font:600 12px/22px system-ui,sans-serif;text-align:center}',
     '.pt-lead{margin:2px 0 12px;color:#444}',
     '.pt-credits{margin:0;padding:0}',
+    '.pt-group{margin:14px 0 2px;font-size:13px;font-weight:600;color:#111}',
     '.pt-credits div{padding:9px 0;border-top:1px solid #f0f0f0}',
     '.pt-credits div:first-child{border-top:0}',
     '.pt-credits dt{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#777;margin:0 0 2px}',
@@ -268,7 +269,7 @@
       pill.innerHTML = '';
       pill.appendChild(el('i'));
       // One label, so it reads as one button that opens the panel (user testing, 2026-11-12).
-      pill.appendChild(document.createTextNode(hidden ? 'Show tour' : n && c ? 'Tour & Credits' : n ? 'Tour' : 'Credits'));
+      pill.appendChild(document.createTextNode(hidden ? 'Show tour' : n && c ? 'Tour & Talent' : n ? 'Tour' : 'Talent'));
       pill.setAttribute('aria-expanded', panel ? 'true' : 'false');
       pill.classList.toggle('pt-pill-off', hidden);
     };
@@ -284,12 +285,12 @@
     // One pill, two tabs: the tour's stop list, and the people who made the site.
     var openPanel = function (tab) {
       close();
-      panel = el('div', 'pt-panel' + (phone() ? ' pt-sheet' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Tour and credits');
+      panel = el('div', 'pt-panel' + (phone() ? ' pt-sheet' : '')); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Tour and Talent');
       var tabs = el('div', 'pt-tabs'); tabs.setAttribute('role', 'tablist');
       var body = el('div');
       var names = [];
       if (tour.spots.length) names.push(['tour', 'Tour']);
-      if ((tour.credits || []).length) names.push(['credits', 'Credits']);
+      if ((tour.credits || []).length) names.push(['credits', 'Talent']);
       names.forEach(function (t) {
         var b = btn(t[1], '', function () { show(t[0]); }); b.className = 'pt-tab'; b.setAttribute('role', 'tab'); b.dataset.tab = t[0]; tabs.appendChild(b);
       });
@@ -309,16 +310,24 @@
           row.appendChild(btn('Start tour', 'pt-primary', function () { open(0); }));
           body.appendChild(row);
         } else {
-          body.appendChild(el('p', 'pt-lead', 'The people behind this site.'));
-          var dl = el('dl', 'pt-credits');
-          tour.credits.forEach(function (c) {
-            var d = el('div'); d.appendChild(el('dt', '', c.role));
-            var dd = el('dd');
-            if (c.url) { var a = el('a', '', c.name + ' ↗'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; dd.appendChild(a); }
-            else dd.textContent = c.name;
-            d.appendChild(dd); dl.appendChild(d);
+          body.appendChild(el('p', 'pt-lead', 'The talent behind this site.'));
+          // Two groups (2026-11-18): people (individuals, agencies) and tools (type 'tool'). Older entries are people.
+          // Headings only when both groups have entries.
+          var groups = [['People', tour.credits.filter(function (c) { return c.type !== 'tool'; })], ['Tools', tour.credits.filter(function (c) { return c.type === 'tool'; })]];
+          var both = groups[0][1].length && groups[1][1].length;
+          groups.forEach(function (g) {
+            if (!g[1].length) return;
+            if (both) body.appendChild(el('p', 'pt-group', g[0]));
+            var dl = el('dl', 'pt-credits');
+            g[1].forEach(function (c) {
+              var d = el('div'); d.appendChild(el('dt', '', c.role));
+              var dd = el('dd');
+              if (c.url) { var a = el('a', '', c.name + ' ↗'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; dd.appendChild(a); }
+              else dd.textContent = c.name;
+              d.appendChild(dd); dl.appendChild(d);
+            });
+            body.appendChild(dl);
           });
-          body.appendChild(dl);
         }
       }
       panel.appendChild(tabs); panel.appendChild(body);
@@ -329,7 +338,7 @@
       pill.update();
       requestAnimationFrame(function () { panel && panel.classList.add('pt-show'); });
     };
-    // Credit links are real links out. Keep the copy's "this is a preview" guard from swallowing them.
+    // Talent links are real links out. Keep the copy's "this is a preview" guard from swallowing them.
     window.addEventListener('click', function (e) {
       var a = e.target.closest && e.target.closest('.pt-layer a[href]');
       if (a) e.stopImmediatePropagation();
@@ -391,8 +400,8 @@
 
   function editCredits() {
     showCard(-1, function (c) {
-      c.appendChild(el('p', 'pt-step', 'Credits'));
-      c.appendChild(el('p', 'pt-body', 'Who else worked on this site? Visitors see these under Credits.'));
+      c.appendChild(el('p', 'pt-step', 'Talent'));
+      c.appendChild(el('p', 'pt-body', 'Who else worked on this site? Visitors see these under Talent.'));
       var list = el('div'); c.appendChild(list);
       function addRow(v) {
         v = v || {};
@@ -413,7 +422,7 @@
           if (!o.url) delete o.url;
           return o;
         }).filter(function (o) { return o.name; });
-        save(); close(); flash('Credits saved');
+        save(); close(); flash('Talent saved');
       }));
       c.appendChild(row);
       c.style.width = '440px';
@@ -428,7 +437,7 @@
   var phoneBtn = btn('Phone preview', '', togglePhone);
   if (innerWidth >= 900) bar.appendChild(phoneBtn);
   bar.appendChild(btn('Preview as visitor', '', function () { location.href = location.pathname; }));
-  bar.appendChild(btn('Credits', '', editCredits));
+  bar.appendChild(btn('Talent', '', editCredits));
   bar.appendChild(btn('Copy tour data', '', function () {
     var json = JSON.stringify(tour, null, 2);
     (navigator.clipboard ? navigator.clipboard.writeText(json) : Promise.reject()).then(function () { flash('Copied'); }, function () { prompt('Tour data', json); });

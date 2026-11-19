@@ -6,7 +6,7 @@ Fast, frozen copies of Squarespace sites that designers can show in their portfo
 |---|---|
 | `harness/` | The copy job: capture a page in a real browser, build the scripts-free copy, export, subset fonts, scrub trackers and contact details, quality check. Entry point `make-copy.mjs`. See `harness/README.md`. |
 | `platform/` | Database schema (Supabase), the copy runner (`runner.mjs`: takes queued jobs, runs the harness, uploads to R2), and the serving Worker (`worker/`). See `platform/README.md`. |
-| `app/` | The web app at preserve-app.pages.dev: sign-in, dashboard, new copy, review with pins, tour and credits, plan. Plain JS, no build step. See `app/README.md`. |
+| `app/` | The web app at preserve-app.pages.dev: sign-in, dashboard, new copy, review with pins, Tour and Talent, plan. Plain JS, no build step. See `app/README.md`. |
 
 ## Setup
 
