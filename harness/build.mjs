@@ -94,7 +94,7 @@ set(li,open)},true);
 })();</script>`;
 
 // Header menus, replayed without Squarespace's scripts: the phone menu (burger button opens the full-screen menu,
-// folders slide in with a Back link) and folder dropdowns in the desktop bar on touch screens. Same classes and
+// folders slide in with a Back link; 7.0 templates' overlay menu too) and folder dropdowns in the desktop bar on touch screens. Same classes and
 // attributes Squarespace's header script sets, so the site's own CSS draws and animates everything. Page links inside
 // the menu still get the "snapshot" notice; while open, the header takes the menu's colour theme as Squarespace does; links to a spot on this page close the menu first.
 const MENU_SCRIPT = `<script id="preserve-menu">(function(){
@@ -104,6 +104,8 @@ function isOpen(){return b.classList.contains('header--menu-open')}
 function folders(){return document.querySelectorAll('.header-menu-nav-folder')}
 function show(f,on){f.querySelectorAll('a,button').forEach(function(a){a.setAttribute('tabindex',on?'0':'-1')})}
 function reset(){folders().forEach(function(f){var r=f.getAttribute('data-folder')==='root';f.classList.toggle('header-menu-nav-folder--active',r);f.classList.remove('header-menu-nav-folder--open');show(f,r)})}
+// 7.0 templates (Brine family): a body class shows the full-screen overlay, a class on a folder slides it in.
+function set70(open){b.classList.toggle('is-mobile-overlay-active',open);if(!open){document.querySelectorAll('.Mobile-overlay-folder.is-active-folder').forEach(function(f){f.classList.remove('is-active-folder')});var mm=document.querySelector('.Mobile-overlay-menu');if(mm)mm.classList.remove('has-active-folder')}}
 function set(open){if(open===isOpen())return;b.classList.toggle('header--menu-open',open);
 btns().forEach(function(x){x.classList.toggle('burger--active',open);x.setAttribute('aria-expanded',open?'true':'false');
 var o=x.querySelector('.js-header-burger-open-title'),c=x.querySelector('.js-header-burger-close-title');if(o)o.hidden=open;if(c)c.hidden=!open});
@@ -113,6 +115,9 @@ if(open)reset();else setTimeout(function(){if(!isOpen())reset()},600)}
 btns().forEach(function(x){x.setAttribute('aria-expanded','false');x.removeAttribute('tabindex')});
 document.addEventListener('click',function(e){var t=e.target.closest&&e.target;if(!t)return;
 if(t.closest('.header-burger-btn')){e.preventDefault();set(!isOpen());return}
+var mo=t.closest('[data-controller-overlay="menu"],.Mobile-overlay-close,.Mobile-overlay-back');if(mo){e.preventDefault();set70(mo.matches('[data-controller-overlay="menu"]')&&!b.classList.contains('is-mobile-overlay-active'));return}
+var ft=t.closest('.Mobile-overlay [data-controller-folder-toggle]');if(ft){e.preventDefault();var fo=document.querySelector('.Mobile-overlay-folder[data-controller-folder="'+ft.getAttribute('data-controller-folder-toggle').replace(/"/g,'')+'"]');if(fo){var on=!fo.classList.contains('is-active-folder');fo.classList.toggle('is-active-folder',on);var mm=document.querySelector('.Mobile-overlay-menu');if(mm)mm.classList.toggle('has-active-folder',on)}return}
+var a7=t.closest('.Mobile-overlay a');if(a7&&(a7.getAttribute('href')||'')[0]==='#'){set70(false)}
 var a=t.closest('.header-menu a');if(a){
 var id=a.getAttribute('data-folder-id');if(id!=null){var to=document.querySelector('.header-menu-nav-folder[data-folder="'+id.replace(/"/g,'\\\\"')+'"]');if(to){e.preventDefault();e.stopImmediatePropagation();var from=a.closest('.header-menu-nav-folder');
 if(from){from.classList.add('header-menu-nav-folder--open');show(from,false)}to.classList.add('header-menu-nav-folder--active');show(to,true)}return}
@@ -122,7 +127,7 @@ var h=a.getAttribute('href')||'';if(h[0]==='#'&&h.length>1){set(false)}return}
 var f=t.closest('.header-nav button.header-nav-folder-title[aria-controls]');if(f){e.preventDefault();var ex=f.getAttribute('aria-expanded')!=='true';
 document.querySelectorAll('.header-nav button.header-nav-folder-title[aria-expanded="true"]').forEach(function(o){o.setAttribute('aria-expanded','false')});f.setAttribute('aria-expanded',ex?'true':'false');return}
 if(!t.closest('.header-nav-item--folder'))document.querySelectorAll('.header-nav button.header-nav-folder-title[aria-expanded="true"]').forEach(function(o){o.setAttribute('aria-expanded','false')})},true);
-document.addEventListener('keydown',function(e){if(e.key==='Escape'&&isOpen()){set(false);var x=btns();for(var i=0;i<x.length;i++)if(x[i].offsetParent){x[i].focus();break}}});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&b.classList.contains('is-mobile-overlay-active'))set70(false);if(e.key==='Escape'&&isOpen()){set(false);var x=btns();for(var i=0;i<x.length;i++)if(x[i].offsetParent){x[i].focus();break}}});
 })();</script>`;
 
 // Slideshows built with Swiper (section sliders from plugins such as Will Myers', carousels in code blocks): the
