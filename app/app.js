@@ -9,13 +9,15 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const app = $('#app');
 // Confirmations. On the review screen they show at the top of the side panel, where the person is working, not at the
 // bottom of the window under the Preserve (user testing, 2026-11-17). Elsewhere, and on narrow screens, bottom centre.
-const toast = (t) => {
+// undo: optional function; adds an Undo button and keeps the note up longer.
+const toast = (t, undo) => {
   const el = $('#toast'), side = $('.side'), r = side?.getBoundingClientRect();
   const inSide = !!(r && r.width && innerWidth > 860 && r.bottom > 0);
-  el.textContent = t; el.classList.toggle('in-side', inSide);
+  el.textContent = t; el.classList.toggle('in-side', inSide); el.classList.toggle('act', !!undo);
+  if (undo) { const b = document.createElement('button'); b.className = 'undo'; b.textContent = 'Undo'; b.onclick = () => { el.classList.remove('show'); undo(); }; el.append(' ', b); }
   el.style.left = inSide ? `${r.left + r.width / 2}px` : ''; el.style.top = inSide ? `${Math.max(r.top, 0) + 14}px` : '';
   el.style.maxWidth = inSide ? `${r.width - 24}px` : '';
-  el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2600);
+  el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), undo ? 6000 : 2600);
 };
 // A "Saved" tick next to the item just saved in the panel's lists (a pin, tour stop or answer). It fades by itself.
 const SAVED_TICK = '<small class="saved" aria-live="polite">✓ Saved</small>';
@@ -62,18 +64,15 @@ const noShot = (img) => { const d = document.createElement('div'); d.className =
 window.preserveNoShot = noShot;
 
 function shell(body, { back } = {}) {
-  const unread = store.notifications().filter((n) => !n.read).length;
   app.innerHTML = `<header class="top"><a href="#/" class="brand">Preserve</a>
     <nav>${back ? `<a href="${back}" class="back">← Back</a>` : ''}<a href="#/plan">${esc(store.plan().name)}<span class="wide-only"> plan</span></a>
-    <button class="bell" id="bell" aria-label="Notifications">🔔${unread ? `<span>${unread}</span>` : ''}</button>
     <button class="link" id="out">Sign out</button></nav></header>
-    <div id="notes" class="pop" hidden>${store.notifications().length ? store.notifications().slice(0, 8).map((n) => `<a href="#/copy/${n.copy}" class="${n.read ? '' : 'unread'}">${esc(n.text)}<small>${when(n.at)}</small></a>`).join('') : '<p>No notifications yet.</p>'}</div>
     <main>${body}</main>
     <dialog id="cdlg"></dialog>
     ${store.real ? '' : '<div class="demo-bar">Demo: everything here is stored only in this browser, and new Preserves are simulated. <button class="link" id="reset">Reset demo</button></div>'}`;
   $('#out').onclick = async () => { await store.signOut(); location.hash = '#/'; };
   if ($('#reset')) $('#reset').onclick = () => { store.reset(); location.hash = '#/'; };
-  $('#bell').onclick = (e) => { e.stopPropagation(); const p = $('#notes'); p.hidden = !p.hidden; if (!p.hidden) setTimeout(() => store.markRead(), 1500); };
+  readyTitle();
 }
 
 // A confirmation card (instead of the browser's confirm box). Resolves true when the main button is pressed.
@@ -158,7 +157,8 @@ function drawList() {
   const plan = store.plan();
   $('#cap').textContent = plan.copies >= 100000 ? `${plural(store.liveCount(), 'Live Preserve')} · ${plan.name} plan` : `${store.liveCount()} of ${plan.copies} Live on your ${plan.name} plan`;
   const q = dash.q.trim().toLowerCase();
-  const all = store.copies().filter((c) => c.status !== 'deleted').sort((a, b) => b.created.localeCompare(a.created));
+  const all = store.copies().filter((c) => c.status !== 'deleted')
+    .sort((a, b) => (b.status === 'review') - (a.status === 'review') || b.created.localeCompare(a.created));   // ready to review first
   const shown = all.filter((c) => inFilter(c, dash.filter) && (!q || c.title.toLowerCase().includes(q) || c.url.toLowerCase().includes(q)));
   const pages = Math.max(1, Math.ceil(shown.length / PAGE));
   dash.page = Math.min(dash.page, pages - 1);
@@ -170,8 +170,10 @@ function drawList() {
   app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
   app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => embedCard(store.copy(b.dataset.embed))));
   app.querySelectorAll('[data-live]').forEach((b) => (b.onchange = async () => {
-    const err = await store.setStatus(b.dataset.live, b.checked ? 'ready' : 'archived');
-    if (err) { b.checked = !b.checked; toast(err); } else toast(b.checked ? 'Live again' : 'Archived. Its link now shows “preview paused”.');
+    const id = b.dataset.live, err = await store.setStatus(id, b.checked ? 'ready' : 'archived');
+    if (err) { b.checked = !b.checked; toast(err); return; }
+    if (b.checked) toast('Live again');
+    else toast('Archived. Its link now shows “preview paused”.', async () => { const e2 = await store.setStatus(id, 'ready'); toast(e2 || 'Live again'); });
   }));
   app.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (await confirmDelete()) { await store.remove(b.dataset.del); toast('Deleted'); } }));
 }
@@ -183,11 +185,11 @@ function card(c) {
   const del = `<button class="link danger" data-del="${c.id}">Delete</button>`;
   return `<article class="copy">
     <a href="#/copy/${c.id}" class="shot">${t ? `<img ${t.signed ? `data-still="${c.id}" data-src="${esc(t.src)}"` : `src="${esc(t.src)}"`} alt="${esc(c.title)}" loading="lazy" onerror="preserveNoShot(this)">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
-    <div class="meta"><a href="#/copy/${c.id}" class="title">${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
+    <div class="meta"><a href="#/copy/${c.id}" class="title">${c.status === 'review' ? '<i class="dot" aria-hidden="true"></i>' : ''}${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
     <div class="sub">${esc(hostOf(c))} · ${day(c.created)}</div>
     ${accepted ? `<div class="actions"><button class="btn small" data-link="${c.id}">Copy link</button><button class="btn small secondary" data-embed="${c.id}">Copy embed code</button></div>
       <div class="actions minor"><label class="switch"><input type="checkbox" data-live="${c.id}" ${c.status === 'archived' ? '' : 'checked'}><span class="knob"></span><span class="on">Live</span><span class="off">Archived</span></label>
-        <a class="link" href="#/copy/${c.id}">Review</a>${del}</div>`
+        <a class="link" href="#/copy/${c.id}">Open</a><span class="push"></span>${del}</div>`
       : c.status === 'review' ? `<div class="actions"><a class="btn small" href="#/copy/${c.id}">Review</a></div><div class="actions minor">${del}</div>`
       : c.status === 'failed' ? `<p class="sub">${esc(c.message || '')}</p><div class="actions minor">${del}</div>` : ''}
   </article>`;
@@ -198,12 +200,12 @@ function newCopy() {
   shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop.</p>
     <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
     <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
-    <p class="fine">Takes a few minutes. You can leave this page; we’ll let you know here (and soon by email) when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
+    <p class="fine">Takes a few minutes. You can leave this page; it moves to the top of your Preserves when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
   $('#f').onsubmit = async (e) => {
     e.preventDefault();
     const r = await store.create($('#u').value.trim());
     if (r.error) { $('#err').textContent = r.error; $('#err').hidden = false; return; }
-    app.querySelector('main').innerHTML = `<div class="card narrow center"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. We’ll notify you when it’s ready to review.</p><a class="btn" href="#/">Back to your Preserves</a></div>`;
+    app.querySelector('main').innerHTML = `<div class="card narrow center"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. When it’s ready to review, it moves to the top of your Preserves.</p><a class="btn" href="#/">Back to your Preserves</a></div>`;
   };
 }
 
@@ -233,7 +235,7 @@ function copyPage(id) {
     view.frameKey = null;
     shell(`<div class="card narrow"><h1>${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
       <ol class="steps">${(c.stepNames || []).map((s, i) => `<li class="${i < c.step ? 'done' : i === c.step ? 'now' : ''}">${esc(s)}</li>`).join('')}</ol>
-      <p class="fine">You can leave this page. We’ll notify you when it’s ready.</p></div>`, { back: '#/' });
+      <p class="fine">You can leave this page. When it’s ready to review, it moves to the top of your Preserves.</p></div>`, { back: '#/' });
     return;
   }
   if (c.status === 'failed') {
@@ -259,12 +261,12 @@ function copyPage(id) {
   if (view.frameKey !== key || !$('#fr')) {
     view.frameKey = key;
     // Title, link and the preview controls share one row so the preview starts high and gets the height.
-    shell(`<div class="head copyhead"><div class="ttlwrap"><h1 id="ttl"></h1><p class="sub"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p></div>
-          <div class="toolbar"><span class="hint" id="hint"></span><div class="seg"><button data-l="desktop" class="${view.layout === 'desktop' ? 'on' : ''}">Desktop</button><button data-l="mobile" class="${view.layout === 'mobile' ? 'on' : ''}">Phone</button></div>
+    shell(`<div class="head copyhead"><div class="ttlwrap"><div class="ttlrow"><h1 id="ttl"></h1><div class="morewrap"><button class="link more" id="morebtn" aria-label="More actions" aria-haspopup="true">…</button><div class="pop menu" id="more" hidden><button class="link danger" id="del">Delete this Preserve</button></div></div></div><p class="sub"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p></div>
+          <div class="toolbar"><div class="seg"><button data-l="desktop" class="${view.layout === 'desktop' ? 'on' : ''}">Desktop</button><button data-l="mobile" class="${view.layout === 'mobile' ? 'on' : ''}">Phone</button></div>
             <button class="btn small secondary" id="expand"></button></div></div>
       <div class="split ${view.wide ? 'wide' : ''}">
         <div class="stage">
-          <div class="frame ${view.layout}" id="fw"><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=${encodeURIComponent(view.reviewToken?.t || 1)}" title="Preserve preview"></iframe></div>
+          <div class="frame ${view.layout}" id="fw"><div class="pinbar" id="hint" hidden></div><iframe id="fr" src="${store.view}/c/${c.id}/${view.layout}?review=${encodeURIComponent(view.reviewToken?.t || 1)}" title="Preserve preview"></iframe></div>
         </div>
         <aside class="side"><nav class="tabs" id="tabs"></nav><div id="panel"></div></aside>
       </div>
@@ -274,6 +276,8 @@ function copyPage(id) {
     $('#expand').onclick = () => { view.wide = !view.wide; $('.split').classList.toggle('wide', view.wide); copyPage(id); fitFrame(); };
     fitFrame();
     window.onmessage = (m) => onFrameMessage(m, id);
+    $('#morebtn').onclick = () => { $('#more').hidden = !$('#more').hidden; };
+    $('#del').onclick = async () => { $('#more').hidden = true; if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } };
   } else {
     refreshHeader();
   }
@@ -283,19 +287,21 @@ function copyPage(id) {
   $('#tabs').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${view.tab === k ? 'on' : ''}">${l}${k === 'fonts' && nf ? ` <span class="count">${nf}</span>` : ''}</button>`).join('');
   app.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t; view.pinFor = null; sendMode(); copyPage(id); }));
   panel(c, review);
-  $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'To report an issue, drop a pin and describe the issue. Press Esc to cancel.'
-    : 'Click the spot on the page. Press Esc to cancel.';
+  $('#hint').textContent = !view.pinFor ? '' : view.pinFor === 'check' ? 'Click the spot that looks wrong. Esc to cancel.'
+    : 'Click the spot on the page. Esc to cancel.';
+  $('#hint').hidden = !view.pinFor;
   // The boxes around a font's words belong to the Fonts step only (Jeremy, 2026-11-16).
   if (view.fontShown && view.tab !== 'fonts') showFont(null);
   sendPins(c);
   sendFonts(c);
 }
 
-// Re-render only the header bits that shell() would otherwise redraw (notifications, plan).
-function refreshHeader() {
-  const unread = store.notifications().filter((n) => !n.read).length;
-  const bell = $('#bell'); if (bell) bell.innerHTML = `🔔${unread ? `<span>${unread}</span>` : ''}`;
+// With no bell (Jeremy, 2026-11-19), the browser tab says how many Preserves are ready to review: "(2) Preserve".
+function readyTitle() {
+  const n = store.copies().filter((c) => c.status === 'review').length;
+  document.title = n ? `(${n}) Preserve` : 'Preserve';
 }
+function refreshHeader() { readyTitle(); }
 
 function fitFrame() {
   const fw = $('#fw'), fr = $('#fr');
@@ -359,7 +365,7 @@ function onFrameMessage(m, id) {
   }
   if (d.type === 'preserve-pin' && view.pinFor) {
     const forWhat = view.pinFor;
-    view.pinFor = null; sendMode(); $('#hint').textContent = '';
+    view.pinFor = null; sendMode(); $('#hint').textContent = ''; $('#hint').hidden = true;
     noteDialog(forWhat, null, async (vals) => {
       const pin = { blockId: d.blockId, x: d.x, y: d.y, layout: d.layout, label: d.label };
       markSaved({ kind: forWhat === 'tour' ? 'tour' : 'issue', body: vals.body });
@@ -370,10 +376,9 @@ function onFrameMessage(m, id) {
     copyPage(id);
   }
 }
-// The notifications list closes on a click anywhere outside it, or Esc.
-addEventListener('click', (e) => { const p = $('#notes'); if (p && !p.hidden && !e.target.closest('#notes')) p.hidden = true; });
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#notes') && !$('#notes').hidden) $('#notes').hidden = true; });
-addEventListener('blur', () => { const p = $('#notes'); if (p) p.hidden = true; });   // a click inside the preview frame
+// The "…" menu next to a Preserve's title closes on a click anywhere else, or Esc.
+addEventListener('click', (e) => { const m = $('#more'); if (m && !m.hidden && !e.target.closest('#more,#morebtn')) m.hidden = true; });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#more') && !$('#more').hidden) $('#more').hidden = true; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.fontShown && !view.pinFor) { showFont(null); if (view.id) copyPage(view.id); } });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { view.pinFor = null; sendMode(); if (view.id) copyPage(view.id); } });
 
@@ -462,7 +467,7 @@ function panel(c, review) {
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
       ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>
         <p class="fine">We’ll re-capture the page and focus on the spots you pinned. Check the rest once more before accepting.</p>` : ''}
-      <button class="link" id="del">Delete this Preserve</button></div>`;
+</div>`;
   } else if (view.tab === 'fonts') {
     loadLookalikes(c);
     P.innerHTML = `<h2>Fonts</h2>
@@ -535,7 +540,6 @@ function panel(c, review) {
     copyPage(id);
   };
   on('#refine', () => store.refine(id));
-  on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => embedCard(c));
   P.querySelectorAll('[data-tk]').forEach((b) => (b.onclick = () => { view.talentKind = b.dataset.tk; panel(c, review); }));
