@@ -102,6 +102,8 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     const add = (e, k, why) => {
       if (seen[k].has(e) || list.length >= maxCand || !e.isConnected || e === document.body || e === document.documentElement) return;
       if (e.closest(SKIP_IN) || !vis(e)) return;
+      // Squarespace's own folder dropdowns have our stand-in: only plugin code listening on them makes them a candidate.
+      if (why !== 'listener' && e.closest('.header-nav-folder-title,.header-nav-item--folder')) return;
       // A link to another page is a link: the "snapshot" note covers it, unless plugin code listens on it.
       if (why !== 'listener' && e.closest('a[href]') && !/^(#|javascript:|$)/.test(e.closest('a[href]').getAttribute('href') || '')) return;
       seen[k].add(e); list.push({ e, k, why });
@@ -251,18 +253,22 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
       }
     }
     if (keep && !(await alive())) { out.error = 'the page started over while we clicked'; break; }
+    let st = null;
     if (keep) {
       // Number what took part, keep the change (the elements a plugin added stay aside until the end).
-      const st = await page.evaluate(([trig, kind]) => {
+      st = await page.evaluate(([trig, kind]) => {
         const S = window.__pvActs ||= { n: 0, states: [], hold: [] };
         const id = (e) => { if (!e.hasAttribute('data-pv-at')) e.setAttribute('data-pv-at', String(S.n++)); return e.getAttribute('data-pv-at'); };
-        const t = document.querySelector(`[data-preserve-ic="${trig}"]`);
+        const t = document.querySelector(`[data-preserve-ic="${trig}"]`); if (!t) return null;
         const ch = window.__pvLast.ch.map(([e, d]) => [id(e), d]);
         const tags = Object.fromEntries(window.__pvLast.ch.map(([e]) => [e.getAttribute('data-pv-at'), e.tagName.toLowerCase()]));
         const added = window.__pvLast.added.map((n) => { S.hold.push(n); return S.hold.length - 1; });
         const cb = document.querySelector('[data-preserve-close]'); const close = cb ? id(cb) : null; if (cb) cb.removeAttribute('data-preserve-close');
         return { t: id(t), k: kind, ch, added, tags, close };
       }, [c.i, c.k]);
+      if (!st) { skip('trigger replaced'); keep = false; }
+    }
+    if (keep) {
       if (undo.close && st.close) undo.close = st.close; else delete undo.close;
       states.push({ ...st, u: undo, why: c.why, what: `${c.tag}.${c.cls}`.slice(0, 70), seen: Math.round(seen * 1000) / 1000 });
     }

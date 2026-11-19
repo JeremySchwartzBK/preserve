@@ -146,7 +146,7 @@ async function layoutCss(base, stage, layout, report) {
     }));
     const T = new Map(tree.map((t) => [t.i, t]));
     const unique = new Set();
-    const stateRules = [];
+    const stateRules = [], dropActs = new Set();
     const startObs = () => page.evaluate((ign) => {
       window.__mut = new Map();
       window.__mo = new MutationObserver((ms) => { for (const m of ms) { const e = m.target; if (!e.hasAttribute || !e.hasAttribute('data-pz') || ign.includes(m.attributeName.toLowerCase())) continue; const k = e.getAttribute('data-pz'); const o = window.__mut.get(k) || {}; if (!(m.attributeName in o)) o[m.attributeName] = m.oldValue; window.__mut.set(k, o); } });
@@ -279,8 +279,9 @@ async function layoutCss(base, stage, layout, report) {
     // Clicks and hovers plugins drive (build.mjs ACT_SCRIPT replays the class names and attributes the plugin changed):
     // each state shown once and its look written as rules keyed on what the plugin changed, as for the phone menu.
     const nActs = await page.evaluate(() => (window.__pvAct ? window.__pvActN : 0));
+    dropActs.clear();
     if (nActs) {
-      let rules = 0, orphans = 0, shown = 0;
+      let rules = 0, shown = 0;
       for (let i = 0; i < nActs; i++) {
         await startObs(); await page.evaluate((i) => window.__pvAct(i, 1), i); await sleep(60);
         const ch = await endObs();
@@ -289,10 +290,17 @@ async function layoutCss(base, stage, layout, report) {
         const inl = await page.evaluate((i) => { const d = JSON.parse(document.getElementById('preserve-acts-data').textContent)[i] || { ch: {} };
           return Object.keys(d.ch).filter((id) => d.ch[id].s).map((id) => document.querySelector(`[data-pv-at="${id}"]`)?.getAttribute('data-pz')).filter(Boolean); }, i);
         const dd = diffAll(rest, await capture()); for (const k of inl) if (!ch[k]) delete dd[k];
-        if (Object.keys(ch).length) { addState(`act-${i}`, dd, ch); rules += report.states[`act-${i}`].rules; orphans += report.states[`act-${i}`].orphans; delete report.states[`act-${i}`]; shown++; }
+        if (Object.keys(ch).length) {
+          const r0 = stateRules.length; addState(`act-${i}`, dd, ch);
+          // A state our stylesheet can't draw is left out of the Preserve (the click or hover then does nothing, as
+          // without the recorder) rather than shown half drawn.
+          if (report.states[`act-${i}`].orphans) { stateRules.length = r0; dropActs.add(i); }
+          else { rules += report.states[`act-${i}`].rules; shown++; }
+          delete report.states[`act-${i}`];
+        }
         await page.evaluate((i) => window.__pvAct(i, 0), i); await revert(ch);
       }
-      report.states.acts = { states: nActs, shown, rules, orphans };
+      report.states.acts = { states: nActs, shown, rules, dropped: dropActs.size };
     }
 
     // Hover: each element a :hover rule can apply to, hovered in turn (it and its ancestors match :hover).
@@ -427,6 +435,7 @@ async function layoutCss(base, stage, layout, report) {
     $('script').each((_, el) => { const t = $(el).html(); if (t && /sqs(rte|p)?-|tweak-/.test(t)) $(el).html(renameText(t)); });
     // Comments ("This is Squarespace." and the like) carry nothing the copy needs.
     $('*').contents().add($.root().contents()).filter((_, n) => n.type === 'comment').remove();
+    if (dropActs.size) $('#preserve-acts-data').each((_, el) => { const d = JSON.parse($(el).html() || '[]'); $(el).text(JSON.stringify(d.filter((_, i) => !dropActs.has(i)))); });
     $('head').append(`<style id="pv-css">${css}</style>`);
     let out = $.html();
     // Markup the element walk doesn't reach (template and noscript contents): same renames.
