@@ -43,7 +43,8 @@ try {
   const rec = await recordInteractions(page, 'desktop');
   assert.equal(page.url(), 'https://site.test/', 'the recorder never leaves the page');
   assert.ok(await page.evaluate(() => !!document.getElementById('toggle')), 'a script sending the page elsewhere leaves it in place');
-  assert.equal(rec.skipped['goes to another page'], 2, 'clicks that leave the page are left to the snapshot note: ' + JSON.stringify(rec.skipped));
+  assert.equal(rec.skipped['goes to another page'], 1, 'a click a script sends elsewhere is left to the snapshot note: ' + JSON.stringify(rec.skipped));
+  assert.equal(await page.evaluate(() => document.getElementById('book').hasAttribute('data-pv-at')), false, 'clicking a link is never recorded');
   const kinds = rec.states.map((s) => s.k).sort().join('');
   assert.equal(rec.kept, 3, JSON.stringify(rec));
   assert.equal(kinds, 'cch', JSON.stringify(rec));

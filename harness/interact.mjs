@@ -104,8 +104,9 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
       if (e.closest(SKIP_IN) || !vis(e)) return;
       // Squarespace's own folder dropdowns have our stand-in: only plugin code listening on them makes them a candidate.
       if (why !== 'listener' && e.closest('.header-nav-folder-title,.header-nav-item--folder')) return;
-      // A link to another page is a link: the "snapshot" note covers it, unless plugin code listens on it.
-      if (why !== 'listener' && e.closest('a[href]') && !/^(#|javascript:|$)/.test(e.closest('a[href]').getAttribute('href') || '')) return;
+      // A link to another page is a link: clicking it shows the "snapshot" note, whatever a plugin does with it on the
+      // way (a booking popup, say); hovering it can still open a plugin's menu.
+      if ((k === 'c' || why !== 'listener') && e.closest('a[href]') && !/^(#|javascript:|$)/.test(e.closest('a[href]').getAttribute('href') || '')) return;
       seen[k].add(e); list.push({ e, k, why });
     };
     for (const [e, r] of L.reg) {
