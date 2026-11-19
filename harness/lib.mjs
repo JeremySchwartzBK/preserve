@@ -70,6 +70,13 @@ export const OVERLAY_SELECTORS = [
   '[id^="fbt-ribbon"]',
   '[class*="Friendbuy-ribbon"]',
   '[data-preserve-promo]',
+  // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
+  ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
+    '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
+    '[class*="omnisend-form"]', '[id*="omnisend"]', '.needsclick.kl-private-reset-css-Xuajs1', '[class*="klaviyo-form"]', '[id^="privy"]', '[class*="privy-"]', '[id^="attentive_overlay"]', '#attentive_creative', '[id^="justuno"]', '[class*="ju_"]',
+    '#shopify-pc__banner', '.shopify-pc__banner__dialog', '#shopify-chat', 'inbox-online-store-chat', '#gorgias-chat-container', '#tidio-chat', '[id*="smile-ui"]', '#locale-popup', '[class*="geolocation"]', 'localization-popup',
+    'iframe[src*="referralcorner"]', 'iframe[src*="smile.io"]', '#smile-ui-lite-container', 'iframe[src*="rivo"]', '[id*="gw-"][class*="floating"]', '.cc-popup', '[class*="age_modal"]', '[class*="age-verif"]', '[id*="age-verif"]', '[class*="wheelio"]', '[class*="scratch"][class*="popup"]', '[id*="popup"][role="dialog"]',
+  ] : []),
 ];
 
 // Run in the page before saving it: marks marketing promotions pinned to the window that aren't part of the design.

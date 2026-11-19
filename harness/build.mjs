@@ -722,6 +722,8 @@ function isOwnerScript($, el) {
   if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return false;
   if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return false;
   if (/(^|[^\w.$])(Y|Static|Squarespace|jQuery|SQS)\s*\.|(^|[^\w.])\$\s*\(|window\.Static|fbq|gtag/.test(t)) return false;
+  // Prototype Shopify adapter: theme and app code (anything naming Shopify, its apps' settings) is the platform's, not the owner's.
+  if (process.env.PRESERVE_PLATFORM === 'shopify' && /shopify|appstle|_ABConfig|klaviyo|judgeme|yotpo|rebuy|bold_|loox|okendo|stamped|theme\.|window\.theme/i.test(t)) return false;
   return true;
 }
 
@@ -785,7 +787,9 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       }
     });
     // Connections to hosts the copy never uses.
-    $('link[rel=preconnect],link[rel=dns-prefetch]').remove();
+    $('link[rel~=preconnect],link[rel~=dns-prefetch]').remove();
+    // Prefetch hints are for a later page or script the copy never runs (Shopify themes queue their scripts this way).
+    $('link[rel~=prefetch]').remove();
     $('base').remove();
     if (v.optimize) {
       // Below-the-fold images can wait; the first-screen pass (atf.mjs) sets priority on the hero.

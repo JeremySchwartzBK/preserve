@@ -18,7 +18,8 @@ export function rewriteUrls(text, variant, hosts, siteHost) {
   }
   if (siteHost) {
     const e = siteHost.replace(/\./g, '\\.');
-    text = text.replace(new RegExp(`https?://${e}/`, 'g'), '/').replace(new RegExp(`https?:\\\\/\\\\/${e}\\\\/`, 'g'), '\\/');
+    // Protocol-relative addresses too ("//shop.com/cdn/...", how Shopify themes link their own files).
+    text = text.replace(new RegExp(`(https?:)?//${e}/`, 'g'), '/').replace(new RegExp(`(https?:)?\\\\/\\\\/${e}\\\\/`, 'g'), '\\/');
   }
   return text;
 }

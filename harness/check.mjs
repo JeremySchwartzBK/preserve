@@ -12,7 +12,7 @@ import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL } fro
 const BLUR = 2.5;
 export async function diffPct(aPath, bPath, maxH, mask = [], dpr = 1, debugOut = null, opts = {}) {
   if (!fs.existsSync(aPath) || !fs.existsSync(bPath)) return null;
-  const a = sharp(aPath), b = sharp(bPath);
+  const a = sharp(aPath, { limitInputPixels: false }), b = sharp(bPath, { limitInputPixels: false });
   const [ma, mb] = await Promise.all([a.metadata(), b.metadata()]);
   const w = Math.min(ma.width, mb.width, 800);
   const ha = Math.round(ma.height * w / ma.width), hb = Math.round(mb.height * w / mb.width);
@@ -22,7 +22,7 @@ export async function diffPct(aPath, bPath, maxH, mask = [], dpr = 1, debugOut =
   const SHIFT = typeof opts.shift === 'number' ? opts.shift : ha > 1.5 * (w * 0.75) ? 300 : 40;
   const hA = Math.min(ha, h + SHIFT);
   // A light blur so a photo cropped a pixel or two differently, or text drawn a hair apart, does not count as changed.
-  const raw = async (p, full, hh) => (await sharp(p).resize({ width: w, height: full }).extract({ left: 0, top: 0, width: w, height: hh }).blur(BLUR).ensureAlpha().raw().toBuffer());
+  const raw = async (p, full, hh) => (await sharp(p, { limitInputPixels: false }).resize({ width: w, height: full }).extract({ left: 0, top: 0, width: w, height: hh }).blur(BLUR).ensureAlpha().raw().toBuffer());
   const [ra0, rb] = await Promise.all([raw(aPath, ha, hA), raw(bPath, hb, h)]);
   // Line the live page up with the copy row by row (dynamic time warping on rows, within ±SHIFT): a block a few
   // pixels taller higher up, or wrapped text, shifts everything below it, which would otherwise count as the whole

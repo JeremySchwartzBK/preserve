@@ -69,9 +69,11 @@ async function checkUrl(p) {
   const pre = await step('check-url', async () => {
     const r = await fetch(p.url, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(30000) });
     const html = await r.text();
-    return { status: r.status, finalUrl: r.url, squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html), passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
+    return { status: r.status, finalUrl: r.url, squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html), shopify: /cdn\.shopify\.com|Shopify\.theme|shopify-features/i.test(html), passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
   });
   if (p.path === '') job.preflight = pre;
+  // Prototype (not for production): PRESERVE_PLATFORMS=shopify lets Shopify pages through the Squarespace-only check.
+  if (pre.shopify && !pre.squarespace && (process.env.PRESERVE_PLATFORMS || '').split(',').includes('shopify')) { pre.squarespace = true; pre.platform = 'shopify'; process.env.PRESERVE_PLATFORM = 'shopify'; }
   // A Squarespace lock screen answers HTTP 401 with the password form, so name the lock before the status code.
   if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.passwordPage ? 'password-protected' : pre.status >= 400 ? 'page-unreachable' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
   return null;
