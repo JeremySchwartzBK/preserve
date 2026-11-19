@@ -114,6 +114,7 @@ dialog h2{margin-bottom:4px}
 .linkedit{display:flex;align-items:center;flex-wrap:wrap;margin-top:6px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-weight:400;font-size:.88rem;color:var(--sub);word-break:break-all}
 .linkedit input{display:inline-block;width:auto;margin:0;padding:1px 3px;border:0;border-bottom:1.5px dashed var(--accent);border-radius:3px;background:transparent;color:var(--ink);font-weight:600;font-size:.88rem;min-width:4ch}
 .linkedit input:focus{outline:2px solid var(--accent);background:var(--card)}
+.seg.tk{margin:4px 0 6px}
 .cred{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
 .cred:first-child{border-top:0}.cred input{margin:0;font-size:.88rem;padding:7px 9px}
 .cred input[data-f=url]{grid-column:1/2}.cred .link{justify-self:end;font-size:.85rem}

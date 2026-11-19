@@ -39,7 +39,7 @@ async function lookup(env, key) {
   return obj ? obj.json() : null;
 }
 
-// Talks to the app that frames the copy (review, tour and credits editing, problem reports). In pin mode a clear layer
+// Talks to the app that frames the copy (review, Tour and Talent editing, problem reports). In pin mode a clear layer
 // covers the page, so a tap never presses a button or follows a link; it reports the Squarespace block under it and
 // where inside the block (0-1), which is the same in the phone and desktop layouts. The block under the pointer is
 // outlined while choosing. Pins sent by the app are drawn inside their blocks, so they scroll with the page.
@@ -63,7 +63,7 @@ if(d.type==='preserve-scroll-to'){var b=find(d.blockId);if(b)b.scrollIntoView({b
 if(d.type==='preserve-show-font'){var q=function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'')},want=q(d.name).slice(0,6),hit=[];document.querySelectorAll('.preserve-font-hit').forEach(function(x){x.classList.remove('preserve-font-hit')});if(want){document.querySelectorAll('body *').forEach(function(el){if(!el.childNodes.length||![].some.call(el.childNodes,function(n){return n.nodeType===3&&n.textContent.trim()}))return;if(q(getComputedStyle(el).fontFamily.split(',')[0]).indexOf(want)===0){el.classList.add('preserve-font-hit');hit.push(el)}});if(!document.getElementById('preserve-font-css')){var st=document.createElement('style');st.id='preserve-font-css';st.textContent='.preserve-font-hit{outline:2px solid #e8a33d!important;outline-offset:2px}';document.head.appendChild(st)}if(hit[0])hit[0].scrollIntoView({behavior:'smooth',block:'center'})}}});
 P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'*')})();</script>`;
 
-// Visitors' Tour and Credits: the copy's notes (KV tour:<id>, written by the runner from the app's database) plus the
+// Visitors' Tour and Talent (stored under the older key `credits`): the copy's notes (KV tour:<id>, written by the runner from the app's database) plus the
 // small tour script (R2 platform/tour.js). Not added in the app's frame, which draws its own pins.
 // Embeds shrink a Preserve to fit (a desktop layout on a phone is about a quarter size). The embed code tells the page
 // its scale ({type:'preserve-scale',scale}); this grows our own small UI back to normal size: the "snapshot" toast
