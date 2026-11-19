@@ -464,6 +464,29 @@ function iconFont(css, stage, report) {
 
 // Screenshots of a page at rest (and with the phone menu open), with motion off so they compare like for like. One
 // pixel per CSS pixel: very tall phone pages at 3x come back with tiles left unpainted.
+// Puts each animated picture on the page on its first frame (ImageDecoder), as a still in its place.
+const FREEZE_ANIMATED_IMAGES = async () => {
+  if (!('ImageDecoder' in window)) return 0;
+  const TYPES = { webp: 'image/webp', gif: 'image/gif', png: 'image/png', apng: 'image/apng', avif: 'image/avif' };
+  let n = 0;
+  await Promise.all([...document.images].map(async (i) => {
+    const u = i.currentSrc || i.src; const ext = (u.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+    if (!TYPES[ext]) return;
+    try {
+      const r = await fetch(u); const type = /^image\//.test(r.headers.get('content-type') || '') ? r.headers.get('content-type').split(';')[0] : TYPES[ext];
+      const d = new ImageDecoder({ data: r.body, type }); await d.tracks.ready;
+      if (!d.tracks.selectedTrack || !d.tracks.selectedTrack.animated) { d.close(); return; }
+      const { image } = await d.decode({ frameIndex: 0 });
+      const c = document.createElement('canvas'); c.width = image.displayWidth; c.height = image.displayHeight; c.getContext('2d').drawImage(image, 0, 0); image.close(); d.close();
+      const blob = await new Promise((res) => c.toBlob(res));
+      const pic = i.parentElement && i.parentElement.tagName === 'PICTURE' ? i.parentElement : null;
+      if (pic) pic.querySelectorAll('source').forEach((s) => s.remove());
+      i.removeAttribute('srcset'); i.src = URL.createObjectURL(blob); await i.decode().catch(() => {}); n++;
+    } catch {}
+  }));
+  return n;
+};
+
 async function shots(base, layout, name) {
   const browser = await launch();
   try {
@@ -476,6 +499,10 @@ async function shots(base, layout, name) {
     await page.goto(`${base}/${name}`, { waitUntil: 'load', timeout: 60000 });
     // Every image loaded before the photo, so lazy loading can't make the two differ.
     await page.evaluate(() => Promise.race([new Promise((r) => setTimeout(r, 15000)), Promise.all([...document.images].map((i) => { i.loading = 'eager'; return i.complete ? 0 : new Promise((r) => { i.onload = i.onerror = r; }); }))]));
+    // Animated pictures (GIFs saved as animated WebP) held on their first frame in both photos: otherwise each photo
+    // catches a different frame and the two stylesheets look different where they aren't (Ken Edits' grid of moving
+    // thumbnails, Nov 18 showcase re-run).
+    await page.evaluate(FREEZE_ANIMATED_IMAGES).catch(() => 0);
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
     for (let y = 0; y < h; y += 600) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(60); }
     await page.evaluate(() => { scrollTo(0, 0); document.querySelectorAll('video').forEach((v) => { try { v.pause(); v.currentTime = 0; } catch {} }); });
