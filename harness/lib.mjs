@@ -142,3 +142,18 @@ export const FREEZE_ANIMATED_IMAGES = async () => {
   }));
   return n;
 };
+
+// Animations that play forever (a strip of pictures sliding along, a spinning badge) paused, so two photos of a page
+// don't catch them at different moments: at their start ('start'), at given moments (one per animation, in the order
+// the page lists them), or where they are now. Returns the moments they were paused at. Entrance animations, which
+// end, are left to finish.
+export const PAUSE_LOOPS = (at) => {
+  const out = []; let i = 0;
+  for (const a of document.getAnimations()) {
+    const t = a.effect && a.effect.getTiming && a.effect.getTiming();
+    if (!t || t.iterations !== Infinity) continue;
+    try { a.pause(); if (at === 'start') a.currentTime = 0; else if (Array.isArray(at) && at[i] != null) a.currentTime = at[i]; out.push(a.currentTime); } catch { out.push(null); }
+    i++;
+  }
+  return out;
+};

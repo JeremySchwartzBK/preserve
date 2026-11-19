@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import * as cheerio from 'cheerio';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import { launch, PROFILES, sleep, FREEZE_ANIMATED_IMAGES } from './lib.mjs';
+import { launch, PROFILES, sleep, FREEZE_ANIMATED_IMAGES, PAUSE_LOOPS } from './lib.mjs';
 import { mathForm, ownMotions } from './own-forms.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -493,6 +493,8 @@ async function shots(base, layout, name) {
       const imgs = [...document.images].concat([...bg].map((u) => { const i = new Image(); i.src = u; return i; }));
       return Promise.race([new Promise((r) => setTimeout(r, 15000)), Promise.all(imgs.map((i) => (i.complete ? Promise.resolve() : new Promise((r) => { i.onload = i.onerror = r; })).then(() => i.decode()).catch(() => {})))]);
     });
+    // Endless animations at their start in both photos (Second Story's sliding strip of pictures, Nov 18 showcase re-run).
+    await page.evaluate(PAUSE_LOOPS, 'start').catch(() => 0);
     await ready(); await sleep(300);
     // A full-page photo can itself make images reload; take it until two in a row agree.
     let shot = await page.screenshot({ fullPage: true });
