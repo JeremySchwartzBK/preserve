@@ -491,7 +491,7 @@ function panel(c, review) {
     P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The talent behind the site. Visitors see it under “Talent”.</p>
       <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="crl">${cr.map((p) => credRow(p, tk)).join('') || `<p class="fine">${tk === 'tool' ? 'No tools yet, such as the website platform or an AI tool you used.' : 'No people yet, such as a photographer, copywriter or agency.'}</p>`}</div>
-      <p><button class="btn small secondary" id="addcr">+ Talent</button></p>
+      <p><button class="btn small secondary" id="addcr">${tk === 'tool' ? '+ Tool' : '+ Talent'}</button></p>
       ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
