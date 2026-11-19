@@ -433,7 +433,7 @@ function panel(c, review) {
   const fix = review ? toFix(c) : 0;
   // Talent is typed straight into the panel (stored as copy_pin kind 'credit'): once drawn, the rows are left alone (only new rows get their ids), so a
   // save when a field loses focus never redraws the panel under the next click.
-  const key = `${id}|${view.tab}|${c.status}|${view.flash || ''}`;
+  const key = `${id}|${view.tab}|${view.talentKind || 'person'}|${c.status}|${view.flash || ''}`;
   if (view.tab === 'talent' && P.dataset.k === key) {
     const shown = new Set([...P.querySelectorAll('.cred')].map((r) => r.dataset.cid));
     const added = pinsFor(c, 'talent').filter((p) => !shown.has(String(p.id)));
@@ -477,12 +477,16 @@ function panel(c, review) {
       ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', '+ Add a stop')}</p>
       ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
-      ${review ? '<div class="stack"><button class="btn wide" data-t2="talent">Next: Add Talent</button></div>' : ''}`;
+      ${review ? '<div class="stack"><button class="btn wide" data-t2="talent">Next: Create Talent</button></div>' : ''}`;
   } else if (view.tab === 'talent') {
-    const cr = pinsFor(c, 'talent');
-    P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The people behind the site. Visitors see them under “Talent”.</p>
-      <div id="crl">${cr.map((p) => credRow(p)).join('')}</div>
-      <p><button class="btn small secondary" id="addcr">+ Add a person</button></p>
+    // Two kinds of Talent (Jeremy, 2026-11-18): people (individuals, agencies) and tools (Squarespace, Claude, ...).
+    // The toggle picks which list is being edited; entries made before it have no type and count as people.
+    const tk = view.talentKind || 'person';
+    const cr = pinsFor(c, 'talent').filter((p) => talentKind(p) === tk);
+    P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The talent behind the site. Visitors see it under “Talent”.</p>
+      <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div id="crl">${cr.map((p) => credRow(p, tk)).join('') || `<p class="fine">${tk === 'tool' ? 'No tools yet, such as the website platform or an AI tool you used.' : 'No people yet, such as a photographer, copywriter or agency.'}</p>`}</div>
+      <p><button class="btn small secondary" id="addcr">+ Talent</button></p>
       ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
@@ -534,7 +538,8 @@ function panel(c, review) {
   on('#del', async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } });
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => embedCard(c));
-  on('#addcr', () => { const row = document.createElement('div'); row.innerHTML = credRow(null); $('#crl').appendChild(row.firstElementChild); wireCred(id); row.remove(); $('#crl').lastElementChild.querySelector('input').focus(); });
+  P.querySelectorAll('[data-tk]').forEach((b) => (b.onclick = () => { view.talentKind = b.dataset.tk; panel(c, review); }));
+  on('#addcr', () => { $('#crl > p.fine')?.remove(); const row = document.createElement('div'); row.innerHTML = credRow(null, view.talentKind || 'person'); $('#crl').appendChild(row.firstElementChild); wireCred(id); row.remove(); $('#crl').lastElementChild.querySelector('input').focus(); });
   wireCred(id);
   const nm = $('#nm');
   if (nm) {
@@ -645,7 +650,9 @@ async function accept(id) {
   copyPage(id);
 }
 
-const credRow = (p) => `<div class="cred" data-cid="${p?.id ?? ''}"><input placeholder="Role, e.g. Photography" value="${esc(p?.meta?.role || '')}" data-f="role"><input placeholder="Name" value="${esc(p?.body || '')}" data-f="name"><input placeholder="Link (optional)" value="${esc(p?.meta?.url || '')}" data-f="url"><button class="link" data-crm>Remove</button></div>`;
+const TALENT_KINDS = [['person', 'People'], ['tool', 'Tools']];
+const talentKind = (p) => (p.meta?.type === 'tool' ? 'tool' : 'person');
+const credRow = (p, kind) => `<div class="cred" data-cid="${p?.id ?? ''}" data-kind="${kind}"><input placeholder="${kind === 'tool' ? 'Used for, e.g. Website platform' : 'Role, e.g. Photography'}" value="${esc(p?.meta?.role || '')}" data-f="role"><input placeholder="${kind === 'tool' ? 'Name, e.g. Squarespace' : 'Name'}" value="${esc(p?.body || '')}" data-f="name"><input placeholder="Link (optional)" value="${esc(p?.meta?.url || '')}" data-f="url"><button class="link" data-crm>Remove</button></div>`;
 function wireCred(id) {
   app.querySelectorAll('.cred').forEach((row) => {
     const get = (f) => row.querySelector(`[data-f="${f}"]`).value.trim();
@@ -653,8 +660,9 @@ function wireCred(id) {
       const name = get('name'), role = get('role'), url = get('url').replace(/^(?!https?:\/\/)(?=\S)/, 'https://');
       const pid = row.dataset.cid;
       if (!name) return;
-      if (pid) await store.updatePin(id, pid, { body: name, meta: { role, url: url || null } });
-      else { row.dataset.cid = 'saving'; await store.addPin(id, { kind: 'credit', body: name, meta: { role, url: url || null } }); }
+      const meta = { role, url: url || null, type: row.dataset.kind === 'tool' ? 'tool' : 'person' };
+      if (pid) await store.updatePin(id, pid, { body: name, meta });
+      else { row.dataset.cid = 'saving'; await store.addPin(id, { kind: 'credit', body: name, meta }); }
       toast('Talent saved');
       row.querySelector('.saved')?.remove(); row.insertAdjacentHTML('beforeend', SAVED_TICK);
     };

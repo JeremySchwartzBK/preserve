@@ -337,7 +337,7 @@ async function main() {
         coalesce((select array_agg(name) from copy_name n where n.copy_id = c.id and not n.is_current), '{}') as old,
         coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'page', p.page_id, 'block', p.block_id, 'x', p.x, 'y', p.y, 'title', coalesce(p.meta->>'title', ''), 'body', p.body) order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'tour' and p.block_id is not null), '[]') as spots,
-        coalesce((select jsonb_agg(jsonb_build_object('role', coalesce(p.meta->>'role', ''), 'name', p.body, 'url', p.meta->>'url') order by p.sort, p.created_at)
+        coalesce((select jsonb_agg(jsonb_build_object('role', coalesce(p.meta->>'role', ''), 'name', p.body, 'url', p.meta->>'url', 'type', p.meta->>'type') order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'credit'), '[]') as credits
       from copy c join studio s on s.id = c.studio_id ${ids ? `where c.id in (${ids.map(lit).join(',')})` : ''}`);
     let stills = 0;
@@ -346,7 +346,7 @@ async function main() {
       const status = r.status === 'ready' ? 'live' : ['paused', 'archived'].includes(r.status) && r.live_version ? 'paused' : 'review';
       // Tour stops are pinned by block; the tour script finds the block by its id or Squarespace block id.
       const sel = (id) => (id.startsWith('el:') ? id.slice(3) : id.startsWith('section:') ? `section[data-section-id="${id.slice(8)}"]` : `[id="${id}"],[data-block-id="${id}"]`);
-      const tour = { site: r.id, spots: r.spots.map((p) => ({ id: p.id, page: p.page, sel: sel(p.block), x: p.x, y: p.y, title: p.title, body: p.body })), credits: r.credits.map((c) => (c.url ? c : { role: c.role, name: c.name })) };
+      const tour = { site: r.id, spots: r.spots.map((p) => ({ id: p.id, page: p.page, sel: sel(p.block), x: p.x, y: p.y, title: p.title, body: p.body })), credits: r.credits.map((c) => ({ role: c.role, name: c.name, ...(c.url ? { url: c.url } : {}), ...(c.type === 'tool' ? { type: 'tool' } : {}) })) };
       const v = status === 'review' ? r.latest : r.live_version || r.latest;
       // A version in the page layout tells the viewer where its pages are.
       const sv = r.stored?.[v] || {};

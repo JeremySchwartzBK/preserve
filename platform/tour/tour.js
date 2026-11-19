@@ -60,6 +60,7 @@
     '.pt-num{flex:0 0 22px;height:22px;border-radius:50%;background:#111;color:#fff;font:600 12px/22px system-ui,sans-serif;text-align:center}',
     '.pt-lead{margin:2px 0 12px;color:#444}',
     '.pt-credits{margin:0;padding:0}',
+    '.pt-group{margin:14px 0 2px;font-size:13px;font-weight:600;color:#111}',
     '.pt-credits div{padding:9px 0;border-top:1px solid #f0f0f0}',
     '.pt-credits div:first-child{border-top:0}',
     '.pt-credits dt{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#777;margin:0 0 2px}',
@@ -309,16 +310,24 @@
           row.appendChild(btn('Start tour', 'pt-primary', function () { open(0); }));
           body.appendChild(row);
         } else {
-          body.appendChild(el('p', 'pt-lead', 'The people behind this site.'));
-          var dl = el('dl', 'pt-credits');
-          tour.credits.forEach(function (c) {
-            var d = el('div'); d.appendChild(el('dt', '', c.role));
-            var dd = el('dd');
-            if (c.url) { var a = el('a', '', c.name + ' ↗'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; dd.appendChild(a); }
-            else dd.textContent = c.name;
-            d.appendChild(dd); dl.appendChild(d);
+          body.appendChild(el('p', 'pt-lead', 'The talent behind this site.'));
+          // Two groups (2026-11-18): people (individuals, agencies) and tools (type 'tool'). Older entries are people.
+          // Headings only when both groups have entries.
+          var groups = [['People', tour.credits.filter(function (c) { return c.type !== 'tool'; })], ['Tools', tour.credits.filter(function (c) { return c.type === 'tool'; })]];
+          var both = groups[0][1].length && groups[1][1].length;
+          groups.forEach(function (g) {
+            if (!g[1].length) return;
+            if (both) body.appendChild(el('p', 'pt-group', g[0]));
+            var dl = el('dl', 'pt-credits');
+            g[1].forEach(function (c) {
+              var d = el('div'); d.appendChild(el('dt', '', c.role));
+              var dd = el('dd');
+              if (c.url) { var a = el('a', '', c.name + ' ↗'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; dd.appendChild(a); }
+              else dd.textContent = c.name;
+              d.appendChild(dd); dl.appendChild(d);
+            });
+            body.appendChild(dl);
           });
-          body.appendChild(dl);
         }
       }
       panel.appendChild(tabs); panel.appendChild(body);
