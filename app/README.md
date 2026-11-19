@@ -92,6 +92,10 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
   the visitor pill and panel ("Tour & Talent"), confirmations and plan blurbs. Code and data keep the old name
   (copy_pin kind `credit`, KV `tour.credits`), so accepted Preserves need no data change; their visitor label
   changes because the viewer draws the panel from /_p/tour.js.
+- Talent has two kinds (Jeremy, 2026-11-18): People (individuals and agencies) and Tools (Squarespace, Claude, ...).
+  The app's Talent step has a People / Tools toggle; entries store `meta.type` ('tool', else person). Visitors see
+  both groups at once, with People / Tools headings when both have entries (a coin flip; a visitor toggle is the
+  fallback if it doesn't work). Buttons: "+ Talent", "Next: Create Talent".
 
 ## Fonts step (review, 2026-10-27)
 
