@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { check, diffPct, probeGalleries, probeMotion } from './check.mjs';
+import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
@@ -248,7 +248,19 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       if (c.externalRequests.length) fail('outside-requests', L(c.externalRequests.join(', ')));
       if (c.brokenImages > LIMITS.brokenImages) fail('broken-images', L(`${c.brokenImages} images don't load`));
       if (c.blankImages > LIMITS.blankImages) fail('blank-images', L(`${c.blankImages} images never draw (no file, or too small to load)`));
-      if (c.stuckInvisible > LIMITS.stuckInvisible) fail('blocks-stay-invisible', L(`${c.stuckInvisible} blocks never appear when scrolled to`));
+      if (c.stuckInvisible > LIMITS.stuckInvisible) {
+        // Only what is visible on the live page: blocks that stay invisible there too (titles shown on hover, buttons
+        // Squarespace never fades in) are left out, block by block (check.mjs probeStuck).
+        const live = await withBrowser((b) => probeStuck(b, url, prof));
+        let left = c.stuckAt || [];
+        if (Array.isArray(live)) {
+          const there = new Set(live.map((a) => a.blockId));
+          left = left.filter((a) => !there.has(a.blockId));
+        } else warnings.push(L(`invisible-blocks check on the live page: ${live.error}`));
+        info.stuck = { ...(info.stuck || {}), [prof]: { copy: c.stuckInvisible, live: Array.isArray(live) ? live.length : null, left: left.length } };
+        if (left.length > LIMITS.stuckInvisible) { layoutSpots['blocks-stay-invisible'] = left.slice(0, 3); fail('blocks-stay-invisible', L(`${left.length} blocks never appear when scrolled to`)); }
+        else if (c.spots) delete c.spots['blocks-stay-invisible'];
+      }
       if (c.overlaysVisible?.length) fail('overlay-left', L(c.overlaysVisible.join(', ')));
       if (c.mobileMenu === 'fail') fail('phone-menu-broken', L('burger menu does not open'));
       if (c.dropdown === 'fail') fail('dropdown-broken', L('folder dropdown does not open'));
