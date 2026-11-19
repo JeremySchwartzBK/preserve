@@ -247,7 +247,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
           if (!undo.close) { await press(away); undo.out = await closed(); }
         }
         // One that can't be closed again and covers much of the screen would trap the visitor: left out.
-        if (!undo.again && !undo.esc && !undo.close && !undo.out && seen > 0.25) { skip('opens over the page and does not close'); keep = false; }
+        if (!undo.again && !undo.esc && !undo.close && !undo.out && seen > 0.1) { skip('opens over the page and does not close'); keep = false; }
       }
     }
     if (keep && !(await alive())) { out.error = 'the page started over while we clicked'; break; }
