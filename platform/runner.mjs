@@ -129,9 +129,9 @@ async function main() {
   const plain = (r, N = 'Content') => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '', N) : p) || 'Something looks different from your site.'; };
   // What a finding is on, from the block's Squarespace class in the built page (the block id is the same in both
   // layouts). One place for every kind of finding, whichever part of the check placed it.
-  const NOUNS = [[/\b(?:sqs-block-image|image-block)\b/, 'Image'], [/\b(?:sqs-block-(?:html|markdown|code)|html-block|markdown-block)\b/, 'Text'],
-    [/\b(?:sqs-block-button|button-block)\b/, 'Button'], [/\b(?:sqs-block-(?:gallery|slideshow)|gallery-block|sqs-gallery)\b/, 'Gallery'],
-    [/\b(?:sqs-block-video|video-block)\b/, 'Video'], [/\b(?:sqs-block-(?:form|newsletter)|form-block|newsletter-block)\b/, 'Form']];
+  const NOUNS = [[/\b(?:(?:sqs|ps)-block-image|image-block)\b/, 'Image'], [/\b(?:(?:sqs|ps)-block-(?:html|markdown|code)|html-block|markdown-block)\b/, 'Text'],
+    [/\b(?:(?:sqs|ps)-block-button|button-block)\b/, 'Button'], [/\b(?:(?:sqs|ps)-block-(?:gallery|slideshow)|gallery-block|sqs-gallery)\b/, 'Gallery'],
+    [/\b(?:(?:sqs|ps)-block-video|video-block)\b/, 'Video'], [/\b(?:(?:sqs|ps)-block-(?:form|newsletter)|form-block|newsletter-block)\b/, 'Form']];
   const nounOf = (html, blockId) => {
     if (!blockId || blockId === 'el:body') return 'Content';
     if (blockId === 'el:header') return 'Header';
@@ -140,9 +140,10 @@ async function main() {
     const id = blockId.replace(/^el:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const m = new RegExp(`<[a-z]+[^>]*\\b(?:id|data-block-id)="${id}"[^>]*>`, 'i').exec(html || '');
     if (!m) return 'Content';
-    // The block's own classes, or those of the block inside it (a Fluid Engine cell wraps the Squarespace block).
-    const around = html.slice(m.index, m.index + 1500);
-    for (const [re, n] of NOUNS) if (re.test(around.slice(0, around.indexOf('>') + 1)) || re.test(around)) return n;
+    // The block's own classes (the build renames sqs-block to ps-block), else those of the next two tags inside it (a
+    // Fluid Engine cell wraps the Squarespace block). Never further, so a neighbouring block can't lend its kind.
+    const inner = (html.slice(m.index + m[0].length, m.index + m[0].length + 2000).match(/<[a-z][^>]*>/gi) || []).slice(0, 2).join('');
+    for (const tags of [m[0], inner]) for (const [re, n] of NOUNS) if (re.test(tags)) return n;
     return /<section\b/i.test(m[0]) ? 'Section' : 'Content';
   };
   const FAILED = {
