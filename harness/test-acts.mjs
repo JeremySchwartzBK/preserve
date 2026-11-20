@@ -57,6 +57,9 @@ try {
   assert.ok(!html.includes('plugin.test'));
   const copy = await (await browser.newContext({ viewport: { width: 1200, height: 800 } })).newPage();
   await copy.setContent(html);
+  // The pointer starts at the top-left corner, over the Shop link: on a slow machine Chromium reports that as a hover
+  // once the page is laid out, and our stand-in opens the menu. Rest it somewhere neutral first, as a visitor's would be.
+  await copy.mouse.move(600, 700); await sleep(200);
   const h = (sel) => copy.evaluate((s) => document.querySelector(s).getBoundingClientRect().height, sel);
   assert.equal(await h('#menu'), 0, 'menu closed at rest');
   assert.equal(await h('#panel'), 0, 'panel closed at rest');
