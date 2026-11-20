@@ -71,6 +71,13 @@ export default {
       if (!env.WAKE_SECRET || req.headers.get('authorization') !== `Bearer ${env.WAKE_SECRET}`) return new Response(null, { status: 401 });
       return Response.json(await wake(env));
     }
+    // Stops runner 1 so the next wake starts a fresh one on the deployed image (a stuck runner that keeps being woken
+    // never goes idle, so it would otherwise never be replaced). Running jobs go back to the queue (SIGTERM).
+    if (url.pathname === '/restart' && req.method === 'POST') {
+      if (!env.WAKE_SECRET || req.headers.get('authorization') !== `Bearer ${env.WAKE_SECRET}`) return new Response(null, { status: 401 });
+      await runner(env, 1).stop('SIGTERM');
+      return Response.json({ stopped: 'runner-1' });
+    }
     return new Response(null, { status: 404 });
   },
   async scheduled(event, env, ctx) {
