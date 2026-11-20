@@ -48,11 +48,18 @@ async function main() {
   const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
   // With DATABASE_URL (a dedicated database role; how the hosted runner connects) queries go straight to Postgres.
   // Without it they go through the Supabase management API with the access token the proxy injects (this workspace).
-  const pool = process.env.DATABASE_URL ? new (await import('pg')).default.Pool({ connectionString: process.env.DATABASE_URL, max: 4, ssl: { rejectUnauthorized: false } }) : null;  // Supabase's certificate isn't from a public CA; still encrypted
+  const db = { ok: null, error: null, errorAt: null };  // the last database success and failure, shown on /health
+  // Timeouts so a connection that never answers (a network block, a pooler problem) shows up as an error the slots retry
+  // and /health reports, instead of every slot waiting on it silently forever.
+  const pool = process.env.DATABASE_URL ? new (await import('pg')).default.Pool({ connectionString: process.env.DATABASE_URL, max: 4, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 20e3, query_timeout: 10 * 60e3, keepAlive: true }) : null;  // Supabase's certificate isn't from a public CA; still encrypted
+  pool?.on('error', (e) => { db.error = e.message; db.errorAt = new Date().toISOString(); log('database connection error', e.message); });
   async function sql(query) {
     if (pool) {
-      const r = await pool.query(query);
-      return (Array.isArray(r) ? r.at(-1) : r).rows || [];
+      try {
+        const r = await pool.query(query);
+        db.ok = new Date().toISOString();
+        return (Array.isArray(r) ? r.at(-1) : r).rows || [];
+      } catch (e) { db.error = e.message; db.errorAt = new Date().toISOString(); throw e; }
     }
     for (let i = 0; ; i++) {
       const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer injected-by-proxy' }, body: JSON.stringify({ query }) });
@@ -510,7 +517,7 @@ async function main() {
       if (/[?&]lead=0\b/.test(req.url || '')) { if (!upkeepOff) log('upkeep left to the first runner'); upkeepOff = true; }
       else if (/[?&]lead=1\b/.test(req.url || '')) upkeepOff = false;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ worker: WORKER, pipeline: PIPELINE, jobs: running.size, upkeep: !upkeepOff, idleSeconds: running.size ? 0 : Math.round((Date.now() - lastBusy) / 1000), stopping }));
+      res.end(JSON.stringify({ worker: WORKER, pipeline: PIPELINE, jobs: running.size, upkeep: !upkeepOff, idleSeconds: running.size ? 0 : Math.round((Date.now() - lastBusy) / 1000), stopping, db }));
     }).listen(+process.env.PORT);
   }
 
