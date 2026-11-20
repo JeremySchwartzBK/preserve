@@ -94,6 +94,10 @@ jobs:
           node-version: 22
       - name: Key present
         run: test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+      - name: Upload the visitor panel script and our fonts
+        run: |
+          npx $WRANGLER r2 object put preserve-copies/platform/tour.js --file platform/tour/tour.js --content-type text/javascript --remote
+          for f in inter newsreader; do npx $WRANGLER r2 object put preserve-copies/platform/fonts/$f.woff2 --file platform/fonts/$f.woff2 --content-type font/woff2 --remote; done
       - name: Deploy the viewer
         run: |
           mkdir -p /tmp/view && cp platform/worker/src/index.js /tmp/view/_worker.js

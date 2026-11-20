@@ -98,6 +98,9 @@ r = await get(`/c/${id2}/../../captures/x/index.json`); ok('captures never serve
 await store.kvPut(`tour:${id2}`, { site: id2, spots: [{ id: 's1', sel: 'body', x: 0.5, y: 0.5, title: 'Home stop', body: '', page: 'home' }, { id: 's2', sel: 'body', x: 0.5, y: 0.5, title: 'Kosa stop', body: '', page: 'ab12' }], credits: [{ role: 'Design', name: 'Studio' }] });
 r = await get(`/c/${id2}/work/kosa/desktop`); const tt = await r.text(); ok('page layout: tour shows this page\'s stops only', tt.includes('Kosa stop') && !tt.includes('Home stop') && tt.includes('Studio'));
 await store.put('platform/tour.js', fs.readFileSync(new URL('../tour/tour.js', import.meta.url)), 'text/javascript');
+for (const f of ['inter', 'newsreader']) await store.put(`platform/fonts/${f}.woff2`, fs.readFileSync(new URL(`../fonts/${f}.woff2`, import.meta.url)), 'font/woff2');
+r = await get('/_p/fonts/inter.woff2'); ok('our fonts are served', r.status === 200 && r.headers.get('content-type') === 'font/woff2');
+r = await get('/_p/fonts/other.woff2'); ok('only our two fonts', r.status === 404);
 const browser2 = await launch();
 for (const prof of ['desktop', 'mobile']) {
   const ctx = await browser2.newContext({ ...PROFILES[prof].context });
