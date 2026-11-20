@@ -118,6 +118,21 @@ async function layoutCss(base, stage, layout, report) {
     // Width: one capture inside each range of widths the stylesheets distinguish (within this layout's widths).
     const [lo, hi] = RANGE[layout];
     const bps = (await page.evaluate(() => window.__oc.breakpoints())).filter((b) => b > lo && b <= hi);
+    // @container rules switch where a box crosses a width, which is some other window width than the number in the
+    // rule (The Dial, Nov 19: the newsletter form stacks under a 340px box, about a 380px window, but the copy kept
+    // the side-by-side form from 390px all the way down to 321px). Find those window widths by trying them.
+    if (await page.evaluate(() => window.__oc.hasContainerRules())) {
+      const sigAt = async (w) => { await page.setViewportSize({ width: w, height: H }); await sleep(60); return page.evaluate(() => window.__oc.containerSig()); };
+      let pw = lo, ps = await sigAt(lo);
+      for (let w = lo + 16; ; w = Math.min(hi, w + 16)) {
+        const s = await sigAt(w);
+        if (s !== ps) { let a = pw, z = w; while (z - a > 1) { const m = (a + z) >> 1; if ((await sigAt(m)) === ps) a = m; else z = m; } bps.push(z); }
+        pw = w; ps = s;
+        if (w >= hi) break;
+      }
+      bps.sort((a, b) => a - b);
+      await page.setViewportSize({ width: W, height: H }); await sleep(250);
+    }
     const ranges = [];
     let start = lo;
     for (const b of [...bps, hi + 1]) { if (b > start) ranges.push([start, b - 1]); start = Math.max(start, b); }
@@ -176,6 +191,24 @@ async function layoutCss(base, stage, layout, report) {
           const a = t.up[k];
           if (changed[a]) sel = stateSel(a, changed[a]) + (a === +i ? '' : ` .u${i}`), unique.add(a);
           else { const s = t.sib[k].find((x) => changed[x]); if (s !== undefined) { sel = stateSel(s, changed[s]) + ` ~ .u${a}` + (a === +i ? '' : ` .u${i}`); unique.add(s); unique.add(a); } }
+        }
+        // Otherwise the element whose attributes changed sits elsewhere: a following sibling or a cousin, which plain
+        // selectors can't reach (Colorize, Nov 19: a slideshow's pagers toggle and the slides beside them fade).
+        // Key the rule on their nearest common ancestor holding the changed element in its new state.
+        if (!sel) {
+          let best = null;
+          for (const e in changed) {
+            const te = T.get(+e); if (!te) continue;
+            const ups = new Set(te.up);
+            const k = t.up.findIndex((a) => ups.has(a));
+            if (k >= 0 && (!best || k < best.k)) best = { k, e: +e };
+          }
+          if (best) {
+            const a = t.up[best.k];
+            const has = `:has(${stateSel(best.e, changed[best.e])})`;
+            sel = a === +i ? `.u${i}${has}` : `.u${a}${has} .u${i}`;
+            unique.add(best.e); unique.add(a);
+          }
         }
         if (!sel) { orphan++; (report.orphanSamples ||= []).length < 6 && report.orphanSamples.push(`${name}: ${i} ${d[i][''] ? ser(d[i]['']).slice(0, 120) : Object.keys(d[i]).join(',')}`); continue; }
         unique.add(+i);
