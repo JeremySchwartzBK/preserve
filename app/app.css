@@ -146,6 +146,8 @@ main.full{padding:16px 32px 24px}
 .frame.mobile{height:min(844px,calc(100vh - 150px))}
 .chip{font-size:.75rem;padding:2px 9px}
 .pins.findings .row{gap:6px;flex-wrap:wrap}
+/* Several suspected issues on one part of the page share a letter; each keeps its own answer */
+.pins.findings .fitem+.fitem{margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#e6e6e6)}
 @media (max-width:860px){main.full{padding:14px 16px 60px}.copyhead{flex-wrap:wrap}.frame.desktop{height:60vh}}
 @media (min-width:861px){.side{max-height:calc(100vh - 150px);top:64px}.stage{top:64px}}
 /* Review flow feedback (Jeremy, 2026-10-26) */
