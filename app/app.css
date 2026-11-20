@@ -205,3 +205,6 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 .pop.menu{position:absolute;left:0;right:auto;top:100%;width:max-content;padding:8px 12px}
 /* Pin hint as a banner inside the preview. */
 .pinbar{position:absolute;left:50%;top:12px;transform:translateX(-50%);z-index:3;background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:999px;font-size:.88rem;box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:none;white-space:nowrap;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis}
+
+/* Suspected issues answered "Not an issue" in an earlier round, tucked away. */
+details.dismissed{margin:4px 0 12px}details.dismissed summary{cursor:pointer;color:var(--sub);font-size:.9rem}details.dismissed .pins{margin-top:8px;opacity:.8}
