@@ -40,13 +40,18 @@ const WORDING = {
   notFound: ['Not found', 'There’s no Preserve at this address.'],
   reviewExpired: ['Review link expired', 'This review link has expired. Open the Preserve from your dashboard to review it.'],
 };
+// Our type (Plum style, 2026-11-20): our own copies of Inter and Newsreader, under names no site uses, served from
+// /_p/fonts/ on the Preserve's own address (the page's rules allow fonts only from there). Browsers fetch a font only
+// when text on screen uses it.
+const UI_FONTS = '@font-face{font-family:"Preserve Inter";src:url(/_p/fonts/inter.woff2) format("woff2");font-weight:100 900;font-display:swap}@font-face{font-family:"Preserve Newsreader";src:url(/_p/fonts/newsreader.woff2) format("woff2");font-weight:500;font-display:swap}';
+const UI_SANS = '"Preserve Inter",system-ui,-apple-system,"Segoe UI",sans-serif';
 // A string as a JavaScript literal that is safe inside an inline script.
 const js = (s) => JSON.stringify(s).replace(/[\u0080-\uffff<>]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 // The "this is a snapshot" note for clicks on links, forms and checkout. Every Preserve page carries the copy of this
 // script from when it was made (harness/build.mjs REPLICA_SCRIPT), with that day's wording. The viewer swaps it for
 // this one, so all Preserves show today's wording. Keep the behaviour in step with build.mjs.
 const REPLICA_SCRIPT = `<script id="preserve-replica">(function(){
-var t,LINK=${js(WORDING.linkNote)},FORM=${js(WORDING.formNote)};function toast(msg){if(!t){t=document.createElement('div');t.setAttribute('role','status');t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:all .25s;z-index:2147483647;background:#111;color:#fff;font:500 14px/1.4 system-ui,sans-serif;padding:12px 18px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.25);pointer-events:none;max-width:90vw;text-align:center';document.body.appendChild(t)}t.textContent=msg||FORM;var bg=document.elementFromPoint(innerWidth/2,innerHeight-40),c='';for(;bg&&bg.nodeType===1;bg=bg.parentElement){c=getComputedStyle(bg).backgroundColor;if(c&&!/rgba\\(.*,\\s*0\\)|transparent/.test(c))break;c=''}var m=(c||'rgb(255,255,255)').match(/\\d+/g)||[255,255,255],dark=(+m[0]*299+ +m[1]*587+ +m[2]*114)/1000<128;t.style.background=dark?'#fff':'#111';t.style.color=dark?'#111':'#fff';requestAnimationFrame(function(){t.style.opacity=1;t.style.transform='translateX(-50%)'});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity=0;t.style.transform='translateX(-50%) translateY(20px)'},2600)}
+var t,LINK=${js(WORDING.linkNote)},FORM=${js(WORDING.formNote)};function toast(msg){if(!t){var f=document.createElement('style');f.textContent=${js(UI_FONTS)};document.head.appendChild(f);t=document.createElement('div');t.setAttribute('role','status');t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:all .25s;z-index:2147483647;background:#1d1a24;color:#fff;font:500 14px/1.4 ${UI_SANS.replace(/"/g, '\\"')};padding:12px 18px;border-radius:14px;box-shadow:0 6px 24px rgba(29,26,36,.25);pointer-events:none;max-width:90vw;text-align:center';document.body.appendChild(t)}t.textContent=msg||FORM;var bg=document.elementFromPoint(innerWidth/2,innerHeight-40),c='';for(;bg&&bg.nodeType===1;bg=bg.parentElement){c=getComputedStyle(bg).backgroundColor;if(c&&!/rgba\\(.*,\\s*0\\)|transparent/.test(c))break;c=''}var m=(c||'rgb(255,255,255)').match(/\\d+/g)||[255,255,255],dark=(+m[0]*299+ +m[1]*587+ +m[2]*114)/1000<128;t.style.background=dark?'#fff':'#1d1a24';t.style.color=dark?'#1d1a24':'#fff';requestAnimationFrame(function(){t.style.opacity=1;t.style.transform='translateX(-50%)'});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity=0;t.style.transform='translateX(-50%) translateY(20px)'},2600)}
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href],button[type=submit],input[type=submit],form button,[class*="klaviyo-form"] button,button[class*="form-button"],.sqs-add-to-cart-button,[data-add-to-cart],.sqs-block-button-element');if(!a)return;
 if(a.matches('[data-folder-id],[data-folder],.header-nav-folder-title,[data-action],[aria-controls]')||a.closest('[data-pv-actc]'))return;
 if(a.tagName==='A'){if(a.hasAttribute('data-pv-internal'))return;var h=a.getAttribute('href')||'';if(h===''||h[0]==='#'||/^javascript:/i.test(h))return;var u=new URL(h,location.href);if(u.origin===location.origin&&u.pathname===location.pathname&&u.hash)return}
@@ -111,7 +116,7 @@ const beforeBodyEnd = (html, add) => {
   const i = html.toLowerCase().lastIndexOf('</body>');
   return i < 0 ? html : html.slice(0, i) + add + html.slice(i);
 };
-const page = (status, title, text) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="${ROBOTS}"><title>${title}</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:16px/1.5 system-ui,sans-serif;color:#555;background:#f7f6f3;text-align:center;padding:0 24px}p{max-width:28em}</style></head><body><p>${text}</p></body></html>`, { status, headers: { 'content-type': TYPES.html, 'cache-control': 'no-store', 'x-robots-tag': ROBOTS } });
+const page = (status, title, text) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="${ROBOTS}"><title>${title}</title><style>${UI_FONTS}html,body{height:100%;margin:0}body{display:grid;place-items:center;font:16px/1.5 ${UI_SANS};color:#6c6878;background:#f7f7f9;text-align:center;padding:0 24px;-webkit-font-smoothing:antialiased}p{max-width:28em}</style></head><body><p>${text}</p></body></html>`, { status, headers: { 'content-type': TYPES.html, 'cache-control': 'no-store', 'x-robots-tag': ROBOTS } });
 const notFound = () => page(404, ...WORDING.notFound);
 
 function isPhone(req) {
@@ -250,6 +255,12 @@ export default {
     const url = new URL(req.url);
     const parts = url.pathname.split('/').slice(1);
 
+    const font = /^\/_p\/fonts\/(inter|newsreader)\.woff2$/.exec(url.pathname);
+    if (font) {
+      const obj = await env.COPIES.get(`platform/fonts/${font[1]}.woff2`);
+      if (!obj) return new Response(null, { status: 404 });
+      return new Response(obj.body, { headers: { 'content-type': 'font/woff2', 'cache-control': 'public, max-age=31536000, immutable', 'x-robots-tag': ROBOTS } });
+    }
     if (url.pathname === '/_p/tour.js') {
       const obj = await env.COPIES.get('platform/tour.js');
       if (!obj) return new Response(null, { status: 404 });

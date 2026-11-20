@@ -20,12 +20,22 @@ const toast = (t, undo) => {
   el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), undo ? 6000 : 2600);
 };
 // A "Saved" tick next to the item just saved in the panel's lists (a pin, tour stop or answer). It fades by itself.
-const SAVED_TICK = '<small class="saved" aria-live="polite">✓ Saved</small>';
 const markSaved = (m) => { view.saved = { ...m, until: Date.now() + 3200 }; };
 const isSaved = (p) => !!(view.saved && Date.now() < view.saved.until
   && (view.saved.id ? String(view.saved.id) === String(p.id) : p.kind === view.saved.kind && p.body === view.saved.body));
-const COPY_ICON = '<svg class="ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
-const CHECK_ICON = '<svg class="ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// One line-icon set (Plum style, 2026-11-20): 16 px grid, 1.25 stroke, round ends.
+const ICON_PATHS = {
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  check: '<path d="M3 8.5l3 3 7-7"/>',
+  copy: '<rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5"/>',
+  back: '<path d="M13 8H3M7 4L3 8l4 4"/>',
+  next: '<path d="M3 8h10M9 4l4 4-4 4"/>',
+  more: '<circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/>',
+};
+const ic = (name, size = 14) => `<svg class="ico" viewBox="0 0 16 16" width="${size}" height="${size}" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name]}</svg>`;
+const COPY_ICON = ic('copy');
+const CHECK_ICON = ic('check');
+const SAVED_TICK = `<small class="saved" aria-live="polite">${ic('check', 12)} Saved</small>`;
 const copyText = async (t, what) => { try { await navigator.clipboard.writeText(t); toast(`${what} copied`); } catch { prompt(`Copy the ${what.toLowerCase()}:`, t); } };
 const when = (iso) => { const d = (Date.now() - Date.parse(iso)) / 1000; return d < 60 ? 'just now' : d < 3600 ? `${Math.round(d / 60)} min ago` : d < 86400 ? `${Math.round(d / 3600)} h ago` : `${Math.round(d / 86400)} d ago`; };
 const day = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -65,7 +75,7 @@ window.preserveNoShot = noShot;
 
 function shell(body, { back } = {}) {
   app.innerHTML = `<header class="top"><a href="#/" class="brand">Preserve</a>
-    <nav>${back ? `<a href="${back}" class="back">← Back</a>` : ''}<a href="#/plan">${esc(store.plan().name)}<span class="wide-only"> plan</span></a>
+    <nav>${back ? `<a href="${back}" class="back">${ic('back')} Back</a>` : ''}<a href="#/plan">${esc(store.plan().name)}<span class="wide-only"> plan</span></a>
     <button class="link" id="out">Sign out</button></nav></header>
     <main>${body}</main>
     <dialog id="cdlg"></dialog>
@@ -144,7 +154,7 @@ let dash = { q: '', filter: 'all', page: 0 };
 
 function dashboard() {
   if ($('#dashq')) { refreshHeader(); drawList(); return; }
-  shell(`<div class="head"><div><h1>Your Preserves</h1><p class="sub" id="cap"></p></div><a href="#/new" class="btn">+ New Preserve</a></div>
+  shell(`<div class="head"><div><h1>Your Preserves</h1><p class="sub" id="cap"></p></div><a href="#/new" class="btn">${ic('plus')} New Preserve</a></div>
     <div class="dashbar"><input id="dashq" type="search" placeholder="Search by site name or address" value="${esc(dash.q)}" aria-label="Search your Preserves">
       <div class="seg" id="filt">${FILTERS.map(([k, l]) => `<button data-f="${k}" class="${dash.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     <section class="grid" id="list"></section><nav class="pager" id="pager"></nav>`);
@@ -165,7 +175,7 @@ function drawList() {
   $('#list').innerHTML = shown.slice(dash.page * PAGE, (dash.page + 1) * PAGE).map(card).join('')
     || `<p class="sub">${all.length ? 'No Preserves match.' : 'No Preserves yet. Make your first one.'}</p>`;
   fillThumbs($('#list'));
-  $('#pager').innerHTML = pages > 1 ? `<button class="btn small secondary" data-pg="-1" ${dash.page ? '' : 'disabled'}>← Newer</button><span class="sub">Page ${dash.page + 1} of ${pages}</span><button class="btn small secondary" data-pg="1" ${dash.page < pages - 1 ? '' : 'disabled'}>Older →</button>` : '';
+  $('#pager').innerHTML = pages > 1 ? `<button class="btn small secondary" data-pg="-1" ${dash.page ? '' : 'disabled'}>${ic('back')} Newer</button><span class="sub">Page ${dash.page + 1} of ${pages}</span><button class="btn small secondary" data-pg="1" ${dash.page < pages - 1 ? '' : 'disabled'}>Older ${ic('next')}</button>` : '';
   app.querySelectorAll('[data-pg]').forEach((b) => (b.onclick = () => { dash.page += +b.dataset.pg; drawList(); scrollTo(0, 0); }));
   app.querySelectorAll('[data-link]').forEach((b) => (b.onclick = () => copyText(store.link(store.copy(b.dataset.link)), 'Link')));
   app.querySelectorAll('[data-embed]').forEach((b) => (b.onclick = () => embedCard(store.copy(b.dataset.embed))));
@@ -233,7 +243,7 @@ function copyPage(id) {
   if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null, missing: [], fontShown: null };
   if (c.status === 'processing') {
     view.frameKey = null;
-    shell(`<div class="card narrow"><h1>${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
+    shell(`<div class="card narrow"><h1 class="name">${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
       <ol class="steps">${(c.stepNames || []).map((s, i) => `<li class="${i < c.step ? 'done' : i === c.step ? 'now' : ''}">${esc(s)}</li>`).join('')}</ol>
       <p class="fine">You can leave this page. When it’s ready to review, it moves to the top of your Preserves.</p></div>`, { back: '#/' });
     return;
@@ -261,7 +271,7 @@ function copyPage(id) {
   if (view.frameKey !== key || !$('#fr')) {
     view.frameKey = key;
     // Title, link and the preview controls share one row so the preview starts high and gets the height.
-    shell(`<div class="head copyhead"><div class="ttlwrap"><div class="ttlrow"><h1 id="ttl"></h1><div class="morewrap"><button class="link more" id="morebtn" aria-label="More actions" aria-haspopup="true">…</button><div class="pop menu" id="more" hidden><button class="link danger" id="del">Delete this Preserve</button></div></div></div><p class="sub"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p></div>
+    shell(`<div class="head copyhead"><div class="ttlwrap"><div class="ttlrow"><h1 id="ttl"></h1><div class="morewrap"><button class="link more" id="morebtn" aria-label="More actions" aria-haspopup="true">${ic('more', 18)}</button><div class="pop menu" id="more" hidden><button class="link danger" id="del">Delete this Preserve</button></div></div></div><p class="sub"><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a></p></div>
           <div class="toolbar"><div class="seg"><button data-l="desktop" class="${view.layout === 'desktop' ? 'on' : ''}">Desktop</button><button data-l="mobile" class="${view.layout === 'mobile' ? 'on' : ''}">Phone</button></div>
             <button class="btn small secondary" id="expand"></button></div></div>
       <div class="split ${view.wide ? 'wide' : ''}">
@@ -458,8 +468,8 @@ function panel(c, review) {
     const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
     P.innerHTML = `<h2>Look and Feel</h2>
       <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
-      <p class="sub">To report an issue, click <b>+ Issue</b>, drop a pin, and describe the issue.</p>
-      <p>${pinButton('check', '+ Issue')}</p>
+      <p class="sub">To report an issue, click <b>${ic('plus', 12)} Issue</b>, drop a pin, and describe the issue.</p>
+      <p>${pinButton('check', `${ic('plus')} Issue`)}</p>
       ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
@@ -488,7 +498,7 @@ function panel(c, review) {
     P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
       ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but tour stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
       ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
-      <p>${pinButton('tour', '+ Add a stop')}</p>
+      <p>${pinButton('tour', `${ic('plus')} Add a stop`)}</p>
       ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
       ${review ? '<div class="stack"><button class="btn wide" data-t2="talent">Next: Create Talent</button></div>' : ''}`;
   } else if (view.tab === 'talent') {
@@ -499,7 +509,7 @@ function panel(c, review) {
     P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The talent behind the site. Visitors see it under “Talent”.</p>
       <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="crl">${cr.map((p) => credRow(p, tk)).join('') || `<p class="fine">${tk === 'tool' ? 'No tools yet, such as the website platform or an AI tool you used.' : 'No people yet, such as a photographer, copywriter or agency.'}</p>`}</div>
-      <p><button class="btn small secondary" id="addcr">${tk === 'tool' ? '+ Tool' : '+ Talent'}</button></p>
+      <p><button class="btn small secondary" id="addcr">${ic('plus')} ${tk === 'tool' ? 'Tool' : 'Talent'}</button></p>
       ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);

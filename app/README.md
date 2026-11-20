@@ -38,7 +38,8 @@ Deploy: `wrangler pages deploy <this folder> --project-name preserve-app --branc
 - Tour stops = copy_pin kind tour (meta.title); Talent = kind credit (body name, meta.role/url; the
   database and KV keep the older name `credit`/`credits`). The runner writes
   them to KV tour:<id>; the Worker adds them plus /_p/tour.js (R2 platform/tour.js, visitor-only build of the demo
-  tour script, source platform/tour/tour.js) to visitor pages.
+  tour script, source platform/tour/tour.js) to visitor pages. Its type comes from /_p/fonts/inter.woff2 and
+  newsreader.woff2 (R2 platform/fonts/, source platform/fonts/), which a viewer deploy must upload with tour.js.
 - Link name is edited inline in the link; Enter or leaving the field saves; old names redirect.
 - Report a problem = point and describe (copy_pin kind issue, meta.report=true), logged for triage.
 - UX wording pass deferred by Jeremy.
