@@ -341,7 +341,12 @@ function sendPins(c, force) {
   frameWin()?.postMessage({ type: 'preserve-pins', pins }, '*');
 }
 // Findings for the layout on screen, top to bottom (lettered in that order, on the page and in the list).
-const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
+// A suspected issue the person called "Not an issue" in an earlier round stays answered in later refinements, on
+// phone and desktop alike (runner.mjs carries the answer). It drops out of the list and off the page, into a collapsed
+// list where the answer can still be changed (Jeremy, 2026-11-20).
+const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-problem';
+const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && dismissedEarlier(p));
+const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
 // The person's answer for each suspected issue: two answers since user testing (Jeremy, 2026-11-12). Older answers
 // stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
@@ -448,7 +453,7 @@ function panel(c, review) {
   P.dataset.k = view.tab === 'talent' ? key : '';
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
-    const found = findingsOf(c);
+    const found = findingsOf(c), gone = dismissedOf(c);
     const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).length;
     const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
     P.innerHTML = `<h2>Look and Feel</h2>
@@ -461,6 +466,9 @@ function panel(c, review) {
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
         <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
           <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}</ol>` : ''}
+      ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
+        <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(p.body)}</span>
+          <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
       ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
       ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
       <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}

@@ -279,12 +279,20 @@ async function main() {
     const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: plain(r) })))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
-    // never asks again about something already answered (Jeremy, 2026-10-27).
-    const answered = await sql(`select meta->>'code' as code, block_id, layout, meta->>'verdict' as verdict from copy_pin
-      where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)} and kind = 'finding' and resolved_at is null and coalesce(meta->>'verdict', '') <> ''`);
+    // never asks again about something already answered (Jeremy, 2026-10-27). "Not an issue" is remembered from any
+    // earlier round, and on phone and desktop alike: the same kind of finding on the same block (block ids are the same
+    // in both layouts) stays dismissed (Jeremy, 2026-11-20). The app tucks those into a collapsed list.
+    // Newest first. A carried pin whose answer was cleared means the person asked to see it again, so it ends the search.
+    const answered = await sql(`select meta->>'code' as code, block_id, layout, coalesce(meta->>'verdict', '') as verdict, resolved_at is null as current,
+        coalesce((meta->>'carried')::boolean, false) as carried from copy_pin
+      where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)} and kind = 'finding' order by created_at desc, id desc`);
+    const fine = (v) => ['not-a-problem', 'fine', 'ignore'].includes(v);
     for (const p of findingPins) {
-      const a = answered.find((x) => x.code === p.code && x.block_id === p.blockId && x.layout === p.layout);
-      if (a) p.verdict = a.verdict;
+      const same = answered.filter((x) => x.code === p.code && x.block_id === p.blockId);
+      const here = same.find((x) => x.current && x.layout === p.layout && x.verdict);
+      const last = same.find((x) => x.verdict || x.carried);   // the newest answer, or a cleared one
+      if (here) p.verdict = here.verdict;
+      else if (last && fine(last.verdict)) p.verdict = last.verdict;
     }
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
