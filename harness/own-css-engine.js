@@ -68,9 +68,9 @@
   const absUrls = (v, base) => v.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => { if (/^(data:|#)/.test(u)) return m; try { return `url("${new URL(u, base).href}")`; } catch { return m; } });
 
   // Every style rule in order, with its conditions (media/supports), layer and parsed selectors.
-  let RULES = null, KEYFRAMES = [], FONTFACES = [];
+  let RULES = null, KEYFRAMES = [], FONTFACES = [], MEDIA = [];
   function collect() {
-    RULES = []; KEYFRAMES = []; FONTFACES = [];
+    RULES = []; KEYFRAMES = []; FONTFACES = []; MEDIA = [];
     let order = 0; const layerRank = new Map();
     // parent: the enclosing style rule's selector, for CSS nesting (rules written inside a rule, as plugins do).
     const nest = (sel, parent) => {
@@ -82,7 +82,7 @@
       for (const r of rules) {
         const t = r.constructor.name;
         if (t === 'CSSImportRule') { if (r.styleSheet) { try { walk(r.styleSheet.cssRules, r.styleSheet.href || base, r.media && r.media.mediaText ? [...conds, ['media', r.media.mediaText]] : conds, layer); } catch {} } continue; }
-        if (t === 'CSSMediaRule') { walk(r.cssRules, base, [...conds, ['media', r.media.mediaText]], layer, parent); continue; }
+        if (t === 'CSSMediaRule') { MEDIA.push(r.media.mediaText); walk(r.cssRules, base, [...conds, ['media', r.media.mediaText]], layer, parent); continue; }
         if (t === 'CSSSupportsRule') { if (CSS.supports(r.conditionText)) walk(r.cssRules, base, conds, layer, parent); continue; }
         if (t === 'CSSLayerBlockRule') { const n = (layer ? layer + '.' : '') + (r.name || '#' + order); if (!layerRank.has(n)) layerRank.set(n, layerRank.size); walk(r.cssRules, base, conds, n, parent); continue; }
         if (t === 'CSSLayerStatementRule') { for (const n of r.nameList) if (!layerRank.has(n)) layerRank.set(n, layerRank.size); continue; }
@@ -99,7 +99,9 @@
         for (const sel of own) {
           const pm = sel.match(PSEUDO_EL);
           let pseudo = '', baseSel = sel;
-          if (pm) { pseudo = '::' + pm[1].toLowerCase(); baseSel = sel.slice(0, pm.index) + sel.slice(pm.index + pm[0].length); }
+          // A pseudo-element after a space belongs to every descendant (".plyr--full-ui ::-webkit-media-controls": Pilates
+          // Fireside, Nov 19, where the phone's own video buttons showed over the player's).
+          if (pm) { pseudo = '::' + pm[1].toLowerCase(); baseSel = sel.slice(0, pm.index) + (/\s$/.test(sel.slice(0, pm.index)) ? '*' : '') + sel.slice(pm.index + pm[0].length); }
           baseSel = baseSel.trim() || '*';
           if (/[>+~]\s*$/.test(baseSel)) baseSel += '*';
           const dynamic = DYNAMIC.test(baseSel);
@@ -270,6 +272,11 @@
 
   window.__oc = { collect, capture, keyframes, hoverTargets, captureHover, fontFaces: () => [...new Set(FONTFACES)], inlineVars,
     // Breakpoints (px) any width media condition in the page's stylesheets uses.
+    // Which @container rules hold on which elements: changes as the window widens even where no @media rule does.
+    hasContainerRules: () => { if (!RULES) collect(); return RULES.some((r) => r.conds.some((c) => c[0] === 'container')); },
+    containerSig: () => { if (!RULES) collect(); const out = []; RULES.forEach((r, i) => { if (!r.conds.some((c) => c[0] === 'container') || !active(r.conds)) return; let hits; try { hits = document.querySelectorAll(r.sel); } catch { return; } let n = 0; for (const e of hits) if (containerOk(e, r.conds)) n++; if (n) out.push(i + ':' + n); }); return out.join(','); },
     breakpoints: () => { if (!RULES) collect(); const s = new Set(); const add = (t) => { for (const m of t.matchAll(/(min|max)-width:\s*([\d.]+)px/g)) s.add(m[1] === 'min' ? Math.ceil(+m[2]) : Math.floor(+m[2]) + 1); };
-      for (const r of RULES) for (const [, v] of r.conds) add(v); for (const k of KEYFRAMES) for (const [, v] of k.conds) add(v); return [...s].sort((a, b) => a - b); } };
+      for (const r of RULES) for (const [, v] of r.conds) add(v); for (const k of KEYFRAMES) for (const [, v] of k.conds) add(v);
+      // Every @media width, also of rules that only set variables (The Dial, Nov 19: its heading sizes grow above 1441px).
+      for (const m of MEDIA) add(m); return [...s].sort((a, b) => a - b); } };
 })();
