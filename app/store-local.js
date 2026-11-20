@@ -12,14 +12,15 @@ const SEED_COPIES = [
   { id: '2h59u7sb', name: 'designforward', title: 'Design Forward', url: 'https://www.designforward.live/', status: 'ready', created: ago(4), notes: [] },
   { id: 'b4vhrecu', name: 'xanadu', title: 'Xanadu Roller Arts', url: 'https://www.xanadu.nyc/', status: 'ready', created: ago(3), notes: ['Embedded widgets (such as signup forms) are shown as pictures.'] },
   { id: '9x2arj4e', name: 'kosa', title: 'Kosa Artist Residency', url: 'https://hello-world-kosa.squarespace.com/', status: 'review', created: ago(0.1), notes: ['Videos play muted and on a loop.'],
-    findings: [{ text: 'A slideshow or carousel doesn’t move.', pinned: true }, { text: 'The first screen looks noticeably different from the live site.', pinned: true }] },
+    findings: [{ text: 'Gallery doesn’t move here. It moves on your site.', pinned: true }, { text: 'First screen differs from your site.', pinned: true }] },
 ];
 // Where the quality check saw each problem on the kosa copy (from a real run, 2026-10-16), shown as lettered pins.
-const f = (code, body, layout, blockId, x, y) => ({ kind: 'finding', code, body, layout, blockId, x, y, meta: { code } });
+// crop: the demo's own copies of the "Your site" / "Preserve" pictures the runner cuts (demo/finding-<crop>-site.webp).
+const f = (code, body, layout, blockId, x, y, crop) => ({ kind: 'finding', code, body, layout, blockId, x, y, meta: { code, ...(crop ? { demoCrop: `demo/finding-${crop}` } : {}) } });
 const SEED_FINDINGS = { '9x2arj4e': [
-  f('gallery-does-not-advance', 'A slideshow or carousel doesn’t move.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02),
-  f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'desktop', 'el:body', 0.506, 0.067),
-  f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'mobile', 'el:body', 0.467, 0.047),
+  f('gallery-does-not-advance', 'Gallery doesn’t move here. It moves on your site.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02, 'gallery'),
+  f('first-screen-differs', 'First screen differs from your site.', 'desktop', 'el:body', 0.506, 0.067, 'first'),
+  f('first-screen-differs', 'First screen differs from your site.', 'mobile', 'el:body', 0.467, 0.047, 'first-phone'),
 ] };
 // Fonts on the kosa copy that need the person's look (font licensing, Jeremy 2026-10-19/26): who holds each license
 // decides what the Preserve uses. The three uploaded to kosa's site are real (trial builds); Omnes Pro (an Adobe font

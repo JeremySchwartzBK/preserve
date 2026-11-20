@@ -344,7 +344,9 @@ function sendPins(c, force) {
   const list = kind ? pinsFor(c, view.tab) : [];
   const pins = list.filter((p) => kind === 'tour' || p.layout === view.layout || !p.layout).map((p) => ({ kind: p.kind, blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: list.indexOf(p) + 1 }));
   // While checking, the quality check's findings show too, lettered A, B, C… (grey once marked).
-  if (view.tab === 'check') findingsOf(c).forEach((p, i) => { if (true) pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: letter(i) }); });
+  // A finding about the whole page (the first screen, or no one block) shows as a band across the preview, not a dot.
+  if (view.tab === 'check') findingsOf(c).forEach((p, i) => pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: letter(i),
+    ...(pageWide(p) ? { wide: true, top: p.meta.code === 'first-screen-differs' ? 0 : p.meta.pageY ?? 0 } : {}) }));
   const key = JSON.stringify(pins);
   if (key === lastPins && !force) return;   // unchanged: don't touch the page
   lastPins = key;
@@ -358,6 +360,16 @@ const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-prob
 const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && dismissedEarlier(p));
 const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
+const pageWide = (p) => p.meta.code === 'first-screen-differs' || p.blockId === 'el:body';
+// The "Your site" and "Preserve" pictures the runner cut for a finding (finding-crops.mjs), from the viewer on the
+// owner's signed link. A picture that can't load takes its pair away rather than leave a broken image.
+function cropPair(c, p) {
+  const src = p.meta.demoCrop ? (w) => `${p.meta.demoCrop}-${w}.webp`
+    : p.meta.crop && store.view && view.reviewToken?.t ? (w) => `${store.view}/c/${c.id}/findings/${p.meta.crop}-${w}.webp?review=${encodeURIComponent(view.reviewToken.t)}` : null;
+  if (!src) return '';
+  return `<span class="crops ${p.layout === 'mobile' ? 'phone' : ''}">${[['site', 'Your site'], ['preserve', 'Preserve']].map(([w, t]) =>
+    `<figure><img src="${esc(src(w))}" alt="${t}" loading="lazy" onerror="this.closest('.crops').remove()"><figcaption>${t}</figcaption></figure>`).join('')}</span>`;
+}
 // The person's answer for each suspected issue: two answers since user testing (Jeremy, 2026-11-12). Older answers
 // stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
 const VERDICTS = [['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];
@@ -473,8 +485,8 @@ function panel(c, review) {
       ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
-      ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
-        <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
+      ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated quality check compared this Preserve with your site and identified where the Preserve may have deviated from the live site. For each suspected issue, let us know whether it needs to be addressed by refining the Preserve or whether it’s not an issue that needs to be addressed.</p>
+        <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>${cropPair(c, p)}
           <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(p.body)}</span>

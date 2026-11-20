@@ -101,6 +101,12 @@ await store.put('platform/tour.js', fs.readFileSync(new URL('../tour/tour.js', i
 for (const f of ['inter', 'newsreader']) await store.put(`platform/fonts/${f}.woff2`, fs.readFileSync(new URL(`../fonts/${f}.woff2`, import.meta.url)), 'font/woff2');
 r = await get('/_p/fonts/inter.woff2'); ok('our fonts are served', r.status === 200 && r.headers.get('content-type') === 'font/woff2');
 r = await get('/_p/fonts/other.woff2'); ok('only our two fonts', r.status === 404);
+// The "Your site" / "Preserve" pictures beside a suspected issue: only on the owner's review link (no REVIEW_SECRET
+// here, so any ?review= counts), never to visitors, and only names the runner makes.
+await store.put(`copies/${id2}/v2/p/home/findings/0-site.webp`, Buffer.from('RIFFxxxxWEBP'), 'image/webp');
+r = await get(`/c/${id2}/findings/v2/0-site.webp?review=1`); ok('finding picture on the review link', r.status === 200 && r.headers.get('content-type') === 'image/webp');
+r = await get(`/c/${id2}/findings/v2/0-site.webp`); ok('finding picture not for visitors', r.status === 404);
+r = await get(`/c/${id2}/findings/v2/0-other.webp?review=1`); ok('finding picture: only site and preserve', r.status !== 200 || !(r.headers.get('content-type') || '').includes('webp'));
 const browser2 = await launch();
 for (const prof of ['desktop', 'mobile']) {
   const ctx = await browser2.newContext({ ...PROFILES[prof].context });
