@@ -3,6 +3,7 @@
 // Plain JS, no build step. Routes: #/ dashboard, #/new, #/copy/<id>, #/plan.
 import { store, PLANS } from './store.js';
 import { GOOGLE } from './config.js';
+import { spotMessage, pageMessage, HIDDEN } from './review-messages.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -345,7 +346,7 @@ function sendPins(c, force) {
   const pins = list.filter((p) => kind === 'tour' || p.layout === view.layout || !p.layout).map((p) => ({ kind: p.kind, blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: list.indexOf(p) + 1 }));
   // While checking, the quality check's findings show too, lettered A, B, C… (grey once marked).
   // One marker per part of the page: every suspected issue found on that part shares its letter (Jeremy, 2026-11-20).
-  if (view.tab === 'check') findingGroups(c).forEach((g, i) => pins.push({ kind: g.items.every((p) => p.meta.verdict) ? 'finding-done' : 'finding', blockId: g.blockId, x: g.x, y: g.y, body: g.items.map((p) => p.body).join('\n'), n: letter(i) }));
+  if (view.tab === 'check') findingGroups(c).forEach((g, i) => pins.push({ kind: g.items.every((p) => p.meta.verdict) ? 'finding-done' : 'finding', blockId: g.blockId, x: g.x, y: g.y, body: g.items.map(fText).join('\n'), n: letter(i) }));
   const key = JSON.stringify(pins);
   if (key === lastPins && !force) return;   // unchanged: don't touch the page
   lastPins = key;
@@ -356,8 +357,14 @@ function sendPins(c, force) {
 // phone and desktop alike (runner.mjs carries the answer). It drops out of the list and off the page, into a collapsed
 // list where the answer can still be changed (Jeremy, 2026-11-20).
 const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-problem';
-const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && dismissedEarlier(p));
-const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
+// Suspected issues the person can see and judge in review (Jeremy, 2026-11-20). Older Preserves still carry markers the
+// check now keeps to itself: our own leftovers, and part-by-part findings seen only at a window size between the two
+// layouts (their text names a width but no layout).
+const reviewable = (p) => !HIDDEN.has(p.meta.code) && !(/pixels wide/.test(p.body || '') && !/on (computers|phones)/.test(p.body || ''));
+// Shown in today's wording, by kind (review-messages.js); the stored text stays as it was.
+const fText = (p) => (p.meta.code ? spotMessage(p.meta.code) : p.body);
+const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && reviewable(p) && dismissedEarlier(p));
+const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && reviewable(p) && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
 // Suspected issues grouped by the part of the page they were found on, in page order: one letter, one marker each.
 function findingGroups(c, layout = view.layout) {
   const groups = new Map();
@@ -476,7 +483,9 @@ function panel(c, review) {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
     const found = findingGroups(c), gone = dismissedOf(c);
     const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).length;
-    const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
+    const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f))
+      .filter((f) => !f.pinned && !HIDDEN.has(f.code) && !/pixels wide|browser window/.test(f.text || ''))
+      .map((f) => ({ ...f, text: f.code ? pageMessage(f.code) : f.text }));
     P.innerHTML = `<h2>Look and Feel</h2>
       <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
       <p class="sub">To report an issue, click <b>${ic('plus', 12)} Issue</b>, drop a pin, and describe the issue.</p>
@@ -485,10 +494,10 @@ function panel(c, review) {
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
-        <ol class="pins findings">${found.map((g, i) => `<li><b class="ltr">${letter(i)}</b>${g.items.map((p, j) => `<div class="fitem"><span class="pbody">${esc(p.body)}</span>
+        <ol class="pins findings">${found.map((g, i) => `<li><b class="ltr">${letter(i)}</b>${g.items.map((p, j) => `<div class="fitem"><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${j === g.items.length - 1 && g.blockId ? `<button class="link" data-goto="${esc(g.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></div>`).join('')}</li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
-        <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(p.body)}</span>
+        <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
       ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
       ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}

@@ -165,11 +165,13 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   mark('files');
   // Each finding keeps where it was seen (spots: block + position, per layout) so the app can show it as a pin.
   let layoutSpots = null, layoutName = null;
-  const fail = (code, detail, limitation = null) => {
+  // quiet: seen only where the review can't show it (window sizes between the two layouts), so it is kept for our
+  // triage but not shown to the person (runner.mjs). A finding also seen in a layout the review shows is not quiet.
+  const fail = (code, detail, limitation = null, { quiet = false } = {}) => {
     const spots = layoutSpots?.[code]?.map((p) => ({ ...p, layout: layoutName })) || [];
     const same = reasons.find((r) => r.code === code);
-    if (same) { if (spots.length) same.spots = [...(same.spots || []), ...spots]; same.detail += ' / ' + detail; return; }
-    reasons.push({ code, detail, limitation, ...(spots.length ? { spots } : {}) });
+    if (same) { if (spots.length) same.spots = [...(same.spots || []), ...spots]; same.detail += ' / ' + detail; if (!quiet) delete same.quiet; return; }
+    reasons.push({ code, detail, limitation, ...(spots.length ? { spots } : {}), ...(quiet ? { quiet: true } : {}) });
   };
 
   // Severed from Squarespace and the original: no remaining addresses in any text file of the copy.
@@ -399,9 +401,21 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
         }
       });
       const name = (w) => (w === 390 ? 'phone' : w === 1440 ? 'desktop' : `smaller window (${w} px)`);
+      // Markers only where the review shows the page: the desktop layout at 1440 and the phone layout at 390, each on
+      // its own layout. What only showed at a width in between is kept quiet (Jeremy, 2026-11-20: the person can't see
+      // it in review, and a message naming a window size raised questions).
       for (const [code, list] of Object.entries(found)) {
-        layoutSpots = { [code]: list.slice(0, 3).map((x) => x.at) }; layoutName = list[0].prof;
-        fail(code, `${list.length > 1 ? list.length + ' places: ' : ''}${LAYOUT_TEXT[code]} (${list.slice(0, 3).map((x) => `${name(x.width)}: ${x.detail}`).join('; ')})`);
+        const say = (l) => `${l.length > 1 ? l.length + ' places: ' : ''}${LAYOUT_TEXT[code]} (${l.slice(0, 3).map((x) => `${name(x.width)}: ${x.detail}`).join('; ')})`;
+        const shown = (x) => (x.prof === 'desktop' && x.width === 1440) || (x.prof === 'mobile' && x.width === 390);
+        for (const prof of ['desktop', 'mobile']) {
+          const l = list.filter((x) => shown(x) && x.prof === prof);
+          if (!l.length) continue;
+          layoutSpots = { [code]: l.slice(0, 3).map((x) => x.at) }; layoutName = prof;
+          fail(code, say(l));
+        }
+        layoutSpots = null;
+        const between = list.filter((x) => !shown(x));
+        if (between.length) fail(code, say(between), null, { quiet: !list.some(shown) });
       }
     } catch (e) { warnings.push(`part check failed: ${String(e.message).slice(0, 200)}`); }
     finally { srv3.close(); layoutSpots = null; }

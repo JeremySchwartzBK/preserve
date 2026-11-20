@@ -23,6 +23,7 @@ import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
+import { spotMessage, pageMessage, HIDDEN } from '../app/review-messages.js';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -70,66 +71,7 @@ async function main() {
     }
   }
 
-  // What the review screen says for each thing the quality check can find.
-  // ", most around “Our story…” and “Visit us…”": the text of the blocks where the check found the most change.
-  const near = (r) => {
-    const labels = [...new Set((r?.spots || []).map((p) => (p.label || '').trim()).filter(Boolean))].slice(0, 2)
-      .map((t) => `“${t.length > 40 ? t.slice(0, 40).replace(/\s+\S*$/, '') + '…' : t}”`);
-    return labels.length ? `, most around ${labels.join(' and ')}` : '';
-  };
-  // "on phones and at about 1024 pixels wide": the window sizes a part-by-part finding (harness/layout.mjs) was seen at.
-  const seenAt = (d) => {
-    const w = [...new Set([...String(d).matchAll(/(phone|smaller window \((\d+) px\)|desktop):/g)].map((m) => (m[1] === 'phone' ? 'on phones' : m[2] ? `when the window is about ${m[2]} pixels wide (${+m[2] < 1200 ? 'a tablet' : 'a laptop'})` : 'on computers')))];
-    return w.length ? ' ' + w.slice(0, 2).join(' and ') : '';
-  };
-  const PLAIN = {
-    'blank-images': 'Some images stay blank (for example, a gallery or slideshow with empty frames).',
-    'blocks-stay-invisible': 'Some parts of the page stay hidden that show on the live site.',
-    'broken-images': 'Some images didn’t load.',
-    'dropdown-broken': 'A dropdown menu doesn’t open.',
-    'font-not-on-google-fonts': 'A font on the live site isn’t available to us, so some text shows in a plain stand-in font.',
-    // Where, when the check could place it (Jeremy, 2026-11-11: a bare "page differs from live" isn't helpful).
-    'first-screen-differs': (d, r) => `The first screen looks noticeably different from the live site${near(r)}.`,
-    'gallery-does-not-advance': 'A slideshow or carousel doesn’t move.',
-    'gallery-does-not-autoplay': 'A slideshow that plays by itself on your site stays still.',
-    'gallery-blank-slide': 'A slideshow or carousel shows an empty frame.',
-    'widget-frozen': 'Something that moves by itself on your site stays still in the Preserve.',
-    'animation-flattened': 'A moving picture (such as an animated GIF) on your site shows as a still in the Preserve.',
-    'video-hidden': 'A video plays behind a still picture, so visitors only see the picture.',
-    'hover-effect-lost': 'Something on your site that reacts when the mouse moves over it doesn’t react in the Preserve.',
-    'drag-lost': 'Something on your site that can be dragged or swiped doesn’t move in the Preserve.',
-    'scroll-effect-lost': 'An effect that plays as you scroll your site doesn’t play in the Preserve.',
-    // Part by part against the live site (step 3 of the quality-check plan, 2026-11-13): says which part and where.
-    'part-size-differs': (d, r) => `A part of the page is a different size than on your site${seenAt(d)}${near(r)}.`,
-    'part-moved': (d, r) => `A part of the page sits in a different place than on your site${seenAt(d)}${near(r)}.`,
-    'picture-size-differs': (d, r) => `A picture shows at a different size than on your site${seenAt(d)}${near(r)}.`,
-    'text-wraps-differently': (d, r) => `Some text breaks onto a different number of lines than on your site${seenAt(d)}${near(r)}, often a sign the font is slightly off.`,
-    'parts-overlap-differently': (d, r) => `Parts of the page overlap differently than on your site${seenAt(d)}${near(r)}.`,
-    'part-cut-off': (d, r) => `A part of the page runs off the edge of the screen${seenAt(d)}${near(r)}.`,
-    'frame-missing': (d, r) => `An embedded part of your site (such as a sign-up form, booking widget or map) is missing from the Preserve${near(r)}.`,
-    'frame-size-differs': (d, r) => `An embedded part of your site (such as a sign-up form, booking widget or map) is cropped or a different size${seenAt(d)}${near(r)}.`,
-    'outside-requests': 'The copy still reaches out to other websites.',
-    'overlay-left': 'A popup or banner may still cover part of the page.',
-    'page-differs': (d, r) => `Parts of the page look different from the live site${near(r)}.`,
-    'page-length-differs': 'The page is a different length from the live site, so something may be missing or extra.',
-    'phone-menu-broken': 'The phone menu doesn’t open.',
-    'replica-notice-missing': 'Shopping or form buttons don’t show the “this is a preview” note.',
-    'squarespace-addresses-left': 'Some parts still load from Squarespace.',
-    'capture-addresses-left': 'Some parts point at our capture machine instead of the Preserve.',
-    'unhandled-address': 'There may be contact details we couldn’t replace.',
-    'no-reference': 'We couldn’t compare it with the live site.',
-    // Says which screen sizes, so the person can resize their window to that width and look (Jeremy, 2026-11-10: a bare
-    // "differs at other widths" isn't clear or actionable).
-    'differs-at-other-widths': (d) => {
-      const at = [...new Set([...String(d).matchAll(/(desktop|mobile) at (\d+)px/g)].map((m) => `${m[2]} pixels wide (${m[1] === 'mobile' ? 'a phone' : 'a smaller computer screen'})`))].slice(0, 2);
-      return `At ${at.length ? 'some screen sizes, such as ' + at.join(' and ') : 'some screen sizes'}, parts of the page sit or size differently from the live site. To check, make your browser window that width and compare both.`;
-    },
-    'breaks-on-resize': 'When the browser window is resized, parts of the page don’t adjust the way they do when the page is opened at that size.',
-    'own-stylesheet-mismatch': 'Some text or spacing looks slightly different from the live site.',
-    'squarespace-styles-left': 'Some parts may still depend on Squarespace’s styling and could look slightly off.',
-    'copy-did-not-load': 'The Preserve didn’t finish loading when we checked it.',
-  };
-  const plain = (r) => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '', r) : p) || 'Something looks different from the live site.'; };
+  // What the review screen says for each suspected issue: app/review-messages.js, shared with the app.
   const FAILED = {
     'not-squarespace': 'This page isn’t on Squarespace. For now we can only copy Squarespace sites.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
@@ -278,12 +220,15 @@ async function main() {
     // Page layout (storage format 2): shared files are uploaded once per copy, so a refinement only adds what changed.
     const up = await uploadPages(store, { id: j.copy_id, version: next, pages: [{ page_id: j.page_id, path: '', dir }] });
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(fs.readFileSync(path.join(dir, 'desktop.html'), 'utf8'))?.[1] || '').trim().replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s*·\s*Preview copy$/i, '').split(/\s+[|–—-]\s+/)[0].replace(/\s*®\s*$/, '').slice(0, 120) || null;
-    const findings = (v.reasons || []).map((r) => ({ code: r.code, text: plain(r), pinned: !!r.spots?.length }))
+    // What the person can't see or judge in review (other window sizes, our own leftovers) stays in the verdict for our
+    // triage and is left out here (Jeremy, 2026-11-20).
+    const shown = (v.reasons || []).filter((r) => !HIDDEN.has(r.code) && !r.quiet);
+    const findings = shown.map((r) => ({ code: r.code, text: r.spots?.length ? spotMessage(r.code) : pageMessage(r.code), pinned: !!r.spots?.length }))
       .filter((f, i, a) => a.findIndex((x) => x.text === f.text) === i);
     // Findings the check could place on the page become pins the person can mark (schema-findings.sql); the rest stay
     // a list. They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
-    const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: plain(r) })))
+    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: spotMessage(r.code) })))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
     // never asks again about something already answered (Jeremy, 2026-10-27). "Not an issue" is remembered from any

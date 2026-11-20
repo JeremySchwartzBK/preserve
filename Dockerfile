@@ -13,6 +13,7 @@ COPY platform/package.json platform/package-lock.json platform/
 RUN cd harness && npm ci --omit=dev --ignore-scripts && cd ../platform && npm ci --omit=dev
 COPY harness harness
 COPY platform platform
+COPY app/review-messages.js app/
 
 # Which code made each copy (recorded on every version): pass the commit when building.
 ARG PIPELINE_VERSION=unknown
