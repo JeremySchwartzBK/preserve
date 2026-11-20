@@ -73,10 +73,11 @@ async function main() {
   // What the review screen says for each thing the quality check can find. One pattern (Jeremy, 2026-11-20): what it
   // is, then how it differs, with "here" for the Preserve and "your site" for the original. The marker on the page
   // already says where, and the "Your site" / "Preserve" pictures beside each one (finding-crops.mjs) show it.
-  // "on phones" or "when the window is about 1024 pixels wide": the window sizes a part-by-part finding
-  // (harness/layout.mjs) was seen at. Never names a device type for a width.
+  // "when the window is about 1024 pixels wide": the in-between window sizes a part-by-part finding (harness/layout.mjs)
+  // was seen at. Phone and desktop go unsaid: review lists each layout's findings on its own. Never names a device type
+  // for a width.
   const seenAt = (d) => {
-    const w = [...new Set([...String(d).matchAll(/(phone|smaller window \((\d+) px\)|desktop):/g)].map((m) => (m[1] === 'phone' ? 'on phones' : m[2] ? `when the window is about ${m[2]} pixels wide` : 'on computers')))];
+    const w = [...new Set([...String(d).matchAll(/smaller window \((\d+) px\):/g)].map((m) => `when the window is about ${m[1]} pixels wide`))];
     return w.length ? ' ' + w.slice(0, 2).join(' and ') : '';
   };
   // N is what the finding is on (nounOf below): Image, Text, Button, Gallery, Video, Form, Section, Header, Footer,
@@ -323,8 +324,8 @@ async function main() {
     try {
       const cropDir = path.join(work, j.copy_id, 'finding-crops'), pinsFile = path.join(work, j.copy_id, 'finding-pins.json');
       fs.rmSync(cropDir, { recursive: true, force: true });
-      fs.writeFileSync(pinsFile, JSON.stringify(findingPins.map((p, i) => ({ i, layout: p.layout, pageY: p.pageY, firstScreen: p.code === 'first-screen-differs' }))));
-      const { stdout } = await promisify(execFile)('node', ['finding-crops.mjs', path.join(work, j.copy_id), pinsFile, cropDir], { cwd: HARNESS, timeout: 120e3, env: jobEnv() });
+      fs.writeFileSync(pinsFile, JSON.stringify(findingPins.map((p, i) => ({ i, layout: p.layout, blockId: p.blockId, pageY: p.pageY, firstScreen: p.code === 'first-screen-differs' }))));
+      const { stdout } = await promisify(execFile)('node', ['finding-crops.mjs', path.join(work, j.copy_id), dir, j.url, pinsFile, cropDir], { cwd: HARNESS, timeout: 300e3, env: jobEnv() });
       for (const i of JSON.parse(stdout.slice(stdout.indexOf('[')))) {
         for (const w of ['site', 'preserve']) await store.put(`copies/${j.copy_id}/v${next}/p/${j.page_id}/findings/${i}-${w}.webp`, fs.readFileSync(path.join(cropDir, `${i}-${w}.webp`)), 'image/webp');
         findingPins[i].crop = `v${next}/${i}`;

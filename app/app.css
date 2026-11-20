@@ -147,7 +147,14 @@ main.full{padding:16px 32px 24px}
 .chip{font-size:.75rem;padding:2px 9px}
 .pins.findings .row{gap:6px;flex-wrap:wrap}
 /* The "Your site" / "Preserve" pair under a finding: side by side, same size, so a difference shows at a glance */
-.crops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 4px}
+.crops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 4px;padding:0;border:0;background:none;font:inherit;text-align:left;cursor:zoom-in;width:100%}
+.cropview{border:0;border-radius:var(--r);padding:20px;width:min(1500px,94vw);max-width:none;background:var(--card);box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.cropview::backdrop{background:rgba(29,26,36,.55)}
+.cropview-in{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+.cropview-in.phone{grid-template-columns:repeat(2,minmax(0,300px));justify-content:center}
+.cropview-in figure{margin:0}.cropview-in img{display:block;width:100%;border:1px solid var(--line);border-radius:8px}
+.cropview-in figcaption{font-size:.85rem;color:var(--sub);margin-top:6px}
+@media (max-width:700px){.cropview-in{grid-template-columns:1fr}}
 .crops figure{margin:0;min-width:0}.crops img{display:block;width:100%;border:1px solid var(--line);border-radius:6px;background:var(--sunk)}
 .crops.phone img{max-height:240px;object-fit:cover;object-position:top}
 .crops figcaption{font-size:.7rem;color:var(--sub);margin-top:2px}

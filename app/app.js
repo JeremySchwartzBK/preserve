@@ -367,9 +367,18 @@ function cropPair(c, p) {
   const src = p.meta.demoCrop ? (w) => `${p.meta.demoCrop}-${w}.webp`
     : p.meta.crop && store.view && view.reviewToken?.t ? (w) => `${store.view}/c/${c.id}/findings/${p.meta.crop}-${w}.webp?review=${encodeURIComponent(view.reviewToken.t)}` : null;
   if (!src) return '';
-  return `<span class="crops ${p.layout === 'mobile' ? 'phone' : ''}">${[['site', 'Your site'], ['preserve', 'Preserve']].map(([w, t]) =>
-    `<figure><img src="${esc(src(w))}" alt="${t}" loading="lazy" onerror="this.closest('.crops').remove()"><figcaption>${t}</figcaption></figure>`).join('')}</span>`;
+  return `<button type="button" class="crops ${p.layout === 'mobile' ? 'phone' : ''}" title="See larger" onclick="showCrops(this)">${[['site', 'Your site'], ['preserve', 'Preserve']].map(([w, t]) =>
+    `<figure><img src="${esc(src(w))}" alt="${t}" loading="lazy" onerror="this.closest('.crops').remove()"><figcaption>${t}</figcaption></figure>`).join('')}</button>`;
 }
+// The pair at full size, side by side over the page (the side panel is too narrow to judge a desktop picture).
+window.showCrops = (btn) => {
+  const d = document.createElement('dialog');
+  d.className = 'cropview';
+  d.innerHTML = `<div class="cropview-in ${btn.classList.contains('phone') ? 'phone' : ''}">${btn.innerHTML}</div><button class="btn secondary" autofocus>Close</button>`;
+  d.onclick = (e) => { if (e.target === d || e.target.closest('button')) d.close(); };
+  d.onclose = () => d.remove();
+  document.body.appendChild(d); d.showModal();
+};
 // The person's answer for each suspected issue: two answers since user testing (Jeremy, 2026-11-12). Older answers
 // stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
 const VERDICTS = [['fix', 'Fix issue'], ['not-a-problem', 'Not an issue']];

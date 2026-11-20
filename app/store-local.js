@@ -15,12 +15,12 @@ const SEED_COPIES = [
     findings: [{ text: 'Gallery doesn’t move here. It moves on your site.', pinned: true }, { text: 'First screen differs from your site.', pinned: true }] },
 ];
 // Where the quality check saw each problem on the kosa copy (from a real run, 2026-10-16), shown as lettered pins.
-// crop: the demo's own copies of the "Your site" / "Preserve" pictures the runner cuts (demo/finding-<crop>-site.webp).
+// crop: pictures for the "Your site" / "Preserve" pair, if the demo has them (demo/finding-<crop>-site.webp).
 const f = (code, body, layout, blockId, x, y, crop) => ({ kind: 'finding', code, body, layout, blockId, x, y, meta: { code, ...(crop ? { demoCrop: `demo/finding-${crop}` } : {}) } });
 const SEED_FINDINGS = { '9x2arj4e': [
-  f('gallery-does-not-advance', 'Gallery doesn’t move here. It moves on your site.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02, 'gallery'),
-  f('first-screen-differs', 'First screen differs from your site.', 'desktop', 'el:body', 0.506, 0.067, 'first'),
-  f('first-screen-differs', 'First screen differs from your site.', 'mobile', 'el:body', 0.467, 0.047, 'first-phone'),
+  f('gallery-does-not-advance', 'Gallery doesn’t move here. It moves on your site.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02),
+  f('first-screen-differs', 'First screen differs from your site.', 'desktop', 'el:body', 0.506, 0.067),
+  f('first-screen-differs', 'First screen differs from your site.', 'mobile', 'el:body', 0.467, 0.047),
 ] };
 // Fonts on the kosa copy that need the person's look (font licensing, Jeremy 2026-10-19/26): who holds each license
 // decides what the Preserve uses. The three uploaded to kosa's site are real (trial builds); Omnes Pro (an Adobe font
