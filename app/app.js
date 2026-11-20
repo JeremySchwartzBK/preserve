@@ -344,7 +344,8 @@ function sendPins(c, force) {
   const list = kind ? pinsFor(c, view.tab) : [];
   const pins = list.filter((p) => kind === 'tour' || p.layout === view.layout || !p.layout).map((p) => ({ kind: p.kind, blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: list.indexOf(p) + 1 }));
   // While checking, the quality check's findings show too, lettered A, B, C… (grey once marked).
-  if (view.tab === 'check') findingsOf(c).forEach((p, i) => { if (true) pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: letter(i) }); });
+  // One marker per part of the page: every suspected issue found on that part shares its letter (Jeremy, 2026-11-20).
+  if (view.tab === 'check') findingGroups(c).forEach((g, i) => pins.push({ kind: g.items.every((p) => p.meta.verdict) ? 'finding-done' : 'finding', blockId: g.blockId, x: g.x, y: g.y, body: g.items.map((p) => p.body).join('\n'), n: letter(i) }));
   const key = JSON.stringify(pins);
   if (key === lastPins && !force) return;   // unchanged: don't touch the page
   lastPins = key;
@@ -357,6 +358,16 @@ function sendPins(c, force) {
 const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-problem';
 const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && dismissedEarlier(p));
 const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
+// Suspected issues grouped by the part of the page they were found on, in page order: one letter, one marker each.
+function findingGroups(c, layout = view.layout) {
+  const groups = new Map();
+  for (const p of findingsOf(c, layout)) {
+    const k = p.blockId || `pin:${p.id}`;
+    if (!groups.has(k)) groups.set(k, { blockId: p.blockId, x: p.x, y: p.y, items: [] });
+    groups.get(k).items.push(p);
+  }
+  return [...groups.values()];
+}
 const letter = (i) => String.fromCharCode(65 + (i % 26));
 // The person's answer for each suspected issue: two answers since user testing (Jeremy, 2026-11-12). Older answers
 // stay as stored and show as "Not an issue": 'fine' (the first "Looks fine") and 'ignore' (the dropped "Ignore issue").
@@ -463,7 +474,7 @@ function panel(c, review) {
   P.dataset.k = view.tab === 'talent' ? key : '';
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
-    const found = findingsOf(c), gone = dismissedOf(c);
+    const found = findingGroups(c), gone = dismissedOf(c);
     const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).length;
     const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)).filter((f) => !f.pinned);
     P.innerHTML = `<h2>Look and Feel</h2>
@@ -474,8 +485,8 @@ function panel(c, review) {
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
       ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated check identified potential issues with your Preserve for you to review. The letters correspond to pins on the Preserve.</p>
-        <ol class="pins findings">${found.map((p, i) => `<li><b class="ltr">${letter(i)}</b><span class="pbody">${esc(p.body)}</span>
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}</ol>` : ''}
+        <ol class="pins findings">${found.map((g, i) => `<li><b class="ltr">${letter(i)}</b>${g.items.map((p, j) => `<div class="fitem"><span class="pbody">${esc(p.body)}</span>
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${j === g.items.length - 1 && g.blockId ? `<button class="link" data-goto="${esc(g.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></div>`).join('')}</li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(p.body)}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
