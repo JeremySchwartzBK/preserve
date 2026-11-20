@@ -298,7 +298,6 @@
         [].forEach.call(tabs.children, function (b) { b.setAttribute('aria-selected', b.dataset.tab === which ? 'true' : 'false'); });
         body.innerHTML = '';
         if (which === 'tour') {
-          body.appendChild(el('p', 'pt-lead', tour.spots.length + ' things the designer wants you to notice.'));
           var ol = el('ol', 'pt-stops');
           tour.spots.forEach(function (s, i) {
             var li = el('li'), b = btn('', '', function () { open(i); });
