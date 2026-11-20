@@ -536,6 +536,10 @@ if(c.hp&&hov){e.addEventListener('mouseenter',function(){an.pause()});e.addEvent
 // attributes, inline style properties, added elements shown), made on the same gesture and undone the way live undid
 // them: the pointer leaving the trigger and what it opened, a second click, Escape, its close button, or a click elsewhere. Hover states
 // only where there is a pointer. window.__pvAct(i, on) shows a state (our own stylesheet records each one).
+// A click state on a trigger that also has a hover state was recorded with the pointer already on it (so it is what
+// the click changes after the hover): when the hover closes, that click state counts as closed too.
+// A part that covers the whole screen (a dimmed backdrop behind a panel) doesn't count as "still over it": the pointer
+// is always over a backdrop, so the hover would never close.
 const ACT_SCRIPT = `<script id="preserve-acts">(function(){
 var D;try{D=JSON.parse(document.getElementById('preserve-acts-data').textContent)}catch(x){return}if(!D||!D.length)return;
 function at(id){return document.querySelector('[data-pv-at="'+id+'"]')}
@@ -549,11 +553,12 @@ if(c.a)for(var n in c.a){var y=c.a[n][v?1:0];if(y==null)e.removeAttribute(n);els
 window.__pvAct=set;window.__pvActN=D.length;
 var hov=window.matchMedia&&matchMedia('(hover: hover)').matches;
 function parts(d){var l=[];d.t.concat(Object.keys(d.ch),d.add||[]).forEach(function(id){var e=at(id);if(e&&l.indexOf(e)<0)l.push(e)});return l}
+function cover(e){var r=e.getBoundingClientRect();return r.width>=innerWidth*0.95&&r.height>=innerHeight*0.95}
 function inside(d,n){return parts(d).some(function(e){return e!==document.body&&e!==document.documentElement&&e.contains(n)})}
 D.forEach(function(d,i){var u=d.u||{};d.t.forEach(function(id){var t=at(id);if(!t)return;
 if(d.k==='h'){if(!hov)return;var tm;
 t.addEventListener('mouseenter',function(){clearTimeout(tm);set(i,1)});
-if(u.leave){var leave=function(){clearTimeout(tm);tm=setTimeout(function(){var over=parts(d).some(function(e){return e!==document.body&&e!==document.documentElement&&e.matches(':hover')});if(!over)set(i,0)},120)};
+if(u.leave){var leave=function(){clearTimeout(tm);tm=setTimeout(function(){var over=parts(d).some(function(e){return e!==document.body&&e!==document.documentElement&&!cover(e)&&e.matches(':hover')});if(!over){set(i,0);D.forEach(function(o,j){if(on[j]&&o.k==='c'&&o.t.some(function(x){return d.t.indexOf(x)>=0}))on[j]=false})}},120)};
 parts(d).forEach(function(e){if(e!==document.body&&e!==document.documentElement)e.addEventListener('mouseleave',leave)})}}
 else{t.setAttribute('data-pv-actc','');t.style.cursor='pointer';
 t.addEventListener('click',function(e){e.preventDefault();if(!on[i]){D.forEach(function(o,j){if(j!==i&&on[j]&&o.k==='c'&&(o.u||{}).again)set(j,0)});set(i,1)}else if(u.again)set(i,0)})}})});

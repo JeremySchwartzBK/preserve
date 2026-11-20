@@ -424,8 +424,13 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   } else {
     const folder = page.locator('.header-nav-folder-title').filter({ visible: true }).first();
     if (await folder.count()) {
+      // A plugin can take over a folder title and open its own panel on hover instead of Squarespace's dropdown, which it
+      // leaves hidden (Paws with Claus's "Book Now", 2026-11-20): the screen changing visibly on hover counts too.
+      const before = PNG.sync.read(await page.screenshot());
       await folder.hover({ timeout: 3000 }).catch(() => {}); await sleep(700);
-      out.dropdown = await page.evaluate(() => { const c = document.querySelector('.header-nav-item--folder:hover .header-nav-folder-content, .header-nav-folder-content'); if (!c) return 'fail'; const s = getComputedStyle(c); return s.visibility !== 'hidden' && +s.opacity > 0.5 && c.getBoundingClientRect().height > 10 ? 'pass' : 'fail'; });
+      const after = PNG.sync.read(await page.screenshot());
+      const opened = after.width === before.width && after.height === before.height && pixelmatch(before.data, after.data, null, after.width, after.height, { threshold: 0.15 }) / (after.width * after.height) > 0.02;
+      out.dropdown = opened ? 'pass' : await page.evaluate(() => { const c = document.querySelector('.header-nav-item--folder:hover .header-nav-folder-content, .header-nav-folder-content'); if (!c) return 'fail'; const s = getComputedStyle(c); return s.visibility !== 'hidden' && +s.opacity > 0.5 && c.getBoundingClientRect().height > 10 ? 'pass' : 'fail'; });
       if (out.dropdown === 'fail') spot('dropdown-broken', [await folder.evaluate((e) => window.__preserveAnchor(e)).catch(() => null)].filter(Boolean));
     } else out.dropdown = 'n/a';
   }
