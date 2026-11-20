@@ -134,7 +134,7 @@ export const store = {
     while (db.copies.some((c) => c.name === name && c.status !== 'deleted')) name += '-2';
     const c = { id, name, title: known?.title || u.hostname.replace(/^www\./, ''), url: u.href, status: 'processing', step: 0, created: now(), notes: [], pins: [], versions: [], live: null, simulated: !known };
     db.copies.unshift(c); emit();
-    const steps = ['Checking the address', 'Opening the page on phone and desktop', 'Saving images, fonts and video', 'Building the fast copy', 'Removing trackers and contact details', 'Comparing it with the live site'];
+    const steps = ['Checking the address', 'Opening the page on phone and desktop', 'Saving images, fonts and video', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
     const tick = () => {
       if (c.status !== 'processing') return;
       c.step++;
@@ -156,7 +156,7 @@ export const store = {
     const judge = () => c.pins.filter((p) => p.kind === 'issue' && !p.meta?.report).forEach((p, i) => { p.meta = { ...p.meta, round_result: i === 0 ? 'still-different' : 'looks-fixed', round_version: c.versions.length + 1 }; });
     const finish = () => { judge(); c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); db.notifications.unshift({ at: now(), copy: c.id, text: `Refinement ${c.rounds} of ${c.title} is ready to review.`, read: false }); emit(); };
     const tick = () => { if (c.status !== 'processing') return; c.step++; if (c.step < c.stepNames.length) { emit(); setTimeout(tick, 1400); } else finish(); };
-    c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building the fast copy', 'Removing trackers and contact details', 'Comparing it with the live site'];
+    c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
     setTimeout(tick, 1200);
   },
 };

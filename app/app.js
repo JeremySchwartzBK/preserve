@@ -207,7 +207,7 @@ function card(c) {
 
 // 3. New Preserve ----------------------------------------------------------------------------------------------
 function newCopy() {
-  shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop.</p>
+  shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop. We swap emails, phone numbers and addresses for placeholders.</p>
     <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
     <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
     <p class="fine">Takes a few minutes. You can leave this page; it moves to the top of your Preserves when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
@@ -445,9 +445,9 @@ const roundResult = (p) => p.meta.round_result === 'looks-fixed' ? '<small class
 const BY_DESIGN_TEXT = {
   'contact-details': 'Preserves replace email addresses, phone numbers and street addresses with placeholders, so a Preserve never stands in for your real site.',
   'pop-ups': 'Preserves leave out pop-ups, announcement bars, cookie banners and promo tabs.',
-  'video-still': 'Preserves show a still frame for YouTube and Vimeo videos.',
+  'video-still': 'Preserves show a still frame for YouTube and Vimeo videos, except section backgrounds.',
   'looping-video': 'Preserves clip looping background video to a short loop.',
-  'shopping-forms': 'In a Preserve, buttons that buy, book or send a form show a note that it’s a replica.',
+  'shopping-forms': 'In a Preserve, buttons that buy, book or send a form show a note that it’s a snapshot.',
 };
 const aiNote = (p) => {
   const m = p.meta || {};

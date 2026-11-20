@@ -146,7 +146,7 @@ async function main() {
     return /<section\b/i.test(m[0]) ? 'Section' : 'Content';
   };
   const FAILED = {
-    'not-squarespace': 'This page isn’t on Squarespace. For now we can only copy Squarespace sites.',
+    'not-squarespace': 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
     'password-protected': 'This page is password protected, so we couldn’t copy it.',
   };
