@@ -116,7 +116,8 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     if (L.deleg.c) for (const e of document.querySelectorAll('button:not([type=submit]),[role=button],[aria-expanded],[aria-controls],summary')) add(e, 'c', 'page-listener');
     // Nested candidates on the same element tree with the same gesture: keep the outermost (one hover, one state).
     const keep = list.filter((x) => !list.some((y) => y !== x && y.k === x.k && y.e !== x.e && y.e.contains(x.e)));
-    return keep.map((x, i) => { x.e.setAttribute('data-preserve-ic', String(i)); return { i, k: x.k, why: x.why, tag: x.e.tagName.toLowerCase(), cls: (x.e.className && x.e.className.toString() || '').slice(0, 60) }; });
+    // One element can be both a hover and a click candidate: it carries both numbers.
+    return keep.map((x, i) => { x.e.setAttribute('data-preserve-ic', ((x.e.getAttribute('data-preserve-ic') || '') + ' ' + i).trim()); return { i, k: x.k, why: x.why, hover: !!(L.reg.get(x.e)?.h || L.deleg.h), tag: x.e.tagName.toLowerCase(), cls: (x.e.className && x.e.className.toString() || '').slice(0, 60) }; });
   }, [prof, SKIP, maxCand]).catch(() => []);
   out.candidates = cands.length;
   if (!cands.length) return out;
@@ -185,8 +186,8 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     const t = performance.now();
     while (performance.now() - t < 1500) { const run = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming?.().iterations !== Infinity); if (!run.length) break; await new Promise((r) => setTimeout(r, 100)); }
   });
-  const where = (i) => page.evaluate((i) => {
-    const e = document.querySelector(`[data-preserve-ic="${i}"]`); if (!e) return null;
+  const whereNow = (i) => page.evaluate((i) => {
+    const e = document.querySelector(`[data-preserve-ic~="${i}"]`); if (!e) return null;
     e.scrollIntoView({ block: 'center', behavior: 'instant' });
     const r = e.getBoundingClientRect(); if (r.width < 4 || r.height < 4) return null;
     // A point on the element that the element itself gets (not something drawn over it).
@@ -198,6 +199,8 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     }
     return null;
   }, i);
+  // A header that slides back in after we scroll to an element can leave it covered for a moment: look again once.
+  const where = async (i) => (await whereNow(i)) || (await sleep(600), await settle(), await whereNow(i));
   const press = async (p) => { if (prof === 'mobile') await page.touchscreen.tap(p.x, p.y); else await page.mouse.click(p.x, p.y); };
 
   const { vw, vh } = await page.evaluate(() => ({ vw: innerWidth, vh: innerHeight }));
@@ -209,6 +212,11 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     // Somewhere far from it (not the top corner: that is often the header, with menus of its own).
     const away = { x: Math.round(vw / 2), y: p.y < vh / 2 ? vh - 3 : Math.max(3, Math.round(p.y - vh * 0.45)) };
     if (c.k === 'h') await page.mouse.move(away.x, away.y);
+    // A click with a mouse arrives over the element first. When a plugin opens something on hover too (a "Book now"
+    // button that opens a panel on hover, and toggles it on click), the hover would open it and the click close it
+    // again, so the click looked like it did nothing. The pointer rests on the element first, so the hover's part
+    // counts as the starting point and only what the click itself changes is measured (the hover is its own candidate).
+    else if (prof === 'desktop' && c.hover) { await page.mouse.move(p.x, p.y, { steps: 4 }); await sleep(450); await settle(); }
     await sleep(350);
     out.tried++;
     // What changes by itself, first, so it doesn't count.
@@ -267,7 +275,7 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
       st = await page.evaluate(([trig, kind]) => {
         const S = window.__pvActs ||= { n: 0, states: [], hold: [] };
         const id = (e) => { if (!e.hasAttribute('data-pv-at')) e.setAttribute('data-pv-at', String(S.n++)); return e.getAttribute('data-pv-at'); };
-        const t = document.querySelector(`[data-preserve-ic="${trig}"]`); if (!t) return null;
+        const t = document.querySelector(`[data-preserve-ic~="${trig}"]`); if (!t) return null;
         const ch = window.__pvLast.ch.map(([e, d]) => [id(e), d]);
         const tags = Object.fromEntries(window.__pvLast.ch.map(([e]) => [e.getAttribute('data-pv-at'), e.tagName.toLowerCase()]));
         const added = window.__pvLast.added.map((n) => { S.hold.push(n); return S.hold.length - 1; });
