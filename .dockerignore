@@ -2,6 +2,7 @@
 .git
 .github
 app
+!app/review-messages.js
 **/.wrangler
 work
 ready
