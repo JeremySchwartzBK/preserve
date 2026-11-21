@@ -158,6 +158,8 @@ main.full{padding:16px 32px 24px}
 .crops figure{margin:0;min-width:0}.crops img{display:block;width:100%;border:1px solid var(--line);border-radius:6px;background:var(--sunk)}
 .crops.phone img{max-height:240px;object-fit:cover;object-position:top}
 .crops figcaption{font-size:.7rem;color:var(--sub);margin-top:2px}
+/* Several suspected issues on one part of the page share a letter; each keeps its own answer */
+.pins.findings .fitem+.fitem{margin-top:10px;padding-top:10px;border-top:1px solid var(--line,#e6e6e6)}
 @media (max-width:860px){main.full{padding:14px 16px 60px}.copyhead{flex-wrap:wrap}.frame.desktop{height:60vh}}
 @media (min-width:861px){.side{max-height:calc(100vh - 150px);top:64px}.stage{top:64px}}
 /* Review flow feedback (Jeremy, 2026-10-26) */

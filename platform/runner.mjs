@@ -23,6 +23,7 @@ import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
+import { spotMessage, pageMessage, HIDDEN } from '../app/review-messages.js';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -70,64 +71,7 @@ async function main() {
     }
   }
 
-  // What the review screen says for each thing the quality check can find. One pattern (Jeremy, 2026-11-20): what it
-  // is, then how it differs, with "here" for the Preserve and "your site" for the original. The marker on the page
-  // already says where, and the "Your site" / "Preserve" pictures beside each one (finding-crops.mjs) show it.
-  // "when the window is about 1024 pixels wide": the in-between window sizes a part-by-part finding (harness/layout.mjs)
-  // was seen at. Phone and desktop go unsaid: review lists each layout's findings on its own. Never names a device type
-  // for a width.
-  const seenAt = (d) => {
-    const w = [...new Set([...String(d).matchAll(/smaller window \((\d+) px\):/g)].map((m) => `when the window is about ${m[1]} pixels wide`))];
-    return w.length ? ' ' + w.slice(0, 2).join(' and ') : '';
-  };
-  // N is what the finding is on (nounOf below): Image, Text, Button, Gallery, Video, Form, Section, Header, Footer,
-  // or Content when the check can't tell.
-  const PLAIN = {
-    'blank-images': 'Images blank here. They show on your site.',
-    'blocks-stay-invisible': (d, N) => `${N} hidden here. Visible on your site.`,
-    'broken-images': 'Image missing.',
-    'dropdown-broken': 'Dropdown menu doesn’t open here. It opens on your site.',
-    'font-not-on-google-fonts': 'Font not available to us, so this text uses a plain stand-in.',
-    'first-screen-differs': 'First screen differs from your site.',
-    'gallery-does-not-advance': 'Gallery doesn’t move here. It moves on your site.',
-    'gallery-does-not-autoplay': 'Gallery still here. It plays by itself on your site.',
-    'gallery-blank-slide': 'Gallery shows an empty frame here.',
-    'widget-frozen': (d, N) => `${N} still here. It moves on its own on your site.`,
-    'animation-flattened': 'Animated picture still here. It moves on your site.',
-    'video-hidden': 'Video hidden behind a picture.',
-    'hover-effect-lost': (d, N) => `${N} has no hover effect here. It has one on your site.`,
-    'drag-lost': (d, N) => `${N} can’t be dragged or swiped here. It can on your site.`,
-    'scroll-effect-lost': 'Scroll effect missing.',
-    'part-size-differs': (d, N) => `${N} is a different size from your site${seenAt(d)}.`,
-    'part-moved': (d, N) => `${N} sits in a different place from your site${seenAt(d)}.`,
-    'picture-size-differs': (d) => `Image shows at a different size from your site${seenAt(d)}.`,
-    'text-wraps-differently': (d) => `Text breaks onto a different number of lines from your site${seenAt(d)}, often a sign the font is slightly off.`,
-    'parts-overlap-differently': (d, N) => `${N} overlaps differently from your site${seenAt(d)}.`,
-    'part-cut-off': (d, N) => `${N} runs off the edge of the screen${seenAt(d)}.`,
-    'frame-missing': 'Embedded content (a sign-up form, booking widget or map) missing here.',
-    'frame-size-differs': (d) => `Embedded content (a sign-up form, booking widget or map) cropped or a different size${seenAt(d)}.`,
-    'outside-requests': 'The Preserve still reaches out to other websites.',
-    'overlay-left': 'A popup or banner may still cover part of the page.',
-    'page-differs': (d, N) => `${N} looks different from your site.`,
-    'page-length-differs': 'The page is a different length from your site, so something may be missing or extra.',
-    'phone-menu-broken': 'Phone menu doesn’t open here. It opens on your site.',
-    'replica-notice-missing': 'Shopping or form buttons don’t show the “this is a snapshot” note.',
-    'squarespace-addresses-left': 'Some parts still load from Squarespace.',
-    'capture-addresses-left': 'Some parts point at our capture machine instead of the Preserve.',
-    'unhandled-address': 'There may be contact details we couldn’t replace.',
-    'no-reference': 'We couldn’t compare it with your site.',
-    // Says which screen sizes, so the person can resize their window to that width and look (Jeremy, 2026-11-10: a bare
-    // "differs at other widths" isn't clear or actionable).
-    'differs-at-other-widths': (d) => {
-      const at = [...new Set([...String(d).matchAll(/(desktop|mobile) at (\d+)px/g)].map((m) => `${m[2]} pixels wide`))].slice(0, 2);
-      return `At ${at.length ? 'some window sizes, such as ' + at.join(' and ') : 'some window sizes'}, parts of the page sit or size differently from your site. To check, make your browser window that width and compare both.`;
-    },
-    'breaks-on-resize': 'When the browser window is resized, parts of the page don’t adjust the way they do on your site.',
-    'own-stylesheet-mismatch': 'Some text or spacing looks slightly different from your site.',
-    'squarespace-styles-left': 'Some parts may still depend on Squarespace’s styling and could look slightly off.',
-    'copy-did-not-load': 'The Preserve didn’t finish loading when we checked it.',
-  };
-  const plain = (r, N = 'Content') => { const p = PLAIN[r.code]; return (typeof p === 'function' ? p(r.detail || '', N) : p) || 'Something looks different from your site.'; };
+  // What the review screen says for each suspected issue: app/review-messages.js, shared with the app.
   // What a finding is on, from the block's Squarespace class in the built page (the block id is the same in both
   // layouts). One place for every kind of finding, whichever part of the check placed it.
   const NOUNS = [[/\b(?:(?:sqs|ps)-block-image|image-block)\b/, 'Image'], [/\b(?:(?:sqs|ps)-block-(?:html|markdown|code)|html-block|markdown-block)\b/, 'Text'],
@@ -295,13 +239,16 @@ async function main() {
     // Page layout (storage format 2): shared files are uploaded once per copy, so a refinement only adds what changed.
     const up = await uploadPages(store, { id: j.copy_id, version: next, pages: [{ page_id: j.page_id, path: '', dir }] });
     const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(fs.readFileSync(path.join(dir, 'desktop.html'), 'utf8'))?.[1] || '').trim().replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, '’').replace(/\s*·\s*Preview copy$/i, '').split(/\s+[|–—-]\s+/)[0].replace(/\s*®\s*$/, '').slice(0, 120) || null;
-    const findings = (v.reasons || []).map((r) => ({ code: r.code, text: plain(r), pinned: !!r.spots?.length }))
+    // What the person can't see or judge in review (other window sizes, our own leftovers) stays in the verdict for our
+    // triage and is left out here (Jeremy, 2026-11-20).
+    const shown = (v.reasons || []).filter((r) => !HIDDEN.has(r.code) && !r.quiet);
+    const findings = shown.map((r) => ({ code: r.code, text: r.spots?.length ? spotMessage(r.code) : pageMessage(r.code), pinned: !!r.spots?.length }))
       .filter((f, i, a) => a.findIndex((x) => x.text === f.text) === i);
     // Findings the check could place on the page become pins the person can mark (schema-findings.sql); the rest stay
     // a list. They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
     const pageHtml = Object.fromEntries(['desktop', 'mobile'].map((l) => { try { return [l, fs.readFileSync(path.join(dir, `${l}.html`), 'utf8')]; } catch { return [l, '']; } }));
-    const findingPins = (v.reasons || []).flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: plain(r, nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId)) })))
+    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
     // never asks again about something already answered (Jeremy, 2026-10-27). "Not an issue" is remembered from any
@@ -345,7 +292,7 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
