@@ -393,10 +393,12 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
     const r = i.getBoundingClientRect();
     return !i.complete && (r.width === 0 || r.height === 0);
   }).map((i) => window.__preserveAnchor(i.getBoundingClientRect().width > 4 ? i : i.parentElement)));
-  out.blankImages = blankList.length;
-  spot('blank-images', blankList);
   out.brokenImages = await page.evaluate(() => [...document.images].filter((i) => i.getBoundingClientRect().height > 20 && i.complete && i.naturalWidth === 0 && getComputedStyle(i).display !== 'none').length);
-  out.blankImages = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).length);
+  // What the check counts (and holds on) is placed too, so a blank image is never a finding without a marker
+  // (Gucha Gucha, 2026-11-21: the count found one, the list above didn't, and it fell off the page).
+  const blankCounted = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).map((i) => window.__preserveAnchor(i)));
+  out.blankImages = blankCounted.length;
+  spot('blank-images', [...blankCounted, ...blankList]);
   await page.screenshot({ path: `${shotPrefix}-full-${profileName}.png`, fullPage: true }).catch(() => {});
   await page.evaluate(() => scrollTo(0, 0)); await sleep(600);
 

@@ -244,12 +244,15 @@ async function main() {
     const shown = (v.reasons || []).filter((r) => !HIDDEN.has(r.code) && !r.quiet);
     const findings = shown.map((r) => ({ code: r.code, text: r.spots?.length ? spotMessage(r.code) : pageMessage(r.code), pinned: !!r.spots?.length }))
       .filter((f, i, a) => a.findIndex((x) => x.text === f.text) === i);
-    // Findings the check could place on the page become pins the person can mark (schema-findings.sql); the rest stay
-    // a list. They replace the previous version's findings.
+    // Findings become pins the person can mark (schema-findings.sql), placed on the page where the check could tell.
+    // They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
     const pageHtml = Object.fromEntries(['desktop', 'mobile'].map((l) => { try { return [l, fs.readFileSync(path.join(dir, `${l}.html`), 'utf8')]; } catch { return [l, '']; } }));
     const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
+    // What the check couldn't place on the page is answered like any other suspected issue (Jeremy, 2026-11-21: all
+    // issues under Suspected issues): a pin with no block and no layout, which the app lists in both views, unlettered.
+    for (const r of shown) if (!r.spots?.length) findingPins.push({ blockId: null, layout: null, code: r.code, text: pageMessage(r.code) });
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
     // never asks again about something already answered (Jeremy, 2026-10-27). "Not an issue" is remembered from any
     // earlier round, and on phone and desktop alike: the same kind of finding on the same block (block ids are the same
