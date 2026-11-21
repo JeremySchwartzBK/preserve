@@ -6,7 +6,7 @@ import { PLANS } from './store-local.js';
 import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
-const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building the fast copy', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
+const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building your Preserve', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
 const STEP_KEYS = Object.keys(STEP_NAMES);
 const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
 

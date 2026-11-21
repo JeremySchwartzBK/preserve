@@ -72,8 +72,27 @@ async function main() {
   }
 
   // What the review screen says for each suspected issue: app/review-messages.js, shared with the app.
+  // What a finding is on, from the block's Squarespace class in the built page (the block id is the same in both
+  // layouts). One place for every kind of finding, whichever part of the check placed it.
+  const NOUNS = [[/\b(?:(?:sqs|ps)-block-image|image-block)\b/, 'Image'], [/\b(?:(?:sqs|ps)-block-(?:html|markdown|code)|html-block|markdown-block)\b/, 'Text'],
+    [/\b(?:(?:sqs|ps)-block-button|button-block)\b/, 'Button'], [/\b(?:(?:sqs|ps)-block-(?:gallery|slideshow)|gallery-block|sqs-gallery)\b/, 'Gallery'],
+    [/\b(?:(?:sqs|ps)-block-video|video-block)\b/, 'Video'], [/\b(?:(?:sqs|ps)-block-(?:form|newsletter)|form-block|newsletter-block)\b/, 'Form']];
+  const nounOf = (html, blockId) => {
+    if (!blockId || blockId === 'el:body') return 'Content';
+    if (blockId === 'el:header') return 'Header';
+    if (blockId === 'el:footer') return 'Footer';
+    if (blockId.startsWith('section:')) return 'Section';
+    const id = blockId.replace(/^el:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp(`<[a-z]+[^>]*\\b(?:id|data-block-id)="${id}"[^>]*>`, 'i').exec(html || '');
+    if (!m) return 'Content';
+    // The block's own classes (the build renames sqs-block to ps-block), else those of the next two tags inside it (a
+    // Fluid Engine cell wraps the Squarespace block). Never further, so a neighbouring block can't lend its kind.
+    const inner = (html.slice(m.index + m[0].length, m.index + m[0].length + 2000).match(/<[a-z][^>]*>/gi) || []).slice(0, 2).join('');
+    for (const tags of [m[0], inner]) for (const [re, n] of NOUNS) if (re.test(tags)) return n;
+    return /<section\b/i.test(m[0]) ? 'Section' : 'Content';
+  };
   const FAILED = {
-    'not-squarespace': 'This page isn’t on Squarespace. For now we can only copy Squarespace sites.',
+    'not-squarespace': 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
     'password-protected': 'This page is password protected, so we couldn’t copy it.',
   };
@@ -228,7 +247,8 @@ async function main() {
     // Findings the check could place on the page become pins the person can mark (schema-findings.sql); the rest stay
     // a list. They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
-    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => ({ ...p, code: r.code, text: spotMessage(r.code) })))
+    const pageHtml = Object.fromEntries(['desktop', 'mobile'].map((l) => { try { return [l, fs.readFileSync(path.join(dir, `${l}.html`), 'utf8')]; } catch { return [l, '']; } }));
+    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }))
       .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
     // The person's answers to last round's findings carry over to the same finding at the same spot, so a refinement
     // never asks again about something already answered (Jeremy, 2026-10-27). "Not an issue" is remembered from any
@@ -246,6 +266,18 @@ async function main() {
       if (here) p.verdict = here.verdict;
       else if (last && fine(last.verdict)) p.verdict = last.verdict;
     }
+    // The "Your site" and "Preserve" pictures for each finding (finding-crops.mjs), kept with this version and shown
+    // in review through the viewer (findings/ route, owner's signed link only). Missing pictures never stop a copy.
+    try {
+      const cropDir = path.join(work, j.copy_id, 'finding-crops'), pinsFile = path.join(work, j.copy_id, 'finding-pins.json');
+      fs.rmSync(cropDir, { recursive: true, force: true });
+      fs.writeFileSync(pinsFile, JSON.stringify(findingPins.map((p, i) => ({ i, layout: p.layout, blockId: p.blockId, pageY: p.pageY, firstScreen: p.code === 'first-screen-differs' }))));
+      const { stdout } = await promisify(execFile)('node', ['finding-crops.mjs', path.join(work, j.copy_id), dir, j.url, pinsFile, cropDir], { cwd: HARNESS, timeout: 300e3, env: jobEnv() });
+      for (const i of JSON.parse(stdout.slice(stdout.indexOf('[')))) {
+        for (const w of ['site', 'preserve']) await store.put(`copies/${j.copy_id}/v${next}/p/${j.page_id}/findings/${i}-${w}.webp`, fs.readFileSync(path.join(cropDir, `${i}-${w}.webp`)), 'image/webp');
+        findingPins[i].crop = `v${next}/${i}`;
+      }
+    } catch (e) { log('finding pictures not made', j.copy_id, e.message.slice(0, 200)); }
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
     const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
@@ -260,7 +292,7 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);

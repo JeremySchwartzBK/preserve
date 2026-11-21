@@ -12,14 +12,15 @@ const SEED_COPIES = [
   { id: '2h59u7sb', name: 'designforward', title: 'Design Forward', url: 'https://www.designforward.live/', status: 'ready', created: ago(4), notes: [] },
   { id: 'b4vhrecu', name: 'xanadu', title: 'Xanadu Roller Arts', url: 'https://www.xanadu.nyc/', status: 'ready', created: ago(3), notes: ['Embedded widgets (such as signup forms) are shown as pictures.'] },
   { id: '9x2arj4e', name: 'kosa', title: 'Kosa Artist Residency', url: 'https://hello-world-kosa.squarespace.com/', status: 'review', created: ago(0.1), notes: ['Videos play muted and on a loop.'],
-    findings: [{ text: 'A slideshow or carousel doesn’t move.', pinned: true }, { text: 'The first screen looks noticeably different from the live site.', pinned: true }] },
+    findings: [{ text: 'Gallery doesn’t move here. It moves on your site.', pinned: true }, { text: 'First screen differs from your site.', pinned: true }] },
 ];
 // Where the quality check saw each problem on the kosa copy (from a real run, 2026-10-16), shown as lettered pins.
-const f = (code, body, layout, blockId, x, y) => ({ kind: 'finding', code, body, layout, blockId, x, y, meta: { code } });
+// crop: pictures for the "Your site" / "Preserve" pair, if the demo has them (demo/finding-<crop>-site.webp).
+const f = (code, body, layout, blockId, x, y, crop) => ({ kind: 'finding', code, body, layout, blockId, x, y, meta: { code, ...(crop ? { demoCrop: `demo/finding-${crop}` } : {}) } });
 const SEED_FINDINGS = { '9x2arj4e': [
-  f('gallery-does-not-advance', 'A slideshow or carousel doesn’t move.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02),
-  f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'desktop', 'el:body', 0.506, 0.067),
-  f('first-screen-differs', 'The first screen looks noticeably different from the live site.', 'mobile', 'el:body', 0.467, 0.047),
+  f('gallery-does-not-advance', 'Gallery doesn’t move here. It moves on your site.', 'desktop', 'block-yui_3_17_2_1_1784704282143_21527', 0.994, 0.02),
+  f('first-screen-differs', 'First screen differs from your site.', 'desktop', 'el:body', 0.506, 0.067),
+  f('first-screen-differs', 'First screen differs from your site.', 'mobile', 'el:body', 0.467, 0.047),
 ] };
 // Fonts on the kosa copy that need the person's look (font licensing, Jeremy 2026-10-19/26): who holds each license
 // decides what the Preserve uses. The three uploaded to kosa's site are real (trial builds); Omnes Pro (an Adobe font
@@ -133,7 +134,7 @@ export const store = {
     while (db.copies.some((c) => c.name === name && c.status !== 'deleted')) name += '-2';
     const c = { id, name, title: known?.title || u.hostname.replace(/^www\./, ''), url: u.href, status: 'processing', step: 0, created: now(), notes: [], pins: [], versions: [], live: null, simulated: !known };
     db.copies.unshift(c); emit();
-    const steps = ['Checking the address', 'Opening the page on phone and desktop', 'Saving images, fonts and video', 'Building the fast copy', 'Removing trackers and contact details', 'Comparing it with the live site'];
+    const steps = ['Checking the address', 'Opening the page on phone and desktop', 'Saving images, fonts and video', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
     const tick = () => {
       if (c.status !== 'processing') return;
       c.step++;
@@ -155,7 +156,7 @@ export const store = {
     const judge = () => c.pins.filter((p) => p.kind === 'issue' && !p.meta?.report).forEach((p, i) => { p.meta = { ...p.meta, round_result: i === 0 ? 'still-different' : 'looks-fixed', round_version: c.versions.length + 1 }; });
     const finish = () => { judge(); c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); db.notifications.unshift({ at: now(), copy: c.id, text: `Refinement ${c.rounds} of ${c.title} is ready to review.`, read: false }); emit(); };
     const tick = () => { if (c.status !== 'processing') return; c.step++; if (c.step < c.stepNames.length) { emit(); setTimeout(tick, 1400); } else finish(); };
-    c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building the fast copy', 'Removing trackers and contact details', 'Comparing it with the live site'];
+    c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
     setTimeout(tick, 1200);
   },
 };
