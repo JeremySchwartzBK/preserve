@@ -101,6 +101,17 @@ await store.put('platform/tour.js', fs.readFileSync(new URL('../tour/tour.js', i
 for (const f of ['inter', 'newsreader']) await store.put(`platform/fonts/${f}.woff2`, fs.readFileSync(new URL(`../fonts/${f}.woff2`, import.meta.url)), 'font/woff2');
 r = await get('/_p/fonts/inter.woff2'); ok('our fonts are served', r.status === 200 && r.headers.get('content-type') === 'font/woff2');
 r = await get('/_p/fonts/other.woff2'); ok('only our two fonts', r.status === 404);
+
+// Adobe Fonts connection: the studio's kit loads last, from Adobe, and the page's rules let it in only then.
+await store.kvPut(`adobe:${id}`, { kit: 'abc1def' });
+r = await get(`/c/${id}/desktop`); let page = await r.text();
+ok('adobe kit loads on the page', page.includes('<link rel="stylesheet" href="https://use.typekit.net/abc1def.css">') && page.indexOf('use.typekit.net') > page.lastIndexOf('<style id="preserve-fonts"') && page.indexOf('use.typekit.net') < page.lastIndexOf('</body>'));
+ok('adobe kit allowed by the page rules', /style-src [^;]*https:\/\/use\.typekit\.net/.test(r.headers.get('content-security-policy')) && /font-src [^;]*https:\/\/use\.typekit\.net/.test(r.headers.get('content-security-policy')));
+await store.kvPut(`adobe:${id}`, { kit: 'x"><script>' });
+r = await get(`/c/${id}/desktop`); page = await r.text();
+ok('a malformed kit id is ignored', !page.includes('typekit') && !r.headers.get('content-security-policy').includes('typekit'));
+await store.kvDel(`adobe:${id}`);
+r = await get(`/c/${id}/desktop`); ok('no kit, no Adobe in the page rules', !r.headers.get('content-security-policy').includes('typekit'));
 // The "Your site" / "Preserve" pictures beside a suspected issue: only on the owner's review link (no REVIEW_SECRET
 // here, so any ?review= counts), never to visitors, and only names the runner makes.
 await store.put(`copies/${id2}/v2/p/home/findings/0-site.webp`, Buffer.from('RIFFxxxxWEBP'), 'image/webp');

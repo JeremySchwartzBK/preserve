@@ -26,6 +26,9 @@ jobs:
       - name: Private review links
         working-directory: platform
         run: node test-review-links.mjs
+      - name: Adobe Fonts calls
+        working-directory: platform
+        run: node test-adobe.mjs
       - name: How many runners to start
         working-directory: platform/host
         run: node test-scale.mjs

@@ -10,3 +10,4 @@ schema-fonts.sql
 schema-wake.sql
 schema-guards.sql
 schema-review-links.sql
+schema-adobe.sql

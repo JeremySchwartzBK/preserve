@@ -92,4 +92,36 @@ reset role;
 set role anon;
 select t.fails($$select review_link('abcd1234')$$, 'permission denied');
 reset role;
+
+-- Adobe Fonts connection (schema-adobe.sql). Vault stand-in: secrets with ids, and create_secret.
+alter table vault.decrypted_secrets add column id uuid default gen_random_uuid();
+create view vault.secrets as select * from vault.decrypted_secrets;
+create function vault.create_secret(secret text, name text, description text) returns uuid language sql as $$
+  insert into vault.decrypted_secrets (name, decrypted_secret) values (name, secret) returning id $$;
+set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000a');
+select t.fails($$select connect_adobe('not a key!')$$, 'not-an-adobe-key');
+select connect_adobe('  abcdef0123456789abcdef0123456789abcdef01  ');
+select t.is((select state from studio_adobe), 'checking', 'connecting starts with a check');
+select t.fails($$select secret_id from studio_adobe$$, 'permission denied');
+select t.fails($$select adobe_key(my_studio())$$, 'permission denied');
+select t.fails($$select decrypted_secret from vault.decrypted_secrets$$, 'permission denied');
+select set_adobe_accepted_too(true);
+select t.is((select accepted_too from studio_adobe), true, 'the one question is recorded');
+reset role;
+select t.is(adobe_key(s.id), 'abcdef0123456789abcdef0123456789abcdef01', 'the key, trimmed, for the runner only')
+  from studio s join studio_adobe a on a.studio_id = s.id;
+select t.is((select count(*) from serving_outbox o join copy c on c.id = o.copy_id join studio_adobe a on a.studio_id = c.studio_id) > 0, true, 'connecting updates the studio''s Preserves');
+set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000b');
+select t.is((select count(*) from studio_adobe), 0::bigint, 'another studio sees nothing');
+select t.fails($$select set_adobe_accepted_too(false)$$, 'not-connected');
+select t.as_user('00000000-0000-0000-0000-00000000000a');
+select connect_adobe('ffffffff0123456789abcdef0123456789abcdef');
+reset role;
+select t.is((select count(*) from vault.decrypted_secrets where name like 'adobe-fonts:%'), 1::bigint, 'a new key replaces the old one in the vault');
+set role authenticated; select t.as_user('00000000-0000-0000-0000-00000000000a');
+select disconnect_adobe();
+select t.is((select state from studio_adobe), 'disconnected', 'disconnect');
+reset role;
+select t.is((select count(*) from vault.decrypted_secrets where name like 'adobe-fonts:%'), 0::bigint, 'disconnect deletes the key');
+select t.is((select count(*) from studio_adobe_log), 5::bigint, 'every step is logged');
 \echo database rules: all checks pass

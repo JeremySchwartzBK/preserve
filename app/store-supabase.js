@@ -8,9 +8,9 @@ import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building your Preserve', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
 const STEP_KEYS = Object.keys(STEP_NAMES);
-const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.' };
+const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.', 'not-an-adobe-key': 'That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.', 'not-connected': 'Connect your Adobe Fonts account first.' };
 
-let me = null, studio = null, copies = [], notes = [], studioFonts = [], ready = false, timer = null;
+let me = null, studio = null, copies = [], notes = [], studioFonts = [], ready = false, timer = null, adobeConn = null;
 // Font files uploaded in this browser, kept as data: addresses so the preview shows them while the file is checked.
 const justUploaded = {};
 const listeners = new Set();
@@ -23,13 +23,16 @@ async function refresh() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { me = null; studio = null; copies = []; ready = true; emit(); return; }
   const uid = session.user.id;
-  const [{ data: person }, { data: st }, { data: cs }, { data: nt }, { data: sf }] = await Promise.all([
+  const [{ data: person }, { data: st }, { data: cs }, { data: nt }, { data: sf }, { data: ad }] = await Promise.all([
     sb.from('person').select('*').eq('id', uid).maybeSingle(),
     sb.from('studio').select('*').limit(1).maybeSingle(),
     sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
     sb.from('notification').select('*').order('created_at', { ascending: false }).limit(30),
     sb.from('studio_font').select('id,font_key,name,file_name,asset,state,problem,created_at').order('created_at', { ascending: false }),
+    // The Adobe Fonts connection (schema-adobe.sql): whether it works, never the key.
+    sb.from('studio_adobe').select('state,accepted_too,families,connected_at,checked_at').maybeSingle(),
   ]);
+  adobeConn = ad && ad.state !== 'disconnected' ? { state: ad.state, acceptedToo: ad.accepted_too, families: ad.families || {}, connectedAt: ad.connected_at } : null;
   studioFonts = sf || [];
   me = person ? { email: person.email, name: person.name } : { email: session.user.email };
   studio = st;
@@ -39,7 +42,7 @@ async function refresh() {
   emit();
   clearTimeout(timer);
   // Keep looking while a Preserve is being made or an uploaded font is being checked.
-  if (copies.some((c) => c.status === 'processing') || studioFonts.some((f) => f.state === 'checking')) timer = setTimeout(refresh, 5000);
+  if (copies.some((c) => c.status === 'processing') || studioFonts.some((f) => f.state === 'checking') || adobeConn?.state === 'checking') timer = setTimeout(refresh, 5000);
 }
 
 function shape(r) {
@@ -124,6 +127,10 @@ export const store = {
   // Signed review link for the preview frame (schema-review-links.sql); null until private review links are switched on.
   reviewToken: async (id) => { const { data } = await sb.rpc('review_link', { cid: id }); return data || null; },
   notifications: () => notes,
+  adobe: () => adobeConn,
+  connectAdobe: (key) => rpc('connect_adobe', { api_key: key }).then(() => null, say),
+  disconnectAdobe: () => act('disconnect_adobe', {}),
+  setAdobeAcceptedToo: (yes) => act('set_adobe_accepted_too', { yes }),
   async markRead() { await sb.from('notification').update({ read_at: new Date().toISOString() }).is('read_at', null); refresh(); },
   async addPin(id, p) {
     const c = copies.find((x) => x.id === id);

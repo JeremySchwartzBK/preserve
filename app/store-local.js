@@ -106,6 +106,20 @@ export const store = {
   // Font choices during review. decision: keep | lookalike | upload (null until the person has looked). Each change is
   // recorded with who and when; changing a font rebuilds only the fonts (seconds), not a refinement.
   studioFonts() { return db.studio.fonts || []; },
+  // Adobe Fonts connection (schema-adobe.sql). The demo takes any 20+ letter token, "checks" it for a moment, and has
+  // every Adobe font in its catalog except ones named "unnamed".
+  adobe() { return db.studio.adobe && db.studio.adobe.state !== 'disconnected' ? db.studio.adobe : null; },
+  connectAdobe(key) {
+    if (!/^[A-Za-z0-9]{20,80}$/.test(String(key).trim())) return Promise.resolve('That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.');
+    db.studio.adobe = { state: 'checking', acceptedToo: db.studio.adobe?.acceptedToo ?? null, families: {}, connectedAt: now() }; emit();
+    setTimeout(() => {
+      const fams = {}; for (const c of db.copies) for (const f of c.fonts || []) if (f.holder === 'platform') for (const x of f.faces || [{ family: f.id }]) fams[x.family] = /unnamed/.test(x.family) ? null : 'demo' + x.family.length;
+      Object.assign(db.studio.adobe, { state: 'ok', families: fams }); emit();
+    }, 1500);
+    return Promise.resolve(null);
+  },
+  disconnectAdobe() { if (db.studio.adobe) db.studio.adobe.state = 'disconnected'; emit(); },
+  setAdobeAcceptedToo(yes) { if (db.studio.adobe) db.studio.adobe.acceptedToo = yes; emit(); },
   setFont(id, fid, decision) {
     const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
     f.decision = decision; if (decision === 'lookalike') f.covered = null;

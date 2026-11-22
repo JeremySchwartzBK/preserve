@@ -227,3 +227,8 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 
 /* Suspected issues answered "Not an issue" in an earlier round, tucked away. */
 details.dismissed{margin:4px 0 12px}details.dismissed summary{cursor:pointer;color:var(--sub);font-size:.9rem}details.dismissed .pins{margin-top:8px;opacity:.8}
+
+/* Adobe Fonts connection: the connect card and the plan page box. */
+.adobe .steps { margin: 12px 0; padding-left: 20px; display: grid; gap: 6px; }
+.adobe #adkey { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--line, #ccc); border-radius: 8px; margin-top: 4px; }
+.adobebox { margin-top: 24px; }

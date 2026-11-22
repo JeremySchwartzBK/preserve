@@ -136,6 +136,6 @@ export async function deleteCopyFiles(store, id) {
       n++;
     }
   }
-  for (const k of [`tour:${id}`, `fonts:${id}`]) await store.kvDel(k).catch(() => {});
+  for (const k of [`tour:${id}`, `fonts:${id}`, `adobe:${id}`]) await store.kvDel(k).catch(() => {});
   return n;
 }

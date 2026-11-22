@@ -62,6 +62,10 @@ const currentReplica = (html) => html.replace(/<script id="preserve-replica">[\s
 
 const PRESERVE_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self' https://player.vimeo.com https://www.youtube-nocookie.com; connect-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
 
+// Pages with an Adobe Fonts kit may load its stylesheet and fonts from Adobe (and Adobe's page-view counter).
+const withAdobe = (csp) => csp.replace("style-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://use.typekit.net https://p.typekit.net")
+  .replace("font-src 'self' data:", "font-src 'self' data: https://use.typekit.net");
+
 const url = (req) => new URL(req.url);
 
 // Small lookup records (copy:<id>, name:<studio>/<name>, tour:<id>) live in R2 at lookup/<kind>/<key>.json.
@@ -212,7 +216,12 @@ async function serveCopy(req, env, ctx, id, rest) {
   else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
-  const fontCss = fonts?.length ? fontTags(fonts) : '';
+  // The studio's Adobe Fonts kit (schema-adobe.sql), when its connection is working: loaded last, from Adobe (no
+  // self-hosting allowed), over the lookalikes the page already carries. If Adobe stops serving it, the lookalikes show.
+  const kitId = asset || !file.endsWith('.html') ? null : (await lookup(env, `adobe:${id}`))?.kit;
+  const kit = typeof kitId === 'string' && /^[a-z0-9]{4,20}$/.test(kitId) ? kitId : null;
+  const fontCss = (fonts?.length ? fontTags(fonts) : '') + (kit ? `<link rel="stylesheet" href="https://use.typekit.net/${kit}.css">` : '');
+  if (kit && h.has('content-security-policy')) h.set('content-security-policy', withAdobe(h.get('content-security-policy')));
   if (!asset && url(req).searchParams.has('review')) {
     h.set('cache-control', 'no-store');
     const html = beforeBodyEnd(text, fontCss + REVIEW_BRIDGE);
