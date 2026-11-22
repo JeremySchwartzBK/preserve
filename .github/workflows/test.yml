@@ -35,6 +35,9 @@ jobs:
       - name: Alerts
         working-directory: platform/host
         run: node test-alerts.mjs
+      - name: Adobe Fonts check at submit
+        working-directory: platform/host
+        run: node test-adobe-sniff.mjs
       - name: Links between pages
         working-directory: harness
         run: npm ci --ignore-scripts && node test-link-pages.mjs

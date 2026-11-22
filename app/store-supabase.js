@@ -3,7 +3,7 @@
 // database function (schema-actions.sql), which enforces plan limits, refinement rounds, and who may approve.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 import { PLANS } from './store-local.js';
-import { SUPABASE_URL, SUPABASE_KEY, VIEW } from './config.js';
+import { SUPABASE_URL, SUPABASE_KEY, VIEW, HOST } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building your Preserve', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
@@ -131,6 +131,8 @@ export const store = {
   connectAdobe: (key) => rpc('connect_adobe', { api_key: key }).then(() => null, say),
   disconnectAdobe: () => act('disconnect_adobe', {}),
   setAdobeAcceptedToo: (yes) => act('set_adobe_accepted_too', { yes }),
+  // Right after "Create Preserve": does the page load Adobe fonts? true, false, or null when we can't tell in time.
+  adobeCheck: (id) => fetch(`${HOST}/adobe-check?copy=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(8000) }).then((r) => r.json()).then((j) => j.adobe ?? null, () => null),
   async markRead() { await sb.from('notification').update({ read_at: new Date().toISOString() }).is('read_at', null); refresh(); },
   async addPin(id, p) {
     const c = copies.find((x) => x.id === id);

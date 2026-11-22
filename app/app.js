@@ -128,11 +128,11 @@ const ADOBE_TOKENS = 'https://typekit.com/account/tokens';   // Adobe's API docs
 const adobeFaces = (f) => (f.faces?.length ? f.faces.map((x) => x.family) : [f.id]);
 const adobeHas = (f) => { const a = store.adobe?.(); return f.holder === 'platform' && a?.state === 'ok' && adobeFaces(f).some((x) => a.families?.[x]); };
 const usesAdobe = (c) => (c.fonts || []).some((f) => f.holder === 'platform');
-function adobeCard(c) {
+function adobeCard(c, { found = false } = {}) {
   const dlg = $('#cdlg');
   const names = [...new Set((c?.fonts || []).filter((f) => f.holder === 'platform').map((f) => f.name))];
   dlg.innerHTML = `<form method="dialog" class="adobe"><h2>Show your Adobe fonts</h2>
-    <p class="sub">${names.length ? `Your site uses ${names.length === 1 ? 'an Adobe font' : 'Adobe fonts'}: ${esc(names.join(', '))}. ` : ''}If you have Adobe Creative Cloud, connect it once and your Preserves show your Adobe fonts instead of lookalikes.</p>
+    <p class="sub">${names.length ? `Your site uses ${names.length === 1 ? 'an Adobe font' : 'Adobe fonts'}: ${esc(names.join(', '))}. ` : found ? 'This page uses Adobe fonts. ' : ''}If you have Adobe Creative Cloud, connect it once and your Preserves show your Adobe fonts instead of lookalikes.</p>
     <ol class="steps"><li><a href="${ADOBE_TOKENS}" target="_blank" rel="noopener">Open your Adobe Fonts API token page</a> and sign in with your Adobe account.</li>
       <li>Create a token. Any name works, such as Preserve.</li><li>Copy the token and paste it here.</li></ol>
     <input id="adkey" autocomplete="off" spellcheck="false" placeholder="Paste your token" aria-label="Adobe Fonts API token">
@@ -244,7 +244,14 @@ function card(c) {
 }
 
 // 3. New Preserve ----------------------------------------------------------------------------------------------
+// The Preserve just made from this page: the page shows "We're on it" until the person goes elsewhere (kept here, not
+// only drawn once, so a redraw from a store change doesn't put the empty form back).
+let justMade = null;
 function newCopy() {
+  if (justMade) {
+    shell(`<div class="card narrow center" id="onit"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. When it’s ready to review, it moves to the top of your Preserves.</p><a class="btn" href="#/">Back to your Preserves</a></div>`, { back: '#/' });
+    return;
+  }
   shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop. We swap emails, phone numbers and addresses for placeholders.</p>
     <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
     <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
@@ -253,7 +260,13 @@ function newCopy() {
     e.preventDefault();
     const r = await store.create($('#u').value.trim());
     if (r.error) { $('#err').textContent = r.error; $('#err').hidden = false; return; }
-    app.querySelector('main').innerHTML = `<div class="card narrow center"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. When it’s ready to review, it moves to the top of your Preserves.</p><a class="btn" href="#/">Back to your Preserves</a></div>`;
+    justMade = r.id; newCopy();
+    // Adobe Fonts first thing (Jeremy, 2026-11-22): a quick look at the page's own HTML says whether it loads Adobe
+    // fonts, so the connect card opens now, before any lookalike choice. Anything it misses is asked at first review.
+    if (store.adobeCheck && store.adobe && !store.adobe() && !adobeLater()) {
+      const yes = await store.adobeCheck(r.id);
+      if (yes && justMade === r.id && location.hash === '#/new' && !store.adobe() && !$('#cdlg').open) { view.adobeAsked = r.id; adobeCard(null, { found: true }); }
+    }
   };
 }
 
@@ -822,7 +835,7 @@ function route() {
   if (h !== '/') location.hash = '#/';
   dashboard();
 }
-addEventListener('hashchange', () => { view.pinFor = null; view.flash = null; route(); });
+addEventListener('hashchange', () => { justMade = null; view.pinFor = null; view.flash = null; route(); });
 store.onChange(route);
 route();
 

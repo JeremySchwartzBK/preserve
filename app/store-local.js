@@ -119,6 +119,8 @@ export const store = {
     return Promise.resolve(null);
   },
   disconnectAdobe() { if (db.studio.adobe) db.studio.adobe.state = 'disconnected'; emit(); },
+  // The demo's quick check at submit: these test sites load Adobe fonts from Squarespace's menu.
+  adobeCheck(id) { const c = this.copy(id); return new Promise((ok) => setTimeout(() => ok(!!c && ['xanadu.nyc', 'hello-world-kosa.squarespace.com'].includes(new URL(c.url).hostname.replace(/^www\./, ''))), 900)); },
   setAdobeAcceptedToo(yes) { if (db.studio.adobe) db.studio.adobe.acceptedToo = yes; emit(); },
   setFont(id, fid, decision) {
     const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
