@@ -345,10 +345,10 @@ function sendPins(c, force) {
   const list = kind ? pinsFor(c, view.tab) : [];
   const pins = list.filter((p) => kind === 'tour' || p.layout === view.layout || !p.layout).map((p) => ({ kind: p.kind, blockId: p.blockId, x: p.x, y: p.y, body: p.body, n: list.indexOf(p) + 1 }));
   // While checking, the quality check's findings show too, lettered A, B, C… (grey once marked).
-  // One marker per part of the page: every suspected issue found on that part shares its letter (Jeremy, 2026-11-20).
-  // A part that is the whole page (the first screen, or no one block) shows as a band across the preview, not a dot.
-  if (view.tab === 'check') findingGroups(c).forEach((g, i) => { const w = g.items.find(pageWide); pins.push({ kind: g.items.every((p) => p.meta.verdict) ? 'finding-done' : 'finding', blockId: g.blockId, x: g.x, y: g.y, body: g.items.map(fText).join('\n'), n: letter(i),
-    ...(w ? { wide: true, top: g.items.some((p) => p.meta.code === 'first-screen-differs') ? 0 : w.meta.pageY ?? 0 } : {}) }); });
+  // Every suspected issue has its own letter (Jeremy, 2026-11-21); the page nudges markers on the same spot apart so
+  // none hides another. One about the whole page (the first screen, or no one block) shows as a band, not a dot.
+  if (view.tab === 'check') placedOf(c).forEach((p, i) => pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: p.x, y: p.y, body: fText(p), n: letter(i),
+    ...(pageWide(p) ? { wide: true, top: p.meta.code === 'first-screen-differs' ? 0 : p.meta.pageY ?? 0 } : {}) }));
   const key = JSON.stringify(pins);
   if (key === lastPins && !force) return;   // unchanged: don't touch the page
   lastPins = key;
@@ -364,26 +364,20 @@ const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-prob
 // layouts (their text names a width but no layout).
 const reviewable = (p) => !HIDDEN.has(p.meta.code) && !(/pixels wide/.test(p.body || '') && !/on (computers|phones)/.test(p.body || ''));
 // Shown in today's wording, by kind (review-messages.js); the stored text stays as it was.
-const fText = (p) => (p.meta.code ? spotMessage(p.meta.code, p.meta.noun) : p.body);
-const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && reviewable(p) && dismissedEarlier(p));
-const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && p.layout === layout && reviewable(p) && !dismissedEarlier(p)).sort((a, b) => (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
-// Suspected issues grouped by the part of the page they were found on, in page order: one letter, one marker each.
-function findingGroups(c, layout = view.layout) {
-  const groups = new Map();
-  for (const p of findingsOf(c, layout)) {
-    const k = p.blockId || `pin:${p.id}`;
-    if (!groups.has(k)) groups.set(k, { blockId: p.blockId, x: p.x, y: p.y, items: [] });
-    groups.get(k).items.push(p);
-  }
-  return [...groups.values()];
-}
+const fText = (p) => (!p.meta.code ? p.body : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
+// A finding the check couldn't place on the page has no block and no layout (runner.mjs): it is listed in both views,
+// after the lettered ones, and answered like any other.
+const inView = (p, layout) => p.layout === layout || !p.layout;
+const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && inView(p, layout) && reviewable(p) && dismissedEarlier(p));
+const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && inView(p, layout) && reviewable(p) && !dismissedEarlier(p)).sort((a, b) => !a.blockId - !b.blockId || (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
+const placedOf = (c, layout = view.layout) => findingsOf(c, layout).filter((p) => p.blockId);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
 const pageWide = (p) => p.meta.code === 'first-screen-differs' || p.blockId === 'el:body';
 // The "Your site" and "Preserve" pictures the runner cut for a finding (finding-crops.mjs), from the viewer on the
 // owner's signed link. A picture that can't load takes its pair away rather than leave a broken image.
 function cropPair(c, p) {
   const src = p.meta.demoCrop ? (w) => `${p.meta.demoCrop}-${w}.webp`
-    : p.meta.crop && store.view && view.reviewToken?.t ? (w) => `${store.view}/c/${c.id}/findings/${p.meta.crop}-${w}.webp?review=${encodeURIComponent(view.reviewToken.t)}` : null;
+    : p.meta.crop && store.view ? (w) => `${store.view}/c/${c.id}/findings/${p.meta.crop}-${w}.webp?review=${encodeURIComponent(view.reviewToken?.t || 1)}` : null;
   if (!src) return '';
   return `<button type="button" class="crops ${p.layout === 'mobile' ? 'phone' : ''}" title="See larger" onclick="showCrops(this)">${[['site', 'Your site'], ['preserve', 'Preserve']].map(([w, t]) =>
     `<figure><img src="${esc(src(w))}" alt="${t}" loading="lazy" onerror="this.closest('.crops').remove()"><figcaption>${t}</figcaption></figure>`).join('')}</button>`;
@@ -472,7 +466,7 @@ const roundResult = (p) => p.meta.round_result === 'looks-fixed' ? '<small class
 const BY_DESIGN_TEXT = {
   'contact-details': 'Preserves replace email addresses, phone numbers and street addresses with placeholders, so a Preserve never stands in for your real site.',
   'pop-ups': 'Preserves leave out pop-ups, announcement bars, cookie banners and promo tabs.',
-  'video-still': 'Preserves show a still frame for YouTube and Vimeo videos, except section backgrounds.',
+  'video-still': 'Preserves show a static frame for YouTube and Vimeo videos, except section backgrounds.',
   'looping-video': 'Preserves clip looping background video to a short loop.',
   'shopping-forms': 'In a Preserve, buttons that buy, book or send a form show a note that it’s a snapshot.',
 };
@@ -502,9 +496,11 @@ function panel(c, review) {
   P.dataset.k = view.tab === 'talent' ? key : '';
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
-    const found = findingGroups(c), gone = dismissedOf(c);
-    const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).length;
-    const listed = (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f))
+    const found = findingsOf(c), gone = dismissedOf(c);
+    const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).filter((p) => p.layout === other).length;
+    // Preserves checked before unplaced findings became answerable (2026-11-21) keep them only as text: listed with the
+    // rest, without buttons.
+    const older = found.some((p) => !p.blockId) ? [] : (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f))
       .filter((f) => !f.pinned && !HIDDEN.has(f.code) && !/pixels wide|browser window/.test(f.text || ''))
       .map((f) => ({ ...f, text: f.code ? pageMessage(f.code) : f.text }));
     P.innerHTML = `<h2>Look and Feel</h2>
@@ -513,15 +509,14 @@ function panel(c, review) {
       <p>${pinButton('check', `${ic('plus')} Issue`)}</p>
       ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
-        : c.rounds ? `<p class="note ok">Refinement ${c.rounds} is ready. Compare it with your live site again. Your earlier pins are kept below; flag anything still off.</p>` : ''}
-      ${found.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated quality check compared this Preserve with your site and identified where the Preserve may have deviated from the live site. For each suspected issue, let us know whether it needs to be addressed by refining the Preserve or whether it’s not an issue that needs to be addressed.</p>
-        <ol class="pins findings">${found.map((g, i) => `<li><b class="ltr">${letter(i)}</b>${g.items.map((p, j) => `<div class="fitem"><span class="pbody">${esc(fText(p))}</span>${j === 0 ? cropPair(c, g.items.find((x) => x.meta.crop || x.meta.demoCrop) || p) : ''}
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${j === g.items.length - 1 && g.blockId ? `<button class="link" data-goto="${esc(g.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></div>`).join('')}</li>`).join('')}</ol>` : ''}
+        : ''}
+      ${found.length || older.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated quality check compared this Preserve with your site and identified where the Preserve may have deviated from the live site. For each suspected issue, let us know whether it needs to be addressed by refining the Preserve or whether it’s not an issue that needs to be addressed.</p>
+        <ol class="pins findings">${found.map((p, i) => `<li class="${p.blockId ? '' : 'nopin'}">${p.blockId ? `<b class="ltr">${letter(i)}</b>` : ''}<span class="pbody">${esc(fText(p))}</span>${cropPair(c, p)}
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
       ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
-      ${listed.length ? `<h3 class="semi">${found.length ? 'Also noticed' : 'We noticed'}</h3><ul class="found">${listed.map((f) => `<li>${esc(f.text)}</li>`).join('')}</ul>` : ''}
       <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
       ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>
