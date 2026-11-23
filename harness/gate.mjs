@@ -8,7 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, swapLiveFonts } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, useOriginalFontsInCopy } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
 import { probeBehavior, compareBehavior } from './behavior.mjs';
@@ -55,34 +55,26 @@ const BEHAVIOR_TEXT = {
 };
 const withBrowser = async (f) => { const b = await launch(); try { return await f(b); } finally { await b.close(); } };
 
-// refDir: where the live shots the copy is compared with are. Normally capture's own (ref-*.png in siteDir); when the
-// copy shows substitute fonts, capture's shots have the original fonts, so a fresh pair is taken with the substitutes
-// in place (lib.mjs swapLiveFonts) and the first visit becomes the reference.
-async function liveSelfDiff(url, siteDir, refDir = siteDir) {
+async function liveSelfDiff(url, siteDir) {
   const out = {};
   const browser = await launch();
   try {
     for (const prof of ['desktop', 'mobile']) {
       const ctx = await browser.newContext({ ...PROFILES[prof].context, ignoreHTTPSErrors: true });
+      const page = await ctx.newPage();
       try {
-        const shoot = async (file, pins) => {
-          const page = await ctx.newPage();
-          await page.goto(url, { waitUntil: 'load', timeout: 90000 });
-          await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-          await sleep(2000);
-          const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
-          for (let y = 0; y < h + vh; y += Math.round(vh * 0.6)) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(350); }
-          await page.evaluate(() => scrollTo(0, 0)); await sleep(1500);
-          await page.evaluate(markPromos).catch(() => 0);
-          await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
-          await page.screenshot({ path: file(`${prof}.png`) });
-          await page.screenshot({ path: file(`full-${prof}.png`), fullPage: true });
-          if (pins && loadPins().length) await shootPins(page, prof, siteDir, 'live');
-          await page.close();
-        };
-        if (refDir !== siteDir) await shoot((f) => path.join(refDir, `ref-${f}`), false);
-        await shoot((f) => path.join(siteDir, `live2-${f}`), true);
-        out[prof] = { firstScreen: await diffPct(path.join(refDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(refDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
+        await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+        await sleep(2000);
+        const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
+        for (let y = 0; y < h + vh; y += Math.round(vh * 0.6)) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(350); }
+        await page.evaluate(() => scrollTo(0, 0)); await sleep(1500);
+        await page.evaluate(markPromos).catch(() => 0);
+        await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
+        await page.screenshot({ path: path.join(siteDir, `live2-${prof}.png`) });
+        await page.screenshot({ path: path.join(siteDir, `live2-full-${prof}.png`), fullPage: true });
+        if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
+        out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
         out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
         if (BEHAVIOR_CHECK) out[prof].behavior = await probeBehavior(browser, url, prof); // and what reacts to hover, drag, scroll
@@ -164,23 +156,40 @@ const OWN_CSS_MAX_DIFF = 1;
 // A copy resized to a width should look as it does opened at that width (the scripts re-measure on resize).
 const RESIZE_MAX_DIFF = 2;
 
-export async function runGate(job) {
-  // Every font file the copy serves in place of the site's (google-fonts.py: Google's copy of a library font, or a
-  // substitute) is served to the live site too while the check runs, so a font change is never counted as a difference.
-  const gfPath = path.join(job.siteDir, 'fonts-google.json');
-  const gfFonts = fs.existsSync(gfPath) ? JSON.parse(fs.readFileSync(gfPath, 'utf8')).fonts || {} : {};
-  const swap = {};
-  for (const [u, r] of Object.entries(gfFonts)) {
-    const f = path.join(job.siteDir, 'fonts-google', r.file || '');
-    if (r.file && fs.existsSync(f)) swap[u] = { path: f, ct: r.ct };
+// The site's own @font-face rules for every font the copy shows a substitute for, pointing at the original files from
+// the capture (inline, as data: addresses, which the copy's rules allow), for lib.mjs useOriginalFontsInCopy.
+function originalFontCss(siteDir) {
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(siteDir, f), 'utf8')); } catch { return null; } };
+  const gf = read('fonts-google.json'), manifest = read('manifest.json');
+  if (!gf?.fonts || !manifest) return '';
+  const key = (u) => u.split('?')[0].replace(/^http:/, 'https:');
+  const swapped = new Set(Object.entries(gf.fonts).filter(([, r]) => r.lookalike_for).map(([u]) => u));
+  if (!swapped.size) return '';
+  const files = new Map(Object.entries(manifest).filter(([u, e]) => /^https?:/.test(u) && e.file).map(([u, e]) => [key(u), e]));
+  const texts = [...Object.values(manifest).filter((e) => e.file && /css/.test(e.ct || '')).map((e) => path.join(siteDir, 'raw', e.file)), ...['desktop', 'mobile'].map((l) => path.join(siteDir, `rendered-${l}.html`))]
+    .filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8'));
+  const rules = new Map();
+  for (const t of texts) for (const m of t.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
+    const body = m[1];
+    const u = [...body.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)].map((x) => key(x[1].replace(/&amp;/g, '&'))).find((x) => swapped.has(x) && files.has(x));
+    if (!u) continue;
+    const e = files.get(u), f = path.join(siteDir, 'raw', e.file);
+    if (!fs.existsSync(f)) continue;
+    const keep = body.split(';').map((d) => d.trim()).filter((d) => /^(font-family|font-weight|font-style|font-stretch|unicode-range)\s*:/i.test(d));
+    rules.set(keep.join(';'), `@font-face{${keep.join(';')};font-display:block;src:url(data:font/woff2;base64,${fs.readFileSync(f).toString('base64')})}`);
   }
-  swapLiveFonts(swap);
-  try { return await runGateInner(job, Object.keys(swap).length ? path.join(job.siteDir, 'fontref') : job.siteDir); }
-  finally { swapLiveFonts(null); }
+  return [...rules.values()].join('\n');
 }
 
-async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null, steadyReport = null }, refDir) {
-  if (refDir !== siteDir) fs.mkdirSync(refDir, { recursive: true });
+export async function runGate(job) {
+  // A difference caused by a font change is never an issue (Jeremy, 2026-11-23): the copy pages the check opens get the
+  // site's original fonts in place of the substitutes the copy shows (lib.mjs useOriginalFontsInCopy).
+  useOriginalFontsInCopy(originalFontCss(job.siteDir));
+  try { return await runGateInner(job); }
+  finally { useOriginalFontsInCopy(null); }
+}
+
+async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null, steadyReport = null }) {
   const reasons = [], notes = [], warnings = [], info = {};
   // Where the check's time goes: each part is marked as it starts, and the seconds per part are kept with the verdict
   // (info.timings) and printed to the job's log, so a slow check can be traced to the part that was slow.
@@ -263,11 +272,11 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
   const base = `http://127.0.0.1:${srv.address().port}`;
   info.layouts = {};
   mark('live-page');
-  info.liveSelfDiff = await liveSelfDiff(url, siteDir, refDir);
+  info.liveSelfDiff = await liveSelfDiff(url, siteDir);
   try {
     for (const prof of ['desktop', 'mobile']) {
       mark(`${prof}-page`);
-      const c = await check(`${base}/${id}/${prof}`, prof, { refDir, shotPrefix: path.join(siteDir, 'gate'), isCopy: true });
+      const c = await check(`${base}/${id}/${prof}`, prof, { refDir: siteDir, shotPrefix: path.join(siteDir, 'gate'), isCopy: true });
       info.layouts[prof] = c;
       layoutSpots = c.spots; layoutName = prof;
       const L = (s) => `${prof}: ${s}`;

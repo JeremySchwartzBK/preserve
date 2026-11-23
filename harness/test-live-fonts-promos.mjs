@@ -1,9 +1,10 @@
 // The quality check's two comparison rules from 2026-11-23: a pinned popup that asks for an email address is marked
 // as a promotion (dropped from the copy, hidden on the live page), a signup form in the page is not; and with
-// swapLiveFonts set, the live page gets the copy's font file in place of the original one.
+// useOriginalFontsInCopy set, copy pages the check opens show the site's original fonts.
 import fs from 'node:fs';
 import path from 'node:path';
-import { launch, markPromos, swapLiveFonts } from './lib.mjs';
+import http from 'node:http';
+import { launch, markPromos, useOriginalFontsInCopy } from './lib.mjs';
 
 let failed = 0;
 const ok = (c, m) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) failed++; };
@@ -32,21 +33,24 @@ const html = `<!doctype html><body style="margin:0">
 }
 
 {
-  // Any font file will do: the first of the platform's own.
+  // A copy page (served from 127.0.0.1) whose own rule for the font points at a file that isn't there, like a
+  // substitute we want replaced: with the original fonts set, the check's browser shows the original.
   const font = fs.readdirSync(path.join(import.meta.dirname, '..', 'platform', 'fonts')).find((f) => f.endsWith('.woff2'));
-  const file = path.join(import.meta.dirname, '..', 'platform', 'fonts', font);
-  const url = 'https://fonts.preserve-test.invalid/orig.woff2';
-  const page = `<!doctype html><style>@font-face{font-family:probe;src:url(${url}) format("woff2")}</style><p style="font-family:probe">abc</p>`;
-  for (const [swap, want] of [[{ [url]: { path: file, ct: 'font/woff2' } }, 'loaded'], [null, 'error']]) {
-    swapLiveFonts(swap);
+  const b64 = fs.readFileSync(path.join(import.meta.dirname, '..', 'platform', 'fonts', font)).toString('base64');
+  const page = `<!doctype html><body><style>@font-face{font-family:probe;src:url(/missing.woff2) format("woff2")}</style><p style="font-family:probe">abc</p></body>`;
+  const srv = await new Promise((r) => { const s = http.createServer((q, res) => { res.writeHead(q.url === '/' ? 200 : 404, { 'content-type': 'text/html' }); res.end(q.url === '/' ? page : ''); }).listen(0, '127.0.0.1', () => r(s)); });
+  for (const [css, want] of [[`@font-face{font-family:probe;src:url(data:font/woff2;base64,${b64})}`, 'loaded'], [null, 'error']]) {
+    useOriginalFontsInCopy(css);
     const b = await launch();
     const ctx = await b.newContext();
     const p = await ctx.newPage();
-    await p.setContent(page);
-    const st = await p.evaluate(async () => { await document.fonts.ready; return [...document.fonts].find((f) => f.family === 'probe')?.status; });
-    ok(st === want, `${swap ? 'with' : 'without'} the swap the original font address ${want === 'loaded' ? 'loads the copy\'s file' : 'is left alone'} (${st})`);
+    await p.goto(`http://127.0.0.1:${srv.address().port}/`);
+    await p.waitForTimeout(300);
+    const st = await p.evaluate(async () => { await document.fonts.load('16px probe').catch(() => {}); await document.fonts.ready; return [...document.fonts].filter((f) => f.family === 'probe').map((f) => f.status); });
+    ok(want === 'loaded' ? st.includes('loaded') : !st.includes('loaded'), `${css ? 'with' : 'without'} the original fonts set, the copy page's font ${want === 'loaded' ? 'shows the original' : 'is left as it is'} (${st})`);
     await b.close();
   }
-  swapLiveFonts(null);
+  useOriginalFontsInCopy(null);
+  srv.close();
 }
 process.exit(failed ? 1 : 0);

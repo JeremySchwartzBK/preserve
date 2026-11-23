@@ -99,10 +99,16 @@ export function startServer(siteDir, port, variants) {
     if (/gif/.test(entry.ct)) {
       // Animated GIFs are often the heaviest files on a page; animated WebP keeps the motion at a fraction of the size.
       if (fmt === 'jpeg') return { body: src, ct: entry.ct };
-      let g = sharp(src, { animated: true });
-      const gm = await g.metadata();
-      if (gm.width > want) g = g.resize({ width: want });
-      const body = await g.webp({ quality: 75, effort: 4 }).toBuffer();
+      // All frames count toward sharp's pixel limit, so a long, large GIF (Gucha's spinning olive, Yarza's Proxectar
+      // poster, 2026-11-23) went over it and the picture went missing from the copy. No limit here; if the conversion
+      // still fails, the GIF itself is served.
+      let body;
+      try {
+        let g = sharp(src, { animated: true, limitInputPixels: false });
+        const gm = await g.metadata();
+        if (gm.width > want) g = g.resize({ width: want });
+        body = await g.webp({ quality: 75, effort: 4 }).toBuffer();
+      } catch { return { body: src, ct: entry.ct }; }
       if (body.length >= src.length) return { body: src, ct: entry.ct };
       fs.writeFileSync(p.replace(/\.\w+$/, '.webp'), body);
       return { body, ct: 'image/webp' };

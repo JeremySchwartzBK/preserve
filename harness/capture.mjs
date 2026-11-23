@@ -1066,6 +1066,10 @@ async function canvasStills(page, outDir, prof, info) {
         const q = op.getBoundingClientRect();
         if (q.width > 0 && q.height > 0) c.setAttribute('data-preserve-cbox', [r.left - q.left, r.top - q.top].map((v, i) => (100 * v / (i ? q.height : q.width)).toFixed(3)).concat([(100 * r.width / q.width).toFixed(3), (100 * r.height / q.height).toFixed(3)]).join(','));
       }
+      // Pinned to the window and as big as it (Hello World's full-screen drawing, sized by its own pixels): the copy
+      // keeps it filling the window at any width instead of the capture window's pixel size, which made the page wider
+      // than a smaller window.
+      if (cs.position === 'fixed' && Math.abs(r.width - innerWidth) <= 2 && Math.abs(r.height - innerHeight) <= 2) c.setAttribute('data-preserve-fullwin', '');
       out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
       // Squarespace's radial gradient background that follows the pointer: its settings, with colours resolved, so
       // our stand-in (build.mjs FOLLOW_SCRIPT) can move the glow the way the site does.

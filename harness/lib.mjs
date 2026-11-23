@@ -36,19 +36,18 @@ export const PROFILES = {
 PROFILES['mobile-4g'].context = PROFILES.mobile.context;
 
 // Font changes are never a difference (Jeremy, 2026-11-23): when the copy shows a substitute (an Adobe font from
-// Squarespace's menu, a face Google Fonts lacks), the quality check opens the live site with that substitute in place
-// of the original file, so the two pages are compared in the same fonts and only real differences count. The
-// substitute files are the copy's own (google-fonts.py fits each to the original's room), so the live page lays out
-// as the copy does. Set by gate.mjs for the length of a check; keys are font addresses without their query.
-let FONT_SWAP = null;
-export function swapLiveFonts(map) { FONT_SWAP = map && Object.keys(map).length ? map : null; }
-const fontKey = (u) => u.split('?')[0].replace(/^http:/, 'https:');
-async function routeFonts(target, swap) {
-  await target.route((u) => !!swap[fontKey(u.href)], (route) => {
-    const f = swap[fontKey(route.request().url())];
-    return route.fulfill({ path: f.path, contentType: f.ct || 'font/woff2', headers: { 'access-control-allow-origin': '*' } });
-  });
-}
+// Squarespace's menu, a face Google Fonts lacks), the quality check shows the copy in the site's original fonts, so it
+// is compared with the live site (and capture's reference shots, taken at the same moment as the copy) in the same
+// fonts and only real differences count. The original files stay on our machine: they are only added to copy pages
+// opened by the check (served from 127.0.0.1), never to the copy itself. Set by gate.mjs for the length of a check.
+let COPY_FONT_CSS = null;
+export function useOriginalFontsInCopy(css) { COPY_FONT_CSS = css || null; }
+const addOriginalFonts = (css) => {
+  if (!/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) return;
+  // Last in the document, so these rules win over the copy's own for the same font names.
+  const add = () => { const st = document.createElement('style'); st.id = 'pv-check-original-fonts'; st.textContent = css; (document.body || document.documentElement).appendChild(st); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', add, { once: true }); else add();
+};
 
 export async function launch() {
   const proxy = process.env.HTTPS_PROXY
@@ -58,10 +57,10 @@ export async function launch() {
   // (Squarespace's section backgrounds) never drew there and capture had nothing to keep (backbipoc, 2026-11-10).
   // PRESERVE_CHROMIUM: a browser other than Playwright's own (a dev machine whose Playwright browsers differ).
   const browser = await chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  if (FONT_SWAP) {
-    const swap = FONT_SWAP, newContext = browser.newContext.bind(browser), newPage = browser.newPage.bind(browser);
-    browser.newContext = async (o) => { const c = await newContext(o); await routeFonts(c, swap); return c; };
-    browser.newPage = async (o) => { const pg = await newPage(o); await routeFonts(pg.context(), swap); return pg; };
+  if (COPY_FONT_CSS) {
+    const css = COPY_FONT_CSS, newContext = browser.newContext.bind(browser), newPage = browser.newPage.bind(browser);
+    browser.newContext = async (o) => { const c = await newContext(o); await c.addInitScript(addOriginalFonts, css); return c; };
+    browser.newPage = async (o) => { const pg = await newPage(o); await pg.context().addInitScript(addOriginalFonts, css); return pg; };
   }
   return browser;
 }
