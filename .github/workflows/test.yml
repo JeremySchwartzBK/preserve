@@ -75,3 +75,6 @@ jobs:
       - name: Clicks and hovers plugins drive, recorded and replayed
         working-directory: harness
         run: node test-acts.mjs
+      - name: Live page in the copy's fonts, and email popups marked as promotions
+        working-directory: harness
+        run: node test-live-fonts-promos.mjs

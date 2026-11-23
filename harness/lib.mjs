@@ -35,6 +35,21 @@ export const PROFILES = {
 
 PROFILES['mobile-4g'].context = PROFILES.mobile.context;
 
+// Font changes are never a difference (Jeremy, 2026-11-23): when the copy shows a substitute (an Adobe font from
+// Squarespace's menu, a face Google Fonts lacks), the quality check opens the live site with that substitute in place
+// of the original file, so the two pages are compared in the same fonts and only real differences count. The
+// substitute files are the copy's own (google-fonts.py fits each to the original's room), so the live page lays out
+// as the copy does. Set by gate.mjs for the length of a check; keys are font addresses without their query.
+let FONT_SWAP = null;
+export function swapLiveFonts(map) { FONT_SWAP = map && Object.keys(map).length ? map : null; }
+const fontKey = (u) => u.split('?')[0].replace(/^http:/, 'https:');
+async function routeFonts(target, swap) {
+  await target.route((u) => !!swap[fontKey(u.href)], (route) => {
+    const f = swap[fontKey(route.request().url())];
+    return route.fulfill({ path: f.path, contentType: f.ct || 'font/woff2', headers: { 'access-control-allow-origin': '*' } });
+  });
+}
+
 export async function launch() {
   const proxy = process.env.HTTPS_PROXY
     ? { server: process.env.HTTPS_PROXY, bypass: '<-loopback>,localhost,127.0.0.1' }
@@ -42,7 +57,13 @@ export async function launch() {
   // Software WebGL: the runner has no GPU, and Chromium no longer falls back to software on its own, so canvas effects
   // (Squarespace's section backgrounds) never drew there and capture had nothing to keep (backbipoc, 2026-11-10).
   // PRESERVE_CHROMIUM: a browser other than Playwright's own (a dev machine whose Playwright browsers differ).
-  return chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  if (FONT_SWAP) {
+    const swap = FONT_SWAP, newContext = browser.newContext.bind(browser), newPage = browser.newPage.bind(browser);
+    browser.newContext = async (o) => { const c = await newContext(o); await routeFonts(c, swap); return c; };
+    browser.newPage = async (o) => { const pg = await newPage(o); await routeFonts(pg.context(), swap); return pg; };
+  }
+  return browser;
 }
 
 export async function applyThrottle(page, profile) {
@@ -89,7 +110,14 @@ export function markPromos() {
   let n = 0;
   for (const e of document.querySelectorAll('body *')) {
     const s = getComputedStyle(e);
-    if (s.position !== 'fixed' || s.display === 'none' || e.closest('header,#header,[data-preserve-promo]')) continue;
+    if (s.position !== 'fixed' || e.closest('header,#header,[data-preserve-promo]')) continue;
+    // A popup or dialog pinned to the window that asks for an email address: a newsletter signup from a form app
+    // (State of Sage's Flodesk popup has no dimmed layer, so the rule below missed it). Marked open or still closed:
+    // one that opens on a timer after this runs would otherwise be saved open. Never the site's own footer form or a
+    // signup block in the page, which are not pinned to the window.
+    if ((/modal|popup|pop-up|dialog|lightbox/i.test(`${e.className?.toString?.() || ''} ${e.id} ${e.getAttribute('role') || ''}`) || e.getAttribute('aria-modal') === 'true')
+      && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]')) { e.setAttribute('data-preserve-promo', ''); n++; continue; }
+    if (s.display === 'none') continue;
     const r = e.getBoundingClientRect();
     if (!r.width || !r.height) continue;
     // A layer over the whole window that dims the page behind it is a modal someone has to dismiss: a signup or

@@ -8,7 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, swapLiveFonts } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
 import { probeBehavior, compareBehavior } from './behavior.mjs';
@@ -55,26 +55,34 @@ const BEHAVIOR_TEXT = {
 };
 const withBrowser = async (f) => { const b = await launch(); try { return await f(b); } finally { await b.close(); } };
 
-async function liveSelfDiff(url, siteDir) {
+// refDir: where the live shots the copy is compared with are. Normally capture's own (ref-*.png in siteDir); when the
+// copy shows substitute fonts, capture's shots have the original fonts, so a fresh pair is taken with the substitutes
+// in place (lib.mjs swapLiveFonts) and the first visit becomes the reference.
+async function liveSelfDiff(url, siteDir, refDir = siteDir) {
   const out = {};
   const browser = await launch();
   try {
     for (const prof of ['desktop', 'mobile']) {
       const ctx = await browser.newContext({ ...PROFILES[prof].context, ignoreHTTPSErrors: true });
-      const page = await ctx.newPage();
       try {
-        await page.goto(url, { waitUntil: 'load', timeout: 90000 });
-        await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-        await sleep(2000);
-        const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
-        for (let y = 0; y < h + vh; y += Math.round(vh * 0.6)) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(350); }
-        await page.evaluate(() => scrollTo(0, 0)); await sleep(1500);
-        await page.evaluate(markPromos).catch(() => 0);
-        await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
-        await page.screenshot({ path: path.join(siteDir, `live2-${prof}.png`) });
-        await page.screenshot({ path: path.join(siteDir, `live2-full-${prof}.png`), fullPage: true });
-        if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
-        out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
+        const shoot = async (file, pins) => {
+          const page = await ctx.newPage();
+          await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+          await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+          await sleep(2000);
+          const h = await page.evaluate(() => document.documentElement.scrollHeight), vh = await page.evaluate(() => innerHeight);
+          for (let y = 0; y < h + vh; y += Math.round(vh * 0.6)) { await page.evaluate((y) => scrollTo(0, y), y); await sleep(350); }
+          await page.evaluate(() => scrollTo(0, 0)); await sleep(1500);
+          await page.evaluate(markPromos).catch(() => 0);
+          await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
+          await page.screenshot({ path: file(`${prof}.png`) });
+          await page.screenshot({ path: file(`full-${prof}.png`), fullPage: true });
+          if (pins && loadPins().length) await shootPins(page, prof, siteDir, 'live');
+          await page.close();
+        };
+        if (refDir !== siteDir) await shoot((f) => path.join(refDir, `ref-${f}`), false);
+        await shoot((f) => path.join(siteDir, `live2-${f}`), true);
+        out[prof] = { firstScreen: await diffPct(path.join(refDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(refDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
         out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
         if (BEHAVIOR_CHECK) out[prof].behavior = await probeBehavior(browser, url, prof); // and what reacts to hover, drag, scroll
@@ -156,7 +164,23 @@ const OWN_CSS_MAX_DIFF = 1;
 // A copy resized to a width should look as it does opened at that width (the scripts re-measure on resize).
 const RESIZE_MAX_DIFF = 2;
 
-export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null, steadyReport = null }) {
+export async function runGate(job) {
+  // Every font file the copy serves in place of the site's (google-fonts.py: Google's copy of a library font, or a
+  // substitute) is served to the live site too while the check runs, so a font change is never counted as a difference.
+  const gfPath = path.join(job.siteDir, 'fonts-google.json');
+  const gfFonts = fs.existsSync(gfPath) ? JSON.parse(fs.readFileSync(gfPath, 'utf8')).fonts || {} : {};
+  const swap = {};
+  for (const [u, r] of Object.entries(gfFonts)) {
+    const f = path.join(job.siteDir, 'fonts-google', r.file || '');
+    if (r.file && fs.existsSync(f)) swap[u] = { path: f, ct: r.ct };
+  }
+  swapLiveFonts(swap);
+  try { return await runGateInner(job, Object.keys(swap).length ? path.join(job.siteDir, 'fontref') : job.siteDir); }
+  finally { swapLiveFonts(null); }
+}
+
+async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutput = '', ownCssReport = null, steadyReport = null }, refDir) {
+  if (refDir !== siteDir) fs.mkdirSync(refDir, { recursive: true });
   const reasons = [], notes = [], warnings = [], info = {};
   // Where the check's time goes: each part is marked as it starts, and the seconds per part are kept with the verdict
   // (info.timings) and printed to the job's log, so a slow check can be traced to the part that was slow.
@@ -239,11 +263,11 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   const base = `http://127.0.0.1:${srv.address().port}`;
   info.layouts = {};
   mark('live-page');
-  info.liveSelfDiff = await liveSelfDiff(url, siteDir);
+  info.liveSelfDiff = await liveSelfDiff(url, siteDir, refDir);
   try {
     for (const prof of ['desktop', 'mobile']) {
       mark(`${prof}-page`);
-      const c = await check(`${base}/${id}/${prof}`, prof, { refDir: siteDir, shotPrefix: path.join(siteDir, 'gate'), isCopy: true });
+      const c = await check(`${base}/${id}/${prof}`, prof, { refDir, shotPrefix: path.join(siteDir, 'gate'), isCopy: true });
       info.layouts[prof] = c;
       layoutSpots = c.spots; layoutName = prof;
       const L = (s) => `${prof}: ${s}`;
