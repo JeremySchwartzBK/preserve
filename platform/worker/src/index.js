@@ -114,6 +114,23 @@ const tourTags = (data) => `<script id="preserve-tour-data" type="application/js
 const css = (s) => String(s).replace(/[\\"<>\n]/g, '');
 const fontTags = (list) => `<style id="preserve-fonts">${list.map((f) => `@font-face{font-family:"${css(f.family)}";font-weight:${css(f.weight)};font-style:${css(f.style)};font-display:swap;src:url(a/${css(f.src)})}`).join('')}</style>`;
 
+// Adobe names fonts in the studio's kit differently from the page (acumin-pro-1 for acumin-pro), so each font-family
+// rule on the page that names an Adobe font gets the kit's name put in front: Adobe's font when it loads, the page's
+// own (the lookalike underneath) when it doesn't. The saved page itself is never changed; this is done as it's served.
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function adobeNames(html, names) {
+  const pairs = Object.entries(names || {}).filter(([n, c]) => /^[\w-]{1,80}$/.test(n) && /^[\w-]{1,80}$/.test(c || ''));
+  if (!pairs.length) return html;
+  const Q = `(?:"|'|&quot;|&#34;|&#39;)?`;
+  return html.replace(/(font-family\s*:\s*)((?:&#?\w+;|[^;}<>])+)/gi, (all, head, value) => {
+    let v = value;
+    for (const [n, c] of pairs) {
+      v = v.replace(new RegExp(`(^|,)(\\s*)(${Q})${reEsc(n)}(${Q})(?=\\s*(?:,|!|$))`, 'gi'), (m, lead, sp, q1, q2) => `${lead}${sp}${q1}${c}${q2},${q1}${n}${q2}`);  // same quoting as the page: safe inside a style attribute too
+    }
+    return head + v;
+  });
+}
+
 // Our scripts go just before the page's own closing body tag: the LAST one, since a saved widget frame (srcdoc) can carry
 // its own </body> earlier in the file. No closing tag: the page is served as it is.
 const beforeBodyEnd = (html, add) => {
@@ -209,7 +226,7 @@ async function serveCopy(req, env, ctx, id, rest) {
   // any (fonts and images marked crossorigin load only that way).
   // Pages made before stage one (no preserve-steady script) point at SVG icon files, which a sealed page can't use:
   // they keep the no-network rules without the seal, so they look exactly as they did when accepted.
-  const text = asset ? null : currentReplica(await obj.text());
+  let text = asset ? null : currentReplica(await obj.text());
   // Sealed (sandboxed) when it runs the owner's kept code, except where a background video plays through Vimeo's or
   // YouTube's player, which can't start in a sealed page (Jeremy 2026-11-17). The rest of the policy still applies.
   if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') && !text.includes('data-pv-bgvideo=') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
@@ -218,8 +235,10 @@ async function serveCopy(req, env, ctx, id, rest) {
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
   // The studio's Adobe Fonts kit (schema-adobe.sql), when its connection is working: loaded last, from Adobe (no
   // self-hosting allowed), over the lookalikes the page already carries. If Adobe stops serving it, the lookalikes show.
-  const kitId = asset || !file.endsWith('.html') ? null : (await lookup(env, `adobe:${id}`))?.kit;
+  const adobeKv = asset || !file.endsWith('.html') ? null : await lookup(env, `adobe:${id}`);
+  const kitId = adobeKv?.kit;
   const kit = typeof kitId === 'string' && /^[a-z0-9]{4,20}$/.test(kitId) ? kitId : null;
+  if (kit && text) text = adobeNames(text, adobeKv.names);
   const fontCss = (fonts?.length ? fontTags(fonts) : '') + (kit ? `<link rel="stylesheet" href="https://use.typekit.net/${kit}.css">` : '');
   if (kit && h.has('content-security-policy')) h.set('content-security-policy', withAdobe(h.get('content-security-policy')));
   if (!asset && url(req).searchParams.has('review')) {

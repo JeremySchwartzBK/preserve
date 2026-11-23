@@ -8,6 +8,7 @@
 
 const API = 'https://typekit.com/api/v1/json';
 export const KIT_NAME = 'Preserve';
+export const KIT_DOMAINS = 'view.preserve.studio,preserve-view.pages.dev';
 export const kitCss = (kit) => `https://use.typekit.net/${kit}.css`;
 
 export class AdobeError extends Error {
@@ -33,7 +34,9 @@ export function adobe(token, { fetch: f = fetch } = {}) {
   return {
     kits: async () => (await call('GET', 'kits')).kits || [],
     kit: async (id) => (await call('GET', `kits/${encodeURIComponent(id)}`)).kit,
-    createKit: async () => (await call('POST', 'kits', { name: KIT_NAME })).kit,
+    // Adobe's API still requires a domain list when making a web project (2026-11-23, real account). Preserves are
+    // always served from our viewer, embeds included (an embed is a frame of the viewer).
+    createKit: async () => (await call('POST', 'kits', { name: KIT_NAME, domains: KIT_DOMAINS })).kit,
     // Adobe's family id for a css name (proxima-nova), or null when Adobe has no such family.
     async familyId(cssName) {
       try {
@@ -42,8 +45,9 @@ export function adobe(token, { fetch: f = fetch } = {}) {
         return fromLocation || r.family?.id || null;
       } catch (e) { if (e.status === 404) return null; throw e; }
     },
-    // All variations of the family (the page may use any weight); Adobe's default subset.
-    addFamily: (kit, familyId) => call('POST', `kits/${encodeURIComponent(kit)}/families/${encodeURIComponent(familyId)}`, { variations: 'all' }),
+    // Sent with no settings, Adobe adds every weight and style with its default subset (real account, 2026-11-23;
+    // variations=all is read as a family name and refused).
+    addFamily: (kit, familyId) => call('POST', `kits/${encodeURIComponent(kit)}/families/${encodeURIComponent(familyId)}`, {}),
     publish: (kit) => call('POST', `kits/${encodeURIComponent(kit)}/publish`),
   };
 }
@@ -51,23 +55,37 @@ export function adobe(token, { fetch: f = fetch } = {}) {
 // Find the studio's "Preserve" kit (made by us earlier, possibly before a disconnect), or make one.
 export async function ensureKit(api, known) {
   if (known) { try { await api.kit(known); return known; } catch (e) { if (e.refused) throw e; } }
-  const mine = (await api.kits()).find((k) => k.name === KIT_NAME);
-  if (mine) return mine.id;
+  // The list holds only ids (real account, 2026-11-23), so each kit is read for its name.
+  for (const k of await api.kits()) { if (k.name ? k.name === KIT_NAME : (await api.kit(k.id))?.name === KIT_NAME) return k.id; }
   return (await api.createKit()).id;
 }
 
 // Add the families the studio's Preserves use that the kit doesn't have yet, then publish. Returns the updated
-// css name -> family id map (null where Adobe has no such family) and whether anything was added.
+// page font name -> { id: Adobe family id, css: its name in our kit's stylesheet } map (null where Adobe has no
+// such family, or the person's plan doesn't include it) and how many were added.
 export async function syncFamilies(api, kit, wanted, known = {}) {
   const map = { ...known };
   const have = new Set(((await api.kit(kit))?.families || []).map((f) => f.id));
-  let added = 0;
+  let added = 0; const notAllowed = [];
   for (const name of wanted) {
     if (!(name in map)) map[name] = await api.familyId(name);
-    if (map[name] && !have.has(map[name])) { await api.addFamily(kit, map[name]); have.add(map[name]); added++; }
+    const id = typeof map[name] === 'string' ? map[name] : map[name]?.id;
+    if (id && !have.has(id)) {
+      // Adobe answers 400 "not allowed by your account" for a family the person's plan doesn't include: that one stays
+      // a lookalike (null), the rest still go in.
+      try { await api.addFamily(kit, id); have.add(id); added++; }
+      catch (e) { if (e.status === 400 && /not allowed/i.test(e.message)) { map[name] = null; notAllowed.push(name); } else throw e; }
+    }
   }
   if (added) await api.publish(kit);
-  return { families: map, added };
+  // Adobe names each family in our kit's stylesheet differently from the page (acumin-pro-1, not acumin-pro; real
+  // account, 2026-11-23), so record the kit's name for each: the viewer points the page's own font rules at it.
+  const css = new Map(((await api.kit(kit))?.families || []).map((f) => [f.id, f.css_names?.[0] || f.slug]));
+  for (const [name, v] of Object.entries(map)) {
+    const id = typeof v === 'string' ? v : v?.id;
+    map[name] = id ? { id, css: css.get(id) || null } : null;
+  }
+  return { families: map, added, notAllowed };
 }
 
 // The daily check: the key still works (Adobe answers for the kit) and the kit's fonts actually load. A refused key
@@ -75,13 +93,19 @@ export async function syncFamilies(api, kit, wanted, known = {}) {
 // 'not-loading'. Network trouble on our side throws, so the caller keeps the last state instead of switching
 // every Preserve to lookalikes over a blip.
 export async function checkConnection(api, kit, { fetch: f = fetch } = {}) {
-  try { await api.kit(kit); } catch (e) { if (e.refused) return { state: 'key-refused', problem: e.message }; throw e; }
+  let k; try { k = await api.kit(kit); } catch (e) { if (e.refused) return { state: 'key-refused', problem: e.message }; throw e; }
+  // A kit with no fonts in it yet has no stylesheet at all (Adobe answers 404): nothing to load, nothing wrong.
+  if (!k?.families?.length) return { state: 'ok', problem: null };
   const css = await f(kitCss(kit));
   if (!css.ok) return { state: 'not-loading', problem: `kit stylesheet answered ${css.status}` };
   const text = await css.text();
-  const font = /url\("?(https:\/\/use\.typekit\.net\/af\/[^")]+)"?\)/.exec(text)?.[1];
-  if (!font) return { state: text.includes('@font-face') ? 'not-loading' : 'ok', problem: text.includes('@font-face') ? 'kit stylesheet names no font files' : null };
-  const r = await f(font, { headers: { origin: 'https://view.preserve.studio' } });
-  if (!r.ok) return { state: 'not-loading', problem: `font file answered ${r.status}` };
+  // One file per family: a plan that shrinks (paid to free) may stop some families and keep others.
+  const first = new Map();
+  for (const m of text.matchAll(/@font-face\s*\{[^}]*?font-family:\s*"?([\w-]+)"?[^}]*?url\("?(https:\/\/use\.typekit\.net\/af\/[^")]+)"?\)/g)) if (!first.has(m[1])) first.set(m[1], m[2]);
+  if (!first.size) return { state: text.includes('@font-face') ? 'not-loading' : 'ok', problem: text.includes('@font-face') ? 'kit stylesheet names no font files' : null };
+  for (const [family, font] of first) {
+    const r = await f(font, { headers: { origin: 'https://view.preserve.studio' } });
+    if (!r.ok) return { state: 'not-loading', problem: `${family}: font file answered ${r.status}` };
+  }
   return { state: 'ok', problem: null };
 }

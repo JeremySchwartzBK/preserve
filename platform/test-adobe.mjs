@@ -7,7 +7,7 @@ const ok = (name, cond) => { if (!cond) fails++; console.log(cond ? 'PASS' : 'FA
 
 function fakeAdobe({ token = 'good', lapsed = false, fontsGone = false } = {}) {
   const kits = new Map(), calls = [];
-  const fam = { 'proxima-nova': 'vcsm', 'freight-sans-pro': 'ftnk' };
+  const fam = { 'proxima-nova': 'vcsm', 'freight-sans-pro': 'ftnk', 'commuters-sans': 'plan' };
   const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
   const f = async (url, init = {}) => {
     const u = new URL(url), method = init.method || 'GET';
@@ -20,10 +20,11 @@ function fakeAdobe({ token = 'good', lapsed = false, fontsGone = false } = {}) {
     const p = u.pathname.replace('/api/v1/json/', '');
     const form = init.body ? Object.fromEntries(new URLSearchParams(init.body)) : {};
     let m;
-    if (p === 'kits' && method === 'GET') return json(200, { kits: [...kits.values()].map((k) => ({ id: k.id, link: `/api/v1/json/kits/${k.id}`, name: k.name })) });
+    if (p === 'kits' && method === 'GET') return json(200, { kits: [...kits.values()].map((k) => ({ id: k.id, link: `/api/v1/json/kits/${k.id}` })) });  // ids only, like Adobe's
+    if (p === 'kits' && method === 'POST' && !form.domains) return json(400, { errors: ["Missing 'domains' parameter"] });
     if (p === 'kits' && method === 'POST') { const k = { id: 'kit' + (kits.size + 1) + 'ab', name: form.name, families: [] }; kits.set(k.id, k); return json(200, { kit: k }); }
     if ((m = /^kits\/(\w+)$/.exec(p))) return kits.has(m[1]) ? json(200, { kit: kits.get(m[1]) }) : json(404, { errors: ['Not found'] });
-    if ((m = /^kits\/(\w+)\/families\/(\w+)$/.exec(p))) { kits.get(m[1]).families.push({ id: m[2], variations: form.variations }); return json(200, { family: { id: m[2] } }); }
+    if ((m = /^kits\/(\w+)\/families\/(\w+)$/.exec(p))) { if (form.variations) return json(400, { errors: [`The font family '${form.variations}' is not allowed by your account`] }); if (m[2] === 'plan') return json(400, { errors: [`The font family 'plan' is not allowed by your account`] }); kits.get(m[1]).families.push({ id: m[2], css_names: [`${Object.keys(fam).find((k) => fam[k] === m[2])}-1`] }); return json(200, { family: { id: m[2] } }); }
     if ((m = /^kits\/(\w+)\/publish$/.exec(p))) return json(200, { published: '2026-11-22T00:00:00Z' });
     if ((m = /^families\/([\w-]+)$/.exec(p))) return fam[m[1]] ? json(302, { family: { id: fam[m[1]] } }, { location: `/api/v1/json/families/${fam[m[1]]}` }) : json(404, { errors: ['Not found'] });
     return json(404, { errors: ['Not found'] });
@@ -36,13 +37,19 @@ function fakeAdobe({ token = 'good', lapsed = false, fontsGone = false } = {}) {
   const kit = await ensureKit(api, null);
   ok('makes a "Preserve" kit', a.kits.get(kit)?.name === 'Preserve');
   ok('finds it again instead of making another', (await ensureKit(api, null)) === kit && a.kits.size === 1);
-  const r = await syncFamilies(api, kit, ['proxima-nova', 'gopher'], {});
-  ok('adds the families Adobe has, records the one it lacks', r.families['proxima-nova'] === 'vcsm' && r.families.gopher === null && r.added === 1);
-  ok('all weights, then published', a.kits.get(kit).families[0].variations === 'all' && a.calls.includes(`POST /api/v1/json/kits/${kit}/publish`));
+  const r = await syncFamilies(api, kit, ['proxima-nova', 'gopher', 'commuters-sans'], {});
+  ok('adds the families Adobe has, with their names in the kit', r.families['proxima-nova']?.id === 'vcsm' && r.families['proxima-nova'].css === 'proxima-nova-1' && r.added === 1);
+  ok('records the one Adobe lacks and the one the plan doesn\'t include', r.families.gopher === null && r.families['commuters-sans'] === null && r.notAllowed.join() === 'commuters-sans');
+  ok('then published', a.calls.includes(`POST /api/v1/json/kits/${kit}/publish`));
   const before = a.calls.length;
-  const again = await syncFamilies(api, kit, ['proxima-nova', 'gopher'], r.families);
+  const again = await syncFamilies(api, kit, ['proxima-nova', 'gopher', 'commuters-sans'], r.families);
   ok('nothing new: no lookups, no publish', again.added === 0 && !a.calls.slice(before).some((c) => c.includes('families/') || c.includes('publish')));
   ok('daily check: ok', (await checkConnection(api, kit, { fetch: a.f })).state === 'ok');
+}
+{
+  const a = fakeAdobe({ fontsGone: true }), api = adobe('good', { fetch: a.f });
+  const kit = await ensureKit(api, null);
+  ok('a kit with no fonts yet is fine (Adobe has no stylesheet for it)', (await checkConnection(api, kit, { fetch: a.f })).state === 'ok');
 }
 {
   const a = fakeAdobe(), api = adobe('good', { fetch: a.f });

@@ -103,13 +103,14 @@ r = await get('/_p/fonts/inter.woff2'); ok('our fonts are served', r.status === 
 r = await get('/_p/fonts/other.woff2'); ok('only our two fonts', r.status === 404);
 
 // Adobe Fonts connection: the studio's kit loads last, from Adobe, and the page's rules let it in only then.
-await store.kvPut(`adobe:${id}`, { kit: 'abc1def' });
+await store.kvPut(`adobe:${id}`, { kit: 'abc1def', names: { 'gilmer-un3uon': 'gilmer-un3uon-1' } });
 r = await get(`/c/${id}/desktop`); let page = await r.text();
+ok('the page\'s font rules name the kit\'s font first, its own second', /font-family:\s*"?gilmer-un3uon-1"?,\s*"?gilmer-un3uon"?/.test(page) && !/font-family:\s*"?gilmer-un3uon"?\s*[;}]/.test(page));
 ok('adobe kit loads on the page', page.includes('<link rel="stylesheet" href="https://use.typekit.net/abc1def.css">') && page.indexOf('use.typekit.net') > page.lastIndexOf('<style id="preserve-fonts"') && page.indexOf('use.typekit.net') < page.lastIndexOf('</body>'));
 ok('adobe kit allowed by the page rules', /style-src [^;]*https:\/\/use\.typekit\.net/.test(r.headers.get('content-security-policy')) && /font-src [^;]*https:\/\/use\.typekit\.net/.test(r.headers.get('content-security-policy')));
 await store.kvPut(`adobe:${id}`, { kit: 'x"><script>' });
 r = await get(`/c/${id}/desktop`); page = await r.text();
-ok('a malformed kit id is ignored', !page.includes('typekit') && !r.headers.get('content-security-policy').includes('typekit'));
+ok('a malformed kit id is ignored', !page.includes('typekit') && !r.headers.get('content-security-policy').includes('typekit') && !page.includes('gilmer-un3uon-1'));
 await store.kvDel(`adobe:${id}`);
 r = await get(`/c/${id}/desktop`); ok('no kit, no Adobe in the page rules', !r.headers.get('content-security-policy').includes('typekit'));
 // The "Your site" / "Preserve" pictures beside a suspected issue: only on the owner's review link (no REVIEW_SECRET

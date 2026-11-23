@@ -327,12 +327,13 @@ async function main() {
   // connection is working, the version uses an Adobe font the kit has, and the Preserve is in review, was accepted
   // after connecting, or the person said yes to switching earlier ones too. Otherwise its lookalikes show.
   const adobeFamilies = (fonts) => [...new Set((fonts || []).filter((f) => f.holder === 'platform').flatMap((f) => (f.faces || []).map((x) => x.family)).filter(Boolean))];
+  // Returns { kit, names: { page font name: its name in the kit's stylesheet } }, or null.
   function adobeKit(r, status, fonts) {
     const a = r.adobe;
     if (!a || a.state !== 'ok' || !a.kit) return null;
-    if (!adobeFamilies(fonts).some((f) => a.families?.[f])) return null;
-    if (status === 'review') return a.kit;
-    if (a.accepted_too || a.accepted_after) return a.kit;
+    const names = Object.fromEntries(adobeFamilies(fonts).map((f) => [f, a.families?.[f]?.css]).filter(([, c]) => c));
+    if (!Object.keys(names).length) return null;
+    if (status === 'review' || a.accepted_too || a.accepted_after) return { kit: a.kit, names };
     return null;
   }
 
@@ -406,7 +407,7 @@ async function main() {
       if (canon(want) === canon(r.served) && !needStill) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
-      if ((want.adobe ?? null) !== (r.served?.adobe ?? null)) await (want.adobe ? store.kvPut(`adobe:${r.id}`, { kit: want.adobe }) : store.kvDel(`adobe:${r.id}`).catch(() => {}));
+      if (JSON.stringify(want.adobe ?? null) !== JSON.stringify(r.served?.adobe ?? null)) await (want.adobe ? store.kvPut(`adobe:${r.id}`, want.adobe) : store.kvDel(`adobe:${r.id}`).catch(() => {}));
       if (canon(want.tour) !== canon(r.served?.tour ?? null)) await (want.tour ? store.kvPut(`tour:${r.id}`, want.tour) : store.kvDel(`tour:${r.id}`).catch(() => {}));
       if (canon(want.fonts) !== canon(r.served?.fonts ?? null)) {
         // An uploaded font goes beside the Preserve first (shared files never change, so it is written once).
