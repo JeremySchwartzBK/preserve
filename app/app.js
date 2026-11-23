@@ -283,9 +283,10 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Every font that needs a license asks in the Fonts step (Jeremy, 2026-11-18): a font the owner added to their site
 // is confirmed there ("I have the rights to use it here") or swapped for its lookalike. Until then it stays as on the
 // site, and the confirmation at Accept covers whatever is still unanswered or uploaded.
-// Fonts the Fonts step lists. Once Adobe Fonts is connected, a font it serves isn't mentioned in review at all
-// (Jeremy, 2026-11-23): the lapse fallback is explained in the help guide and Terms instead.
-const fontsShown = (c) => (c.fonts || []).filter((f) => !adobeHas(f));
+// Fonts the Fonts step lists: only ones that need a decision (Jeremy, 2026-11-23: no non-questions). Not listed: a font
+// Adobe serves once Adobe Fonts is connected (the lapse fallback is in the help guide and Terms), and a font already
+// covered by a licensed file the studio uploaded earlier (the Preserve simply uses it).
+const fontsShown = (c) => (c.fonts || []).filter((f) => !adobeHas(f) && !(f.covered && !f.decision));
 const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && !adobeHas(f));
 const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? !f.decision || f.decision === 'upload' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
