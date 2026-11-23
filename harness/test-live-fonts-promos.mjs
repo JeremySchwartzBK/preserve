@@ -10,6 +10,7 @@ const ok = (c, m) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) faile
 
 const html = `<!doctype html><body style="margin:0">
 <div class="fd-modal" style="position:fixed;top:10%;left:10%;width:50%;height:50%;background:#fff;display:none"><form><input type="email"></form></div>
+<div class="animation-not-started" style="position:fixed;bottom:0;right:0;width:300px;height:200px"><button aria-label="Close dialog">x</button><form><input type="email"></form></div>
 <footer><form class="newsletter-form"><input type="email" placeholder="Email address"></form></footer>
 <div id="menu" class="header-menu" style="position:fixed;inset:0;background:#000"><a href="#">About</a></div>
 <p id="t" style="font-family:probe">abc</p></body>`;
@@ -18,9 +19,12 @@ const html = `<!doctype html><body style="margin:0">
   const b = await launch();
   const p = await b.newPage();
   await p.setContent(html);
+  await p.evaluate(() => { const h = document.createElement('div'); h.className = 'shadow-host'; document.body.appendChild(h); h.attachShadow({ mode: 'open' }).innerHTML = '<div style="position:fixed;inset:20%"><button>×</button><input placeholder="Your Email Address"></div>'; });
   const n = await p.evaluate(markPromos);
   const marked = await p.evaluate(() => [...document.querySelectorAll('[data-preserve-promo]')].map((e) => e.className || e.tagName));
   ok(marked.some((c) => /fd-modal/.test(c)), 'pinned email popup is marked as a promotion, even while still closed');
+  ok(marked.some((c) => /animation-not-started/.test(c)), 'pinned email box with a close button is marked (The Dial)');
+  ok(marked.some((c) => /shadow-host/.test(c)), 'email popup drawn in a shadow root marks its host');
   ok(!marked.some((c) => /newsletter-form|FOOTER/.test(c)), 'signup form in the page is left alone');
   ok(!marked.some((c) => /header-menu/.test(c)), 'pinned layer without an email box is left alone');
   ok(n === marked.length, 'count matches');

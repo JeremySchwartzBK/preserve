@@ -107,6 +107,7 @@ export const OVERLAY_SELECTORS = [
 export function markPromos() {
   const OFFER = /\d+\s*%\s*off|\$\s*\d+\s*off|discount|free shipping|refer a friend|give \$|get \$\d+|save \d+%|promo code|coupon/i;
   const CLOSE = /^\s*(x|×|✕|✖|close)\s*$/i;
+  const hasClose = (e) => [...e.querySelectorAll('*')].some((c) => CLOSE.test(c.textContent || '') || /close|dismiss/i.test(c.getAttribute('aria-label') || '') || /close|dismiss/i.test(c.className?.toString?.() || ''));
   let n = 0;
   for (const e of document.querySelectorAll('body *')) {
     const s = getComputedStyle(e);
@@ -115,8 +116,9 @@ export function markPromos() {
     // (State of Sage's Flodesk popup has no dimmed layer, so the rule below missed it). Marked open or still closed:
     // one that opens on a timer after this runs would otherwise be saved open. Never the site's own footer form or a
     // signup block in the page, which are not pinned to the window.
-    if ((/modal|popup|pop-up|dialog|lightbox/i.test(`${e.className?.toString?.() || ''} ${e.id} ${e.getAttribute('role') || ''}`) || e.getAttribute('aria-modal') === 'true')
-      && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]')) { e.setAttribute('data-preserve-promo', ''); n++; continue; }
+    // Named a popup or dialog, or carrying a close button (The Dial's form app names its layers only "animation-...").
+    if (!e.closest('nav') && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]')
+      && (/modal|popup|pop-up|dialog|lightbox/i.test(`${e.className?.toString?.() || ''} ${e.id} ${e.getAttribute('role') || ''}`) || e.getAttribute('aria-modal') === 'true' || hasClose(e))) { e.setAttribute('data-preserve-promo', ''); n++; continue; }
     if (s.display === 'none') continue;
     const r = e.getBoundingClientRect();
     if (!r.width || !r.height) continue;
@@ -129,9 +131,16 @@ export function markPromos() {
     if (r.width * r.height > innerWidth * innerHeight * 0.2) continue;
     const text = (e.innerText || '').trim();
     if (!text || text.length > 200 || !OFFER.test(text)) continue;
-    const closeBtn = [...e.querySelectorAll('*')].some((c) => CLOSE.test(c.textContent || '') || /close|dismiss/i.test(c.getAttribute('aria-label') || '') || /close|dismiss/i.test(c.className?.toString?.() || ''));
-    if (!closeBtn) continue;
+    if (!hasClose(e)) continue;
     e.setAttribute('data-preserve-promo', ''); n++;
+  }
+  // Form apps that draw their popup inside a shadow root (The Dial's): the page only holds the host element, so a
+  // pinned email box with a close button inside it marks the host.
+  for (const h of document.querySelectorAll('body *')) {
+    if (!h.shadowRoot || h.closest('[data-preserve-promo]')) continue;
+    const pinned = [...h.shadowRoot.querySelectorAll('*')].some((e) => getComputedStyle(e).position === 'fixed'
+      && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]') && hasClose(e));
+    if (pinned) { h.setAttribute('data-preserve-promo', ''); n++; }
   }
   return n;
 }
