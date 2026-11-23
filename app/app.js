@@ -134,12 +134,12 @@ function adobeCard(c, { found = false } = {}) {
   const dlg = $('#cdlg');
   const names = [...new Set((c?.fonts || []).filter((f) => f.holder === 'platform').map((f) => f.name))];
   dlg.innerHTML = `<form method="dialog" class="adobe"><h2>Show your Adobe fonts</h2>
-    <p class="sub">${names.length ? `Your site uses ${names.length === 1 ? 'an Adobe font' : 'Adobe fonts'}: ${esc(names.join(', '))}. ` : found ? 'This page uses Adobe fonts. ' : ''}If you have Adobe Creative Cloud, connect it once and your Preserves show your Adobe fonts instead of lookalikes.</p>
+    <p class="sub">${names.length ? `Your site uses ${names.length === 1 ? 'an Adobe font' : 'Adobe fonts'}: ${esc(names.join(', '))}. ` : found ? 'This page uses Adobe fonts. ' : ''}If you have Adobe Creative Cloud, connect it once and your Preserves show your Adobe fonts instead of substitutes.</p>
     <ol class="steps"><li><a href="${ADOBE_TOKENS}" target="_blank" rel="noopener">Open your Adobe Fonts API token page</a> and sign in with your Adobe account.</li>
       <li>Click “Make me a new API token”.</li><li>Copy the token and paste it here.</li></ol>
     <input id="adkey" autocomplete="off" spellcheck="false" placeholder="Paste your token" aria-label="Adobe Fonts API token">
     <p class="fine bad" id="aderr" aria-live="polite"></p>
-    <p class="fine">We use it only to add the fonts your Preserves use to a web project called Preserve in your Adobe account. Adobe serves the fonts. If your Adobe subscription ends, your Preserves switch to lookalikes.</p>
+    <p class="fine">We use it only to add the fonts your Preserves use to a web project called Preserve in your Adobe account. Adobe serves the fonts. If your Adobe subscription ends, your Preserves switch to substitutes.</p>
     <div class="row end"><button class="btn secondary" value="later">Not now</button><button class="btn" type="button" id="adgo">Connect</button></div></form>`;
   dlg.returnValue = '';
   $('#adgo', dlg).onclick = async () => {
@@ -150,7 +150,7 @@ function adobeCard(c, { found = false } = {}) {
     // The one question (all or nothing, never per Preserve): accepted Preserves stay as they are unless the person says yes.
     const accepted = store.copies().filter((x) => ['ready', 'paused', 'archived'].includes(x.status) && usesAdobe(x)).length;
     if (accepted && store.adobe()?.acceptedToo == null) {
-      const yes = await confirmCard({ title: 'Switch your accepted Preserves too?', body: `${cap(count(accepted, 'accepted Preserve'))} ${accepted === 1 ? 'uses' : 'use'} lookalikes for Adobe fonts. Switch ${accepted === 1 ? 'it' : 'them all'} to your Adobe fonts? Nothing else about ${accepted === 1 ? 'it' : 'them'} changes.`, ok: accepted === 1 ? 'Switch it' : 'Switch them all', cancel: 'Leave them as they are' });
+      const yes = await confirmCard({ title: 'Switch your accepted Preserves too?', body: `${cap(count(accepted, 'accepted Preserve'))} ${accepted === 1 ? 'uses' : 'use'} substitutes for Adobe fonts. Switch ${accepted === 1 ? 'it' : 'them all'} to your Adobe fonts? Nothing else about ${accepted === 1 ? 'it' : 'them'} changes.`, ok: accepted === 1 ? 'Switch it' : 'Switch them all', cancel: 'Leave them as they are' });
       store.setAdobeAcceptedToo(yes);
     }
     toast('Connected. Your Adobe fonts appear in a few minutes.');
@@ -578,7 +578,7 @@ function panel(c, review) {
         <p class="fine">We’ll re-capture the page and focus on the spots you pinned. Check the rest once more before accepting.</p>` : ''}
 </div>`;
   } else if (view.tab === 'fonts') {
-    loadLookalikes(c);
+    loadSubstitutes(c);
     P.innerHTML = `<h2>Fonts</h2>${fontGroups(c)}
       <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>`;
   } else if (view.tab === 'tour') {
@@ -665,10 +665,10 @@ function fontGroups(c) {
   const shown = fontsShown(c), adobe = store.adobe?.();
   const lic = shown.filter((f) => f.holder !== 'platform'), ado = shown.filter((f) => f.holder === 'platform');
   const steps = '<button class="link" data-adobe="1">these steps</button>';
-  const adoLine = !adobe ? `The following fonts require you to connect an Adobe Creative Cloud subscription or will be replaced by a lookalike. To connect your account, follow ${steps}.`
-    : adobe.state === 'checking' ? 'Connecting to your Adobe account. Until it’s connected, these fonts show their lookalike.'
-    : adobe.state === 'ok' ? 'Your Adobe account can’t show these fonts, so they will be replaced by a lookalike.'
-    : `We can’t reach your Adobe account, so these fonts will be replaced by a lookalike. Connect again with a new token by following ${steps}.`;
+  const adoLine = !adobe ? `The following fonts require you to connect an Adobe Creative Cloud subscription or will be replaced by a substitute. To connect your account, follow ${steps}.`
+    : adobe.state === 'checking' ? 'Connecting to your Adobe account. Until it’s connected, these fonts show their substitute.'
+    : adobe.state === 'ok' ? 'Your Adobe account can’t show these fonts, so they will be replaced by a substitute.'
+    : `We can’t reach your Adobe account, so these fonts will be replaced by a substitute. Connect again with a new token by following ${steps}.`;
   return (lic.length ? `<p class="fgroup"><b>Licensed fonts</b>: Confirm you have the right to use these fonts or select the substitute.</p>${lic.map((f) => fontRow(c, f)).join('')}` : '')
     + (ado.length ? `<p class="fgroup"><b>Adobe fonts</b>: ${adoLine}</p>${ado.map((f) => fontRow(c, f)).join('')}` : '');
 }
@@ -709,7 +709,7 @@ function fontRow(c, f) {
 // recorded with who and when ("I have the rights"). Accept waits only for licensed fonts that haven't been answered.
 const unanswered = (c) => (c.fonts || []).filter((f) => f.holder === 'user' && !f.decision && !f.covered);
 let lookLoaded = '';
-function loadLookalikes(c) {
+function loadSubstitutes(c) {
   const fams = [...new Set(c.fonts.map((f) => f.look).filter(Boolean))].sort();
   if (!fams.length) return;
   const href = `https://fonts.googleapis.com/css2?${fams.map((f) => 'family=' + f.replace(/ /g, '+')).join('&')}&display=swap`;
@@ -768,10 +768,10 @@ function wireCred(id) {
 function adobeSection() {
   if (!store.adobe) return '';
   const a = store.adobe();
-  const state = !a ? 'Not connected. Preserves use lookalikes for Adobe fonts.'
+  const state = !a ? 'Not connected. Preserves use substitutes for Adobe fonts.'
     : a.state === 'checking' ? 'Connecting…'
     : a.state === 'ok' ? 'Connected. Your Preserves show your Adobe fonts.'
-    : 'We can’t reach your Adobe Fonts account, so your Preserves use lookalikes for now. Check your Adobe subscription, or connect again with a new token.';
+    : 'We can’t reach your Adobe Fonts account, so your Preserves use substitutes for now. Check your Adobe subscription, or connect again with a new token.';
   return `<section class="card adobebox"><h2>Adobe Fonts</h2><p class="sub">${state}</p>
     <div class="row">${!a || a.state !== 'ok' ? `<button class="btn small" id="adconnect">${a ? 'Connect again' : 'Connect Adobe Fonts'}</button>` : ''}${a ? '<button class="btn small secondary" id="addisc">Disconnect</button>' : ''}</div></section>`;
 }
@@ -786,7 +786,7 @@ function planPage() {
     ${adobeSection()}`, { back: '#/' });
   if ($('#adconnect')) $('#adconnect').onclick = () => adobeCard(null);
   if ($('#addisc')) $('#addisc').onclick = async () => {
-    if (await confirmCard({ title: 'Disconnect Adobe Fonts?', body: 'All your Preserves switch to lookalikes for Adobe fonts. Connect again any time to bring your Adobe fonts back.', ok: 'Disconnect', danger: true })) { store.disconnectAdobe(); toast('Disconnected. Your Preserves use lookalikes now.'); }
+    if (await confirmCard({ title: 'Disconnect Adobe Fonts?', body: 'All your Preserves switch to substitutes for Adobe fonts. Connect again any time to bring your Adobe fonts back.', ok: 'Disconnect', danger: true })) { store.disconnectAdobe(); toast('Disconnected. Your Preserves use substitutes now.'); }
   };
   app.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => {
     const p = PLANS.find((x) => x.id === b.dataset.p);
