@@ -106,6 +106,22 @@ export const store = {
   // Font choices during review. decision: keep | lookalike | upload (null until the person has looked). Each change is
   // recorded with who and when; changing a font rebuilds only the fonts (seconds), not a refinement.
   studioFonts() { return db.studio.fonts || []; },
+  // Adobe Fonts connection (schema-adobe.sql). The demo takes any 20+ letter token, "checks" it for a moment, and has
+  // every Adobe font in its catalog except ones named "unnamed".
+  adobe() { return db.studio.adobe && db.studio.adobe.state !== 'disconnected' ? db.studio.adobe : null; },
+  connectAdobe(key) {
+    if (!/^[A-Za-z0-9]{20,80}$/.test(String(key).trim())) return Promise.resolve('That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.');
+    db.studio.adobe = { state: 'checking', acceptedToo: db.studio.adobe?.acceptedToo ?? null, families: {}, connectedAt: now() }; emit();
+    setTimeout(() => {
+      const fams = {}; for (const c of db.copies) for (const f of c.fonts || []) if (f.holder === 'platform') for (const x of f.faces || [{ family: f.id }]) fams[x.family] = /unnamed/.test(x.family) ? null : /omnes/i.test(x.family) && /free/.test(key) ? { id: 'demo', css: null, plan: false } : { id: 'demo', css: x.family + '-1' };
+      Object.assign(db.studio.adobe, { state: 'ok', families: fams }); emit();
+    }, 1500);
+    return Promise.resolve(null);
+  },
+  disconnectAdobe() { if (db.studio.adobe) db.studio.adobe.state = 'disconnected'; emit(); },
+  // The demo's quick check at submit: these test sites load Adobe fonts from Squarespace's menu.
+  adobeCheck(id) { const c = this.copy(id); return new Promise((ok) => setTimeout(() => ok(!!c && ['xanadu.nyc', 'hello-world-kosa.squarespace.com'].includes(new URL(c.url).hostname.replace(/^www\./, ''))), 900)); },
+  setAdobeAcceptedToo(yes) { if (db.studio.adobe) db.studio.adobe.acceptedToo = yes; emit(); },
   setFont(id, fid, decision) {
     const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
     f.decision = decision; if (decision === 'lookalike') f.covered = null;
@@ -113,6 +129,7 @@ export const store = {
   },
   // The real check reads the file's name table and compares letter widths with the original; the demo goes by the file
   // name, so a file named after a different font is turned down the same way.
+  certifyFont(id, cert) { const c = this.copy(id); (c.fontLog ||= []).push({ ...cert, by: db.person.email, at: now() }); },
   uploadFont(id, fid, file) {
     const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
     if (!FONT_FILE.test(file.name)) return 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.';
@@ -128,7 +145,8 @@ export const store = {
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
     if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan’s Preserves are all in use. Archive one or upgrade your plan to make another.` };
-    const known = SEED_COPIES.find((s) => new URL(s.url).hostname === u.hostname);
+    const bare = (h) => h.replace(/^www\./, '');
+    const known = SEED_COPIES.find((s) => bare(new URL(s.url).hostname) === bare(u.hostname));  // the hint says "xanadu.nyc"; the seed is www.xanadu.nyc
     const id = known ? known.id : Math.random().toString(36).slice(2, 10);
     let name = (known?.name || u.hostname.replace(/^www\./, '').split('.')[0]).replace(/[^a-z0-9]+/g, '-');
     while (db.copies.some((c) => c.name === name && c.status !== 'deleted')) name += '-2';

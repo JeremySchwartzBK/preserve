@@ -24,6 +24,7 @@ import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs'
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
 import { spotMessage, pageMessage, HIDDEN } from '../app/review-messages.js';
+import { adobe, ensureKit, syncFamilies, checkConnection } from './adobe.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -322,6 +323,48 @@ async function main() {
   }
 
   // Keep KV in step: one record per copy, plus friendly names once a copy has been approved.
+  // Adobe Fonts connection (schema-adobe.sql, adobe.mjs): the studio's kit is loaded on top of this Preserve when the
+  // connection is working, the version uses an Adobe font the kit has, and the Preserve is in review, was accepted
+  // after connecting, or the person said yes to switching earlier ones too. Otherwise its lookalikes show.
+  const adobeFamilies = (fonts) => [...new Set((fonts || []).filter((f) => f.holder === 'platform').flatMap((f) => (f.faces || []).map((x) => x.family)).filter(Boolean))];
+  // Returns { kit, names: { page font name: its name in the kit's stylesheet } }, or null.
+  function adobeKit(r, status, fonts) {
+    const a = r.adobe;
+    if (!a || a.state !== 'ok' || !a.kit) return null;
+    const names = Object.fromEntries(adobeFamilies(fonts).map((f) => [f, a.families?.[f]?.css]).filter(([, c]) => c));
+    if (!Object.keys(names).length) return null;
+    if (status === 'review' || a.accepted_too || a.accepted_after) return { kit: a.kit, names };
+    return null;
+  }
+
+  // Each pass: a new or changed key is tried and the studio's kit made or found; fonts the studio's Preserves use are
+  // added to it. Once a day per studio: the key and the kit's fonts are checked (a lapse shows as a refused key or
+  // fonts that stop loading). A network problem on our side changes nothing; the next pass tries again.
+  async function adobeUpkeep() {
+    const rows = await sql(`select a.studio_id, a.kit_id, a.state, a.families, a.checked_at,
+        a.state = 'checking' or a.checked_at is null or a.checked_at < now() - interval '1 day' as due,
+        coalesce((select jsonb_agg(v.fonts) from copy c join copy_version v on v.copy_id = c.id where c.studio_id = a.studio_id and c.status <> 'failed' and v.fonts is not null), '[]') as fonts
+      from studio_adobe a where a.secret_id is not null`);
+    for (const a of rows) {
+      const wanted = adobeFamilies(a.fonts.flat());
+      const missing = wanted.filter((f) => !(f in (a.families || {})));
+      if (!a.due && !missing.length) continue;
+      try {
+        const [{ k }] = await sql(`select adobe_key(${lit(a.studio_id)}) as k`);
+        if (!k) continue;
+        const api = adobe(k);
+        let kit, families = a.families || {}, check;
+        try {
+          kit = await ensureKit(api, a.kit_id);
+          ({ families } = await syncFamilies(api, kit, wanted, families));
+          check = a.due ? await checkConnection(api, kit) : { state: a.state, problem: null };
+        } catch (e) { if (!e.refused) throw e; check = { state: 'key-refused', problem: e.message }; }
+        await sql(`update studio_adobe set kit_id = coalesce(${lit(kit)}, kit_id), families = ${lit(JSON.stringify(families))}::jsonb, state = ${lit(check.state)}, problem = ${lit(check.problem)}${a.due ? ', checked_at = now()' : ''} where studio_id = ${lit(a.studio_id)} and secret_id is not null`);
+        log('adobe', a.studio_id, check.state, kit || '', `${Object.values(families).filter(Boolean).length} families`);
+      } catch (e) { log('adobe check failed', a.studio_id, e.message); }
+    }
+  }
+
   async function syncServing(ids = null) {
     const rows = ids?.length === 0 ? [] : await sql(`select c.id, c.status, c.live_version, c.served, s.slug,
         (select max(version) from copy_version v where v.copy_id = c.id) as latest,
@@ -329,6 +372,9 @@ async function main() {
         coalesce((select jsonb_agg(jsonb_build_object('font_id', f.font_id, 'decision', f.decision, 'studio_font_id', f.studio_font_id)) from copy_font f where f.copy_id = c.id), '[]') as font_choices,
         coalesce((select jsonb_agg(jsonb_build_object('id', sf.id, 'font_key', sf.font_key, 'state', sf.state, 'asset', sf.asset, 'created_at', sf.created_at)) from studio_font sf where sf.studio_id = c.studio_id), '[]') as studio_fonts,
         (select name from copy_name n where n.copy_id = c.id and n.is_current) as name,
+        (select jsonb_build_object('state', a.state, 'kit', a.kit_id, 'families', a.families, 'accepted_too', a.accepted_too,
+            'accepted_after', exists (select 1 from copy_version v where v.copy_id = c.id and v.version = c.live_version and v.approved_at >= a.connected_at))
+          from studio_adobe a where a.studio_id = c.studio_id and a.secret_id is not null) as adobe,
         coalesce((select array_agg(name) from copy_name n where n.copy_id = c.id and not n.is_current), '{}') as old,
         coalesce((select jsonb_agg(jsonb_build_object('id', p.id, 'page', p.page_id, 'block', p.block_id, 'x', p.x, 'y', p.y, 'title', coalesce(p.meta->>'title', ''), 'body', p.body) order by p.sort, p.created_at)
           from copy_pin p where p.copy_id = c.id and p.kind = 'tour' and p.block_id is not null), '[]') as spots,
@@ -347,7 +393,8 @@ async function main() {
       const sv = r.stored?.[v] || {};
       const layout = sv.fmt === 2 ? { fmt: 2, pages: Object.fromEntries((sv.pages || []).map((p) => [p.path, p.page_id])) } : {};
       const swaps = fontSwaps(sv.fonts, r.font_choices, r.studio_fonts);
-      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null, still: r.served?.still };
+      const kit = adobeKit(r, status, sv.fonts);
+      const want = { v, status, studio: r.slug, name: r.name, old: r.old, ...layout, tour: tour.spots.length + tour.credits.length ? tour : null, fonts: swaps.length ? swaps : null, still: r.served?.still, ...(kit ? { adobe: kit } : {}) };
       const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((m, kk) => ((m[kk] = v[kk]), m), {}) : v));  // key order differs once stored as jsonb
       // A Preserve needs its desktop still: what the Desktop embed shows on phones, and the dashboard's thumbnail. Made
       // once per version in review (so a refinement gets a new one) and again when it goes live (fonts as chosen), a few
@@ -360,6 +407,7 @@ async function main() {
       if (canon(want) === canon(r.served) && !needStill) continue;
       await setCopy(store, { id: r.id, version: want.v, status, studio: r.slug, name: r.name, ...layout });
       if (r.live_version && r.name) await setNames(store, { studio: r.slug, id: r.id, current: r.name, old: r.old });
+      if (JSON.stringify(want.adobe ?? null) !== JSON.stringify(r.served?.adobe ?? null)) await (want.adobe ? store.kvPut(`adobe:${r.id}`, want.adobe) : store.kvDel(`adobe:${r.id}`).catch(() => {}));
       if (canon(want.tour) !== canon(r.served?.tour ?? null)) await (want.tour ? store.kvPut(`tour:${r.id}`, want.tour) : store.kvDel(`tour:${r.id}`).catch(() => {}));
       if (canon(want.fonts) !== canon(r.served?.fonts ?? null)) {
         // An uploaded font goes beside the Preserve first (shared files never change, so it is written once).
@@ -457,7 +505,7 @@ async function main() {
   // as they start), so each waits a moment to hear before beginning.
   let upkeepOff = false;
   async function upkeep() {
-    let full = 0, swept = 0;
+    let full = 0, swept = 0, adobeAt = 0;
     if (process.env.PORT && !once) await new Promise((s) => setTimeout(s, 5000));
     while (!stopping) {
       if (upkeepOff) { await new Promise((s) => setTimeout(s, 3000)); continue; }
@@ -475,6 +523,7 @@ async function main() {
         if (ids.length) lastBusy = Date.now();
         await syncServing(ids);
         if (Date.now() - swept > 15 * 60e3) { swept = Date.now(); await sweepCaptures().catch((e) => log('capture sweep failed', e.message)); }
+        if (Date.now() - adobeAt > 60e3) { adobeAt = Date.now(); await adobeUpkeep().catch((e) => log('adobe upkeep failed', e.message)); }
       } catch (e) { log('upkeep error', e.message); }
       if (once) return;
       await new Promise((s) => setTimeout(s, 3000));

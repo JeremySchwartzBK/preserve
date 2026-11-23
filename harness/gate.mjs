@@ -227,7 +227,7 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     const gone = [...new Set((gf.missing || []).map((m) => [m.family || 'unknown font', m.weight, m.style !== 'normal' && m.style, '(' + m.reason + ')'].filter(Boolean).join(' ')))];
     if (gone.length) fail('font-not-on-google-fonts', gone.slice(0, 5).join('; '));
     const swapped = [...new Set(Object.values(gf.fonts || {}).filter((f) => f.lookalike_for && !f.adobe).map((f) => f.lookalike_for))];
-    if (swapped.length) notes.push({ limitation: null, text: `We used a lookalike for ${count(swapped.length, 'font')} we couldn’t get (${swapped.join(', ')}).`, detail: Object.values(gf.fonts).filter((f) => f.lookalike_for && !f.adobe).map((f) => `${f.lookalike_for} -> ${f.family} ${f.weight} ${f.style}`).join('; ') });
+    if (swapped.length) notes.push({ limitation: null, text: `We used a substitute for ${count(swapped.length, 'font')} we couldn’t get (${swapped.join(', ')}).`, detail: Object.values(gf.fonts).filter((f) => f.lookalike_for && !f.adobe).map((f) => `${f.lookalike_for} -> ${f.family} ${f.weight} ${f.style}`).join('; ') });
     fontRecord = gf.record || [];
     const lacking = Object.values(gf.fonts || {}).filter((f) => f.lacks && !f.lookalike_for);
     if (lacking.length) warnings.push(`Google Fonts versions lack characters Squarespace's had: ${lacking.map((f) => `${f.family} ${f.weight} ${f.subset} (${f.lacks})`).join(', ')}`);

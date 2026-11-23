@@ -62,6 +62,10 @@ const currentReplica = (html) => html.replace(/<script id="preserve-replica">[\s
 
 const PRESERVE_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; frame-src 'self' https://player.vimeo.com https://www.youtube-nocookie.com; connect-src 'none'; worker-src 'none'; object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation";
 
+// Pages with an Adobe Fonts kit may load its stylesheet and fonts from Adobe (and Adobe's page-view counter).
+const withAdobe = (csp) => csp.replace("style-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://use.typekit.net https://p.typekit.net")
+  .replace("font-src 'self' data:", "font-src 'self' data: https://use.typekit.net");
+
 const url = (req) => new URL(req.url);
 
 // Small lookup records (copy:<id>, name:<studio>/<name>, tour:<id>) live in R2 at lookup/<kind>/<key>.json.
@@ -89,9 +93,9 @@ P.postMessage({type:'preserve-pin',blockId:idOf(b),x:+Math.min(1,Math.max(0,(e.c
 document.body.appendChild(box);document.body.appendChild(layer)}
 if(layer){layer.style.display=on?'block':'none';if(!on)box.style.display='none'}}
 addEventListener('message',function(m){var d=m.data||{};if(d.type==='preserve-pin-mode')mode(!!d.on);
-if(d.type==='preserve-pins'){document.querySelectorAll('.preserve-pin').forEach(function(x){x.remove()});var miss=[];(d.pins||[]).forEach(function(p,i){if(p.wide){var c=COL[p.kind]||COL.issue,band=document.createElement('div'),tag=document.createElement('div');band.className='preserve-pin';band.title=p.body||'';band.style.cssText='position:absolute;z-index:2147483639;left:0;right:0;top:'+(+p.top||0)+'px;height:'+(+p.top?160:innerHeight)+'px;border:3px solid '+c+';background:'+c+'14;box-sizing:border-box;pointer-events:none';tag.textContent=p.n||i+1;tag.style.cssText='position:absolute;left:12px;top:12px;min-width:26px;height:26px;padding:0 6px;box-sizing:border-box;border-radius:13px;background:'+c+';color:#fff;font:600 13px/26px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.3)';band.appendChild(tag);document.documentElement.appendChild(band);return}var b=p.blockId&&find(p.blockId);if(!b){if(p.blockId)miss.push(p.blockId);return}if(getComputedStyle(b).position==='static')b.style.position='relative';var dot=document.createElement('div');dot.className='preserve-pin';dot.textContent=p.n||i+1;dot.title=p.body||'';dot.style.cssText='position:absolute;z-index:2147483640;left:'+(p.x*100)+'%;top:'+(p.y*100)+'%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:'+(COL[p.kind]||COL.issue)+';color:#fff;font:600 13px/26px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.3);pointer-events:none';b.appendChild(dot);if(p.kind==='tour'&&dark(dot)){dot.style.background='#fff';dot.style.color='#111';dot.style.boxShadow='0 0 0 3px rgba(17,17,17,.9),0 2px 8px rgba(0,0,0,.3)'}});var ds=[].slice.call(document.querySelectorAll('.preserve-pin')).filter(function(d){return d.offsetWidth<60}).map(function(d,i){var r=d.getBoundingClientRect(),cx=r.left+r.width/2,dx=Math.max(0,18-cx)-Math.max(0,cx-(document.documentElement.clientWidth-18));return{d:d,i:i,x:cx+dx,y:r.top+scrollY+r.height/2,o:0,dx:dx}});ds.forEach(function(m,i){for(var k=0;k<40;k++){var hit=false;for(var j=0;j<i;j++){var q=ds[j];if(Math.abs(q.x-m.x)<30&&Math.abs(q.y+q.o-(m.y+m.o))<30){hit=true;break}}if(!hit)break;m.o+=30}if(m.o||m.dx)m.d.style.transform='translate(calc(-50% + '+m.dx+'px),calc(-50% + '+m.o+'px))'});P.postMessage({type:'preserve-missing',blockIds:miss},'*')}
+if(d.type==='preserve-pins'){document.querySelectorAll('.preserve-pin').forEach(function(x){x.remove()});var miss=[];(d.pins||[]).forEach(function(p,i){if(p.wide){var c=COL[p.kind]||COL.issue,band=document.createElement('div'),tag=document.createElement('div');band.className='preserve-pin';band.setAttribute('data-n',p.n||i+1);band.title=p.body||'';band.style.cssText='position:absolute;z-index:2147483639;left:0;right:0;top:'+(+p.top||0)+'px;height:'+(+p.top?160:innerHeight)+'px;border:3px solid '+c+';background:'+c+'14;box-sizing:border-box;pointer-events:none';tag.textContent=p.n||i+1;tag.style.cssText='position:absolute;left:12px;top:12px;min-width:26px;height:26px;padding:0 6px;box-sizing:border-box;border-radius:13px;background:'+c+';color:#fff;font:600 13px/26px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.3)';band.appendChild(tag);document.documentElement.appendChild(band);return}var b=p.blockId&&find(p.blockId);if(!b){if(p.blockId)miss.push(p.blockId);return}if(getComputedStyle(b).position==='static')b.style.position='relative';var dot=document.createElement('div');dot.className='preserve-pin';dot.setAttribute('data-n',p.n||i+1);dot.textContent=p.n||i+1;dot.title=p.body||'';dot.style.cssText='position:absolute;z-index:2147483640;left:'+(p.x*100)+'%;top:'+(p.y*100)+'%;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;background:'+(COL[p.kind]||COL.issue)+';color:#fff;font:600 13px/26px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 2px 8px rgba(0,0,0,.3);pointer-events:none';b.appendChild(dot);if(p.kind==='tour'&&dark(dot)){dot.style.background='#fff';dot.style.color='#111';dot.style.boxShadow='0 0 0 3px rgba(17,17,17,.9),0 2px 8px rgba(0,0,0,.3)'}});var ds=[].slice.call(document.querySelectorAll('.preserve-pin')).filter(function(d){return d.offsetWidth<60}).map(function(d,i){var r=d.getBoundingClientRect(),cx=r.left+r.width/2,dx=Math.max(0,18-cx)-Math.max(0,cx-(document.documentElement.clientWidth-18));return{d:d,i:i,x:cx+dx,y:r.top+scrollY+r.height/2,o:0,dx:dx}});ds.forEach(function(m,i){for(var k=0;k<40;k++){var hit=false;for(var j=0;j<i;j++){var q=ds[j];if(Math.abs(q.x-m.x)<30&&Math.abs(q.y+q.o-(m.y+m.o))<30){hit=true;break}}if(!hit)break;m.o+=30}if(m.o||m.dx)m.d.style.transform='translate(calc(-50% + '+m.dx+'px),calc(-50% + '+m.o+'px))'});P.postMessage({type:'preserve-missing',blockIds:miss},'*')}
 if(d.type==='preserve-fonts'){var fs=document.getElementById('preserve-fonts');if(!fs){fs=document.createElement('style');fs.id='preserve-fonts';document.body.appendChild(fs)}fs.textContent=d.css||''}
-if(d.type==='preserve-scroll-to'){var b=find(d.blockId);if(b)b.scrollIntoView({behavior:'smooth',block:'center'})}
+if(d.type==='preserve-scroll-to'){var mk=d.n&&[].filter.call(document.querySelectorAll('.preserve-pin'),function(x){return x.getAttribute('data-n')===String(d.n)})[0],b=mk||find(d.blockId);if(b)b.scrollIntoView({behavior:'smooth',block:'center'})}
 if(d.type==='preserve-show-font'){var q=function(x){return String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'')},want=q(d.name).slice(0,6),hit=[];document.querySelectorAll('.preserve-font-hit').forEach(function(x){x.classList.remove('preserve-font-hit')});if(want){document.querySelectorAll('body *').forEach(function(el){if(!el.childNodes.length||![].some.call(el.childNodes,function(n){return n.nodeType===3&&n.textContent.trim()}))return;if(q(getComputedStyle(el).fontFamily.split(',')[0]).indexOf(want)===0){el.classList.add('preserve-font-hit');hit.push(el)}});if(!document.getElementById('preserve-font-css')){var st=document.createElement('style');st.id='preserve-font-css';st.textContent='.preserve-font-hit{outline:2px solid #e8a33d!important;outline-offset:2px}';document.head.appendChild(st)}if(hit[0])hit[0].scrollIntoView({behavior:'smooth',block:'center'})}}});
 P.postMessage({type:'preserve-ready',layout:innerWidth<768?'mobile':'desktop'},'*')})();</script>`;
 
@@ -109,6 +113,23 @@ const tourTags = (data) => `<script id="preserve-tour-data" type="application/js
 // same name; the files sit beside the copy's other files (a/...).
 const css = (s) => String(s).replace(/[\\"<>\n]/g, '');
 const fontTags = (list) => `<style id="preserve-fonts">${list.map((f) => `@font-face{font-family:"${css(f.family)}";font-weight:${css(f.weight)};font-style:${css(f.style)};font-display:swap;src:url(a/${css(f.src)})}`).join('')}</style>`;
+
+// Adobe names fonts in the studio's kit differently from the page (acumin-pro-1 for acumin-pro), so each font-family
+// rule on the page that names an Adobe font gets the kit's name put in front: Adobe's font when it loads, the page's
+// own (the lookalike underneath) when it doesn't. The saved page itself is never changed; this is done as it's served.
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function adobeNames(html, names) {
+  const pairs = Object.entries(names || {}).filter(([n, c]) => /^[\w-]{1,80}$/.test(n) && /^[\w-]{1,80}$/.test(c || ''));
+  if (!pairs.length) return html;
+  const Q = `(?:"|'|&quot;|&#34;|&#39;)?`;
+  return html.replace(/(font-family\s*:\s*)((?:&#?\w+;|[^;}<>])+)/gi, (all, head, value) => {
+    let v = value;
+    for (const [n, c] of pairs) {
+      v = v.replace(new RegExp(`(^|,)(\\s*)(${Q})${reEsc(n)}(${Q})(?=\\s*(?:,|!|$))`, 'gi'), (m, lead, sp, q1, q2) => `${lead}${sp}${q1}${c}${q2},${q1}${n}${q2}`);  // same quoting as the page: safe inside a style attribute too
+    }
+    return head + v;
+  });
+}
 
 // Our scripts go just before the page's own closing body tag: the LAST one, since a saved widget frame (srcdoc) can carry
 // its own </body> earlier in the file. No closing tag: the page is served as it is.
@@ -205,14 +226,21 @@ async function serveCopy(req, env, ctx, id, rest) {
   // any (fonts and images marked crossorigin load only that way).
   // Pages made before stage one (no preserve-steady script) point at SVG icon files, which a sealed page can't use:
   // they keep the no-network rules without the seal, so they look exactly as they did when accepted.
-  const text = asset ? null : currentReplica(await obj.text());
+  let text = asset ? null : currentReplica(await obj.text());
   // Sealed (sandboxed) when it runs the owner's kept code, except where a background video plays through Vimeo's or
   // YouTube's player, which can't start in a sealed page (Jeremy 2026-11-17). The rest of the policy still applies.
   if (file.endsWith('.html')) h.set('content-security-policy', text.includes('id="preserve-steady"') && !text.includes('data-pv-bgvideo=') ? PRESERVE_CSP : PRESERVE_CSP.replace(/; sandbox .*$/, ''));
   else h.set('access-control-allow-origin', '*');
   // Review mode (the app's review and pin editor): add the small bridge that lets the app place pins on blocks.
   const fonts = asset ? null : await lookup(env, `fonts:${id}`);
-  const fontCss = fonts?.length ? fontTags(fonts) : '';
+  // The studio's Adobe Fonts kit (schema-adobe.sql), when its connection is working: loaded last, from Adobe (no
+  // self-hosting allowed), over the lookalikes the page already carries. If Adobe stops serving it, the lookalikes show.
+  const adobeKv = asset || !file.endsWith('.html') ? null : await lookup(env, `adobe:${id}`);
+  const kitId = adobeKv?.kit;
+  const kit = typeof kitId === 'string' && /^[a-z0-9]{4,20}$/.test(kitId) ? kitId : null;
+  if (kit && text) text = adobeNames(text, adobeKv.names);
+  const fontCss = (fonts?.length ? fontTags(fonts) : '') + (kit ? `<link rel="stylesheet" href="https://use.typekit.net/${kit}.css">` : '');
+  if (kit && h.has('content-security-policy')) h.set('content-security-policy', withAdobe(h.get('content-security-policy')));
   if (!asset && url(req).searchParams.has('review')) {
     h.set('cache-control', 'no-store');
     const html = beforeBodyEnd(text, fontCss + REVIEW_BRIDGE);
