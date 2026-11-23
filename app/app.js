@@ -457,7 +457,7 @@ function onFrameMessage(m, id) {
   if (m.source !== frameWin()) return;
   const d = m.data || {};
   const c = store.copy(id);
-  if (d.type === 'preserve-ready') { view.fontShown = null; sendPins(c, true); if (store.fontCss) sendFonts(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: view.gotoAfter }, '*'); view.gotoAfter = null; } }
+  if (d.type === 'preserve-ready') { view.fontShown = null; sendPins(c, true); if (store.fontCss) sendFonts(c, true); sendMode(); if (view.gotoAfter) { frameWin()?.postMessage({ type: 'preserve-scroll-to', ...view.gotoAfter }, '*'); view.gotoAfter = null; } }
   // Pins the page couldn't place (their block isn't there, e.g. after a refinement): tour stops are marked to move.
   if (d.type === 'preserve-missing') { const k = (d.blockIds || []).join('|'); if (k !== view.missing.join('|')) { view.missing = d.blockIds || []; copyPage(id); } }
   if (d.type === 'preserve-pin' && view.pinFor?.startsWith('move:')) {
@@ -508,7 +508,7 @@ const pinList = (c, tab, opts = {}) => {
     <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
     ${tab === 'check' && p.meta?.round_result ? roundResult(p) + aiNote(p) : ''}
     ${tab === 'tour' && view.missing.includes(p.blockId) ? '<small class="warn">This stop no longer lands on the page. Move it to the right spot.</small>' : ''}
-    <span class="row">${isSaved(p) ? SAVED_TICK : ''}<button class="link" data-goto="${esc(p.blockId)}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
+    <span class="row">${isSaved(p) ? SAVED_TICK : ''}<button class="link" data-goto="${esc(p.blockId)}" data-n="${list.indexOf(p) + 1}">Show</button>${opts.edit ? `<button class="link" data-edit="${p.id}">Edit</button><button class="link" data-pin="move:${p.id}">${view.pinFor === 'move:' + p.id ? 'Drop it on the page…' : 'Move'}</button>` : ''}${opts.remove !== false ? `<button class="link" data-rm="${p.id}">Remove</button>` : ''}</span></li>`).join('')}</ol>`;
 };
 
 // How a pin came out in the last refinement (the check compares the pinned spot with the live site).
@@ -568,7 +568,7 @@ function panel(c, review) {
       ${found.length || older.length || gone.length || otherN ? '<p class="fgroup"><b>Our review</b>: Let us know whether issues we identified through an automated quality check should be fixed.</p>' : ''}
       ${found.length || older.length ? `
         <ol class="pins findings">${found.map((p, i) => `<li class="${p.blockId ? '' : 'nopin'}">${p.blockId ? `<b class="ltr">${letter(i)}</b>` : ''}<span class="pbody">${esc(fText(p))}</span>${cropPair(c, p)}
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}" data-n="${letter(i)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
@@ -612,8 +612,11 @@ function panel(c, review) {
   P.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => store.removePin(id, b.dataset.rm)));
   P.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => {
     // A pin placed on the other layout: switch to it, then scroll once the page is loaded.
-    if (b.dataset.layout && b.dataset.layout !== view.layout) { view.layout = b.dataset.layout; view.gotoAfter = b.dataset.goto; copyPage(id); return; }
-    frameWin()?.postMessage({ type: 'preserve-scroll-to', blockId: b.dataset.goto }, '*');
+    // Scroll to the marker itself (its letter or number), not the middle of the block it sits on: a finding about the
+    // first screen sits on the whole page, whose middle is far from the marker (Jeremy, 2026-11-23).
+    const go = { blockId: b.dataset.goto, n: b.dataset.n };
+    if (b.dataset.layout && b.dataset.layout !== view.layout) { view.layout = b.dataset.layout; view.gotoAfter = go; copyPage(id); return; }
+    frameWin()?.postMessage({ type: 'preserve-scroll-to', ...go }, '*');
   }));
   P.querySelectorAll('[data-l2]').forEach((b) => (b.onclick = () => { view.layout = b.dataset.l2; view.pinFor = null; copyPage(id); }));
   P.querySelectorAll('[data-verdict]').forEach((b) => (b.onclick = () => {
