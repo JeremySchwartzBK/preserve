@@ -69,7 +69,7 @@ function findTargets([kinds, NEXT, PREV, isMobile]) {
   const out = [], used = new Set(), count = {};
   for (const kind of kinds) {
     for (const e of document.querySelectorAll(SEL[kind])) {
-      if (used.has(e) || e.closest('[data-preserve-promo]') || !vis(e)) continue;
+      if (used.has(e) || e.closest('[data-preserve-promo], .sqs-block-map, .ps-block-map, .map-block, .gm-style, [class*="map-block"]') || !vis(e)) continue;
       if (kind === 'other' && (e.closest('form, .sqs-add-to-cart-button, .ps-add-to-cart-button, [data-add-to-cart], .product-add-to-cart, .newsletter-form, [class*="cart"]') || e.matches('[type="submit"]') || [...used].some((u) => u.contains(e) || e.contains(u)))) continue;
       if (kind === 'hover' && (isMobile || offPage(e) === false && e.tagName === 'A' && /^#/.test(e.getAttribute('href') || ''))) continue;
       if (kind === 'jump') { const h = e.getAttribute('href') || ''; const id = h.split('#')[1]; if (!id || offPage(e) || !document.getElementById(decodeURIComponent(id))) continue; }
@@ -125,6 +125,8 @@ export async function probeVisitor(browser, url, profileName, { isCopy = false, 
       for (const u of units) {
         const r = u.getBoundingClientRect();
         if (r.width < 60 || r.height < 16) continue;
+        // A picture still loading fades in when it arrives, on any page; not a scroll effect.
+        if (u.tagName === 'IMG' && (!u.complete || !u.naturalWidth)) continue;
         const at = window.__preserveAnchor(u), k = at.blockId || '-'; n[k] = (n[k] || 0) + 1;
         if (r.bottom < innerHeight * 0.1 || r.top > innerHeight * 0.9) continue;
         let op = 1, t = 0;
@@ -182,7 +184,9 @@ export async function probeVisitor(browser, url, profileName, { isCopy = false, 
           if (Math.abs(y1 - y0) > 20) await page.evaluate((y) => scrollTo(0, y), y0);
           continue;
         }
-        const a = await shot(page);
+        let a = await shot(page), idle = 0;
+        // What changes on screen by itself in the same time (a slideshow, a ticker), so it isn't taken for the click.
+        if (t.kind !== 'hover') { await sleep(1000); const a2 = await shot(page); idle = changed(a, a2, { x: 0, y: 0, w: a.width, h: a.height }); a = a2; }
         if (t.kind === 'hover') { await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 }); await sleep(700); }
         else { await el.click({ timeout: 3000, noWaitAfter: true }); await sleep(1000); }
         const b = await shot(page);
@@ -197,7 +201,7 @@ export async function probeVisitor(browser, url, profileName, { isCopy = false, 
         const f = t.kind === 'hover' ? changed(a, b, r) : changed(a, b, { x: 0, y: 0, w: a.width, h: a.height });
         let back;
         if (t.kind === 'hover' && f > 0.02) { await page.mouse.move(0, 0, { steps: 4 }); await sleep(900); back = r3(changed(a, await shot(page), r)); }
-        out.act[t.key] = { kind: t.kind, changed: r3(f), text: t.text, ...(t.kind === 'hover' ? { before: thumb(a, r), after: thumb(b, r), back, blank } : {}) }; out.at[t.key] = t.at;
+        out.act[t.key] = { kind: t.kind, changed: r3(Math.max(0, f - (t.kind === 'hover' ? 0 : idle))), text: t.text, ...(t.kind === 'hover' ? { before: thumb(a, r), after: thumb(b, r), back, blank } : {}) }; out.at[t.key] = t.at;
         if (t.kind !== 'hover' && f > 0.005) {
           // Put it back: Escape, then the same click again (menus, accordions); otherwise start over.
           await page.keyboard.press('Escape'); await sleep(500);
@@ -238,6 +242,7 @@ export function compareVisitor(live, copy) {
       // Changes on both, but to something else: the copy's hover ends up looking unlike the live page's, by far more
       // than the two looked unlike before the mouse came.
       const apart = c ? (thumbDiff(v.after, c.after) ?? 0) - (thumbDiff(v.before, c.before) ?? 0) : 0;
+      if (!c || (v.back != null && v.back > 0.1)) continue;  // gone from the page since, or it moves by itself
       if (c && (c.blank || 0) > (v.blank || 0)) { lost['hover-effect-lost'].push({ at: at(k), detail: `${v.text ? `“${v.text.split('\n')[0]}”` : k.split('|')[1]} shows an empty picture under the mouse; the live page shows a second picture` }); continue; }
       // Changes on both, but the copy doesn't go back when the mouse leaves (Archive 07's second product photo stays).
       if (v.changed >= HOVER_REACT && c && v.back != null && c.back != null && v.back < 0.03 && c.back > Math.max(0.06, v.changed / 3)) lost['hover-effect-lost'].push({ at: at(k), detail: `${v.text ? `“${v.text.split('\n')[0]}”` : k.split('|')[1]} doesn\u2019t go back as it was when the mouse leaves, as it does on the live page` });
@@ -245,7 +250,7 @@ export function compareVisitor(live, copy) {
       else if (v.changed >= HOVER_REACT && (!c || c.changed < v.changed / 3)) lost['hover-effect-lost'].push({ at: at(k), detail: `${v.text ? `“${v.text}”` : k.split('|')[1]} changes under the mouse on the live page (${Math.round(v.changed * 100)}%), ${c ? `not in the copy (${Math.round(c.changed * 100)}%)` : 'and isn’t there in the copy'}` });
     } else if (v.kind === 'jump') {
       if (v.moved >= JUMP_MIN && (!c || c.moved < v.moved / 3)) lost['jump-link-broken'].push({ at: at(k), detail: `the link ${v.text ? `“${v.text}”` : ''} moves the live page, not the copy` });
-    } else if (v.changed >= CLICK_REACT && (!c || c.changed < v.changed / 3)) {
+    } else if (v.changed >= CLICK_REACT && (c ? c.changed < v.changed / 3 : v.kind === 'menu' || v.kind === 'play')) {
       if (v.kind === 'play' || (v.kind === 'lightbox' && videoBlocks.has(k.split('|')[1]))) { lost['video-does-not-play'].push({ at: at(k), detail: `a video ${k.split('|')[1]} plays when clicked on the live page, not in the copy` }); continue; }
       lost['click-does-nothing'].push({ at: at(k), detail: `${WHAT[v.kind]}${v.text ? ` (“${v.text}”)` : ''} changes the screen on the live page (${Math.round(v.changed * 100)}%), ${c ? `not in the copy (${Math.round(c.changed * 100)}%)` : 'and isn’t there in the copy'}` });
     }
