@@ -559,20 +559,20 @@ function panel(c, review) {
       .filter((f) => !f.pinned && !HIDDEN.has(f.code) && !/pixels wide|browser window/.test(f.text || ''))
       .map((f) => ({ ...f, text: f.code ? pageMessage(f.code) : f.text }));
     P.innerHTML = `<h2>Look and Feel</h2>
-      <p class="sub">Your Preserve should look and feel like the page you submitted, but won’t contain any other functionality (for example, form submissions, e-commerce checkout, or dynamically generated content).</p>
-      <p class="sub">To report an issue, click <b>${ic('plus', 12)} Issue</b>, drop a pin, and describe the issue.</p>
+      <p class="fgroup">You can flag components that don’t match the look and feel of the live site, and we’ll attempt to address by refining this Preserve.</p>
+      <p class="fgroup"><b>Your review</b>: Flag and describe anything that doesn’t match the look and feel of the live site.</p>
       <p>${pinButton('check', `${ic('plus')} Issue`)}</p>
-      ${fontsToCheck(c).length ? `<p class="note">${cap(count(fontsToCheck(c).length, 'font'))} still ${fontsToCheck(c).length === 1 ? 'needs' : 'need'} a look. <button class="link" data-t2="fonts">Go to Fonts</button></p>` : ''}
+      ${pinsFor(c, 'check').length ? pinList(c, 'check', {}) : ''}
       ${capped ? `<p class="note">We’ve refined this Preserve as far as we can for now. What’s still off is logged, and we’ll let you know when we can do better. You can accept it as it is, or leave it here.</p>`
         : ''}
-      ${found.length || older.length ? `<h3 class="semi">For review: Suspected issues</h3><p class="fine">Our automated quality check compared this Preserve with your site and identified where the Preserve may have deviated from the live site. For each suspected issue, let us know whether it needs to be addressed by refining the Preserve or whether it’s not an issue that needs to be addressed.</p>
+      ${found.length || older.length || gone.length || otherN ? '<p class="fgroup"><b>Our review</b>: Let us know whether issues we identified through an automated quality check should be fixed.</p>' : ''}
+      ${found.length || older.length ? `
         <ol class="pins findings">${found.map((p, i) => `<li class="${p.blockId ? '' : 'nopin'}">${p.blockId ? `<b class="ltr">${letter(i)}</b>` : ''}<span class="pbody">${esc(fText(p))}</span>${cropPair(c, p)}
           <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
       ${otherN ? `<p class="fine"><button class="link" data-l2="${other}">${count(otherN, 'more issue')} on ${other === 'mobile' ? 'Phone' : 'Desktop'} view</button></p>` : ''}
-      <h3 class="semi">Your pins and notes</h3>${pinList(c, 'check', { empty: 'None yet.' })}
       <div class="stack"><button class="btn wide" data-t2="tour">Next: Create Tour</button>
       ${fix && !capped ? `<button class="btn wide secondary" id="refine">Refine Preserve (${plural(fix, 'issue')} to fix)</button>
         <p class="fine">We’ll re-capture the page and focus on the spots you pinned. Check the rest once more before accepting.</p>` : ''}
