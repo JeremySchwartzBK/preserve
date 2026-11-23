@@ -113,7 +113,7 @@ export const store = {
     if (!/^[A-Za-z0-9]{20,80}$/.test(String(key).trim())) return Promise.resolve('That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.');
     db.studio.adobe = { state: 'checking', acceptedToo: db.studio.adobe?.acceptedToo ?? null, families: {}, connectedAt: now() }; emit();
     setTimeout(() => {
-      const fams = {}; for (const c of db.copies) for (const f of c.fonts || []) if (f.holder === 'platform') for (const x of f.faces || [{ family: f.id }]) fams[x.family] = /unnamed/.test(x.family) ? null : 'demo' + x.family.length;
+      const fams = {}; for (const c of db.copies) for (const f of c.fonts || []) if (f.holder === 'platform') for (const x of f.faces || [{ family: f.id }]) fams[x.family] = /unnamed/.test(x.family) ? null : /omnes/i.test(x.family) && /free/.test(key) ? { id: 'demo', css: null, plan: false } : { id: 'demo', css: x.family + '-1' };
       Object.assign(db.studio.adobe, { state: 'ok', families: fams }); emit();
     }, 1500);
     return Promise.resolve(null);

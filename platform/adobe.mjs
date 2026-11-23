@@ -62,7 +62,8 @@ export async function ensureKit(api, known) {
 
 // Add the families the studio's Preserves use that the kit doesn't have yet, then publish. Returns the updated
 // page font name -> { id: Adobe family id, css: its name in our kit's stylesheet } map (null where Adobe has no
-// such family, or the person's plan doesn't include it) and how many were added.
+// such family; plan: false and no css where the person's plan doesn't include it, tried again at each daily check)
+// and how many were added.
 export async function syncFamilies(api, kit, wanted, known = {}) {
   const map = { ...known };
   const have = new Set(((await api.kit(kit))?.families || []).map((f) => f.id));
@@ -72,9 +73,9 @@ export async function syncFamilies(api, kit, wanted, known = {}) {
     const id = typeof map[name] === 'string' ? map[name] : map[name]?.id;
     if (id && !have.has(id)) {
       // Adobe answers 400 "not allowed by your account" for a family the person's plan doesn't include: that one stays
-      // a lookalike (null), the rest still go in.
+      // a lookalike and the Fonts step says why; the rest still go in.
       try { await api.addFamily(kit, id); have.add(id); added++; }
-      catch (e) { if (e.status === 400 && /not allowed/i.test(e.message)) { map[name] = null; notAllowed.push(name); } else throw e; }
+      catch (e) { if (e.status === 400 && /not allowed/i.test(e.message)) notAllowed.push(name); else throw e; }
     }
   }
   if (added) await api.publish(kit);
@@ -83,7 +84,7 @@ export async function syncFamilies(api, kit, wanted, known = {}) {
   const css = new Map(((await api.kit(kit))?.families || []).map((f) => [f.id, f.css_names?.[0] || f.slug]));
   for (const [name, v] of Object.entries(map)) {
     const id = typeof v === 'string' ? v : v?.id;
-    map[name] = id ? { id, css: css.get(id) || null } : null;
+    map[name] = id ? { id, css: css.get(id) || null, ...(notAllowed.includes(name) ? { plan: false } : {}) } : null;
   }
   return { families: map, added, notAllowed };
 }

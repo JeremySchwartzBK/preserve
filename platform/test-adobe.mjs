@@ -39,11 +39,12 @@ function fakeAdobe({ token = 'good', lapsed = false, fontsGone = false } = {}) {
   ok('finds it again instead of making another', (await ensureKit(api, null)) === kit && a.kits.size === 1);
   const r = await syncFamilies(api, kit, ['proxima-nova', 'gopher', 'commuters-sans'], {});
   ok('adds the families Adobe has, with their names in the kit', r.families['proxima-nova']?.id === 'vcsm' && r.families['proxima-nova'].css === 'proxima-nova-1' && r.added === 1);
-  ok('records the one Adobe lacks and the one the plan doesn\'t include', r.families.gopher === null && r.families['commuters-sans'] === null && r.notAllowed.join() === 'commuters-sans');
+  ok('records the one Adobe lacks and the one the plan doesn\'t include', r.families.gopher === null && r.families['commuters-sans']?.plan === false && !r.families['commuters-sans'].css && r.notAllowed.join() === 'commuters-sans');
   ok('then published', a.calls.includes(`POST /api/v1/json/kits/${kit}/publish`));
   const before = a.calls.length;
   const again = await syncFamilies(api, kit, ['proxima-nova', 'gopher', 'commuters-sans'], r.families);
-  ok('nothing new: no lookups, no publish', again.added === 0 && !a.calls.slice(before).some((c) => c.includes('families/') || c.includes('publish')));
+  const later = a.calls.slice(before);
+  ok('nothing new: no lookups, no publish; only the font outside the plan is tried again', again.added === 0 && !later.some((c) => c.startsWith('GET /api/v1/json/families/') || c.includes('publish')) && later.filter((c) => c.includes('/families/')).join() === `POST /api/v1/json/kits/${kit}/families/plan` && again.families['commuters-sans']?.plan === false);
   ok('daily check: ok', (await checkConnection(api, kit, { fetch: a.f })).state === 'ok');
 }
 {

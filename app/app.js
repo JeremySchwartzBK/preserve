@@ -126,7 +126,9 @@ function embedCard(c) {
 // Adobe Fonts API token; Preserves then show Adobe's fonts, loaded from Adobe, with the lookalike behind each one.
 const ADOBE_TOKENS = 'https://typekit.com/account/tokens';   // Adobe's API docs (fonts.adobe.com/docs/api/auth)
 const adobeFaces = (f) => (f.faces?.length ? f.faces.map((x) => x.family) : [f.id]);
-const adobeHas = (f) => { const a = store.adobe?.(); return f.holder === 'platform' && a?.state === 'ok' && adobeFaces(f).some((x) => a.families?.[x]); };
+const adobeHas = (f) => { const a = store.adobe?.(); return f.holder === 'platform' && a?.state === 'ok' && adobeFaces(f).some((x) => a.families?.[x]?.css); };
+// An Adobe font the person's Adobe plan doesn't include (Adobe refused to add it): its row says so (Jeremy, 2026-11-23).
+const adobeNotInPlan = (f) => { const a = store.adobe?.(); return f.holder === 'platform' && a?.state === 'ok' && adobeFaces(f).some((x) => a.families?.[x]?.plan === false); };
 const usesAdobe = (c) => (c.fonts || []).some((f) => f.holder === 'platform');
 function adobeCard(c, { found = false } = {}) {
   const dlg = $('#cdlg');
@@ -679,6 +681,7 @@ function fontRow(c, f) {
   const lookName = esc(f.look || 'a standard font');
   const state = adobeOn ? `Shown from your Adobe Fonts account. If your Adobe subscription ends, your Preserve uses the lookalike, ${lookName}.`
     : f.holder === 'platform' && adobe?.state === 'checking' ? 'Connecting to your Adobe Fonts account…'
+    : adobeNotInPlan(f) ? `Your Adobe plan doesn’t include ${esc(f.name)}, so your Preserve uses a lookalike, ${lookName}.`
     : f.holder === 'platform' && adobe?.state === 'ok' ? `${esc(f.name)} isn’t in Adobe Fonts, so your Preserve uses a lookalike, ${lookName}.`
     : f.holder === 'platform' && adobe ? `We can’t reach your Adobe Fonts account right now, so your Preserve uses a lookalike, ${lookName}. Check your Adobe subscription, or connect again with a new token.`
     : f.checking ? `Checking your file ${esc(f.file)}. Your Preserve uses it as soon as it passes.`
