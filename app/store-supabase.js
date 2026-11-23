@@ -148,6 +148,8 @@ export const store = {
   // Fonts during review: each choice is recorded with who and when, and the viewer swaps the font in (no refinement).
   studioFonts: () => studioFonts.filter((f) => f.state === 'ok').map((f) => ({ id: f.id, name: f.name, file: f.file_name, at: f.created_at })),
   setFont: (id, fid, decision) => act('set_font_choice', { cid: id, fid, choice: decision }),
+  // The rights line beside an upload, recorded with who and when (copy_font_log, schema-fonts.sql certify_fonts).
+  certifyFont: (id, cert) => rpc('certify_fonts', { cid: id, cert }).catch(() => {}),
   async uploadFont(id, fid, file) {
     if (!/\.(woff2|woff|otf|ttf)$/i.test(file.name)) return 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.';
     if (file.size > 5 * 1024 * 1024) return 'That file is too big for a web font. Upload one under 5 MB.';

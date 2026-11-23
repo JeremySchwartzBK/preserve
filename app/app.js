@@ -278,17 +278,14 @@ const DESKTOP_W = 1440, PHONE_W = 390;
 let view = { id: null, layout: innerWidth < 700 ? 'mobile' : 'desktop', tab: null, pinFor: null, frameKey: null, flash: null, missing: [], fontShown: null };
 const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Issues waiting for a refinement: the person's own pins since the last round, plus suspected issues marked "Fix issue".
-// Fonts that need the person's look before accepting (shown only when some do): every row but one already covered by
-// a file saved in "Your fonts". Kept fonts are the ones the Preserve ships as on the site, which accepting certifies.
-// Every font that needs a license asks in the Fonts step (Jeremy, 2026-11-18): a font the owner added to their site
-// is confirmed there ("I have the rights to use it here") or swapped for its lookalike. Until then it stays as on the
-// site, and the confirmation at Accept covers whatever is still unanswered or uploaded.
+// Fonts that need the person's look before accepting (shown only when some do). Every font that needs a license asks
+// in the Fonts step (Jeremy, 2026-11-18): a font the owner added to their site is confirmed there ("I have the rights
+// to use it here") or swapped for its lookalike, and Accept waits for that answer (unanswered, below).
 // Fonts the Fonts step lists: only ones that need a decision (Jeremy, 2026-11-23: no non-questions). Not listed: a font
 // Adobe serves once Adobe Fonts is connected (the lapse fallback is in the help guide and Terms), and a font already
 // covered by a licensed file the studio uploaded earlier (the Preserve simply uses it).
 const fontsShown = (c) => (c.fonts || []).filter((f) => !adobeHas(f) && !(f.covered && !f.decision));
 const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && !adobeHas(f));
-const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? !f.decision || f.decision === 'upload' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
@@ -602,7 +599,7 @@ function panel(c, review) {
       <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="crl">${cr.map((p) => credRow(p, tk)).join('') || `<p class="fine">${tk === 'tool' ? 'No tools yet, such as the website platform or an AI tool you used.' : 'No people yet, such as a photographer, copywriter or agency.'}</p>`}</div>
       <p><button class="btn small secondary" id="addcr">${ic('plus')} ${tk === 'tool' ? 'Tool' : 'Talent'}</button></p>
-      ${review ? `<div class="stack">${certify(c)}<button class="btn wide" id="acc" ${keptFonts(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
+      ${review ? `<div class="stack">${unanswered(c).length ? `<p class="fine">Answer ${unanswered(c).length === 1 ? 'the font' : `the ${count(unanswered(c).length, 'font')}`} in <button class="link" data-t2="fonts">Fonts</button> first.</p>` : ''}<button class="btn wide" id="acc" ${unanswered(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
     P.innerHTML = `${flash}<h2>Share</h2><label>Link <span class="fine">(click the name to change it)</span>
@@ -629,7 +626,6 @@ function panel(c, review) {
   P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, async (v) => { markSaved({ id: p.id }); await store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } }); toast('Tour stop saved'); }); }));
   P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; view.pinFor = null; sendMode(); copyPage(id); }));
   on('#acc', () => accept(id));
-  const cert = P.querySelector('#cert'); if (cert) cert.onchange = () => { P.querySelector('#acc').disabled = !cert.checked; };
   P.querySelectorAll('[data-font]').forEach((b) => (b.onclick = () => store.setFont(id, b.dataset.fid, b.dataset.font)));
   P.querySelectorAll('[data-showfont]').forEach((b) => (b.onclick = () => {
     const f = c.fonts.find((x) => x.id === b.dataset.showfont);
@@ -647,6 +643,7 @@ function panel(c, review) {
     const err = await store.uploadFont(id, fid, file);
     view.fontBusy = null;
     view.fontErr = err ? { fid, text: err } : null;
+    if (!err) { const f = (store.copy(id).fonts || []).find((x) => x.id === fid); store.certifyFont?.(id, { certified: [f?.name || fid], wording: UPLOAD_RIGHTS, file: file.name }); }
     if (!err) toast(store.real ? 'Font uploaded. We’re checking the file now.' : 'Font updated. Your Preserve now uses your file.');
     copyPage(id);
   };
@@ -727,15 +724,14 @@ function fontRow(c, f) {
     <p class="fine">${state}</p>
     <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">${look ? 'On your site' : 'On your site and in your Preserve'}</span>${site}
       ${second}</div>
-    <div class="row wrap">${actions}</div>
+    <div class="row wrap">${actions}</div>${actions.includes('data-upload') ? `<p class="fine">${UPLOAD_RIGHTS}</p>` : ''}
     ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
 }
-// Above Accept: the fonts the Preserve ships as on the site, which the person confirms they may use (F1).
-function certify(c) {
-  const kept = keptFonts(c);
-  if (!kept.length) return '';
-  return `<label class="certify"><input type="checkbox" id="cert"> <span>These fonts stay as on your site: ${esc(kept.map((f) => f.name).join(', '))}. By accepting this Preserve, you confirm you have the right to use them here, on embeds and in exports.</span></label>`;
-}
+// No checkbox above Accept (Jeremy, 2026-11-23): each right is confirmed where it's given, one font at a time, and
+// recorded with who and when: "Use the font (I have the rights)", or the line beside an upload. Accept waits only for
+// fonts the owner uploaded to their site that haven't been answered yet.
+const unanswered = (c) => (c.fonts || []).filter((f) => f.holder === 'user' && !f.decision && !f.covered);
+const UPLOAD_RIGHTS = 'By uploading, you confirm you have the rights to use this font in your Preserves.';
 let lookLoaded = '';
 function loadLookalikes(c) {
   const fams = [...new Set(c.fonts.map((f) => f.look).filter(Boolean))].sort();
@@ -761,8 +757,7 @@ async function accept(id) {
     body: `After you accept, you won’t be able to change the content or structure of this Preserve, but you will still be able to edit its Tour, Talent, and custom link.${fix ? ` This Preserve has ${count(fix, 'issue')} that ${fix === 1 ? 'has' : 'have'} not been refined.` : ''}`,
     ok: 'Accept Preserve', cancel: 'Review Preserve' });
   if (!yes) { view.tab = 'check'; copyPage(id); return; }
-  const kept = keptFonts(store.copy(id));
-  await store.approve(id, kept.length ? { certified: kept.map((f) => f.name), wording: $('#cert')?.parentElement?.textContent.trim() } : null);
+  await store.approve(id, null);
   const c = store.copy(id);
   if (!c || c.status === 'review') return;   // the database said no (the reason was shown)
   view.tab = 'share';

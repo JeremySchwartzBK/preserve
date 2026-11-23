@@ -129,6 +129,7 @@ export const store = {
   },
   // The real check reads the file's name table and compares letter widths with the original; the demo goes by the file
   // name, so a file named after a different font is turned down the same way.
+  certifyFont(id, cert) { const c = this.copy(id); (c.fontLog ||= []).push({ ...cert, by: db.person.email, at: now() }); },
   uploadFont(id, fid, file) {
     const c = this.copy(id), f = c.fonts.find((x) => x.id === fid);
     if (!FONT_FILE.test(file.name)) return 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.';
