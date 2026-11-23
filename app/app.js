@@ -134,7 +134,7 @@ function adobeCard(c, { found = false } = {}) {
   dlg.innerHTML = `<form method="dialog" class="adobe"><h2>Show your Adobe fonts</h2>
     <p class="sub">${names.length ? `Your site uses ${names.length === 1 ? 'an Adobe font' : 'Adobe fonts'}: ${esc(names.join(', '))}. ` : found ? 'This page uses Adobe fonts. ' : ''}If you have Adobe Creative Cloud, connect it once and your Preserves show your Adobe fonts instead of lookalikes.</p>
     <ol class="steps"><li><a href="${ADOBE_TOKENS}" target="_blank" rel="noopener">Open your Adobe Fonts API token page</a> and sign in with your Adobe account.</li>
-      <li>Create a token. Any name works, such as Preserve.</li><li>Copy the token and paste it here.</li></ol>
+      <li>Click “Make me a new API token”.</li><li>Copy the token and paste it here.</li></ol>
     <input id="adkey" autocomplete="off" spellcheck="false" placeholder="Paste your token" aria-label="Adobe Fonts API token">
     <p class="fine bad" id="aderr" aria-live="polite"></p>
     <p class="fine">We use it only to add the fonts your Preserves use to a web project called Preserve in your Adobe account. Adobe serves the fonts. If your Adobe subscription ends, your Preserves switch to lookalikes.</p>
