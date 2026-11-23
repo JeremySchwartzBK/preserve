@@ -503,7 +503,7 @@ function startPin(forWhat) { view.pinFor = view.pinFor === forWhat ? null : forW
 const pinButton = (forWhat, label) => `<button class="btn small ${view.pinFor === forWhat ? '' : 'secondary'}" data-pin="${forWhat}" aria-pressed="${view.pinFor === forWhat}">${label}</button>`;
 const pinList = (c, tab, opts = {}) => {
   const list = pinsFor(c, tab);
-  if (!list.length) return `<p class="sub">${opts.empty}</p>`;
+  if (!list.length) return opts.empty ? `<p class="sub">${opts.empty}</p>` : '';
   return `<ol class="pins ${tab === 'tour' ? 'tour' : ''}">${list.map((p) => `<li>${p.meta?.title ? `<b>${esc(p.meta.title)}</b>` : ''}<span class="pbody">${esc(p.body)}</span>
     <small>${esc([tab === 'tour' ? '' : p.layout, tab === 'check' && c.lastRoundAt && p.at <= c.lastRoundAt && !p.meta?.round_result ? 'earlier round' : '', p.label].filter(Boolean).join(' · '))}</small>
     ${tab === 'check' && p.meta?.round_result ? roundResult(p) + aiNote(p) : ''}
@@ -583,20 +583,20 @@ function panel(c, review) {
       <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>`;
   } else if (view.tab === 'tour') {
     const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
-    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
+    P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="fgroup">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
       ${fix ? `<p class="note">${cap(count(fix, 'issue'))} ${fix === 1 ? 'is' : 'are'} waiting for refinement, but tour stops dropped on the current Preserve will carry over to refined Preserves.</p>` : ''}
       ${lost ? `<p class="note">${cap(count(lost, 'stop'))} no longer ${lost === 1 ? 'lands' : 'land'} on the page. Move ${lost === 1 ? 'it' : 'them'} below.</p>` : ''}
       <p>${pinButton('tour', `${ic('plus')} Add a stop`)}</p>
-      ${pinList(c, 'tour', { empty: 'No stops yet.', edit: true })}
+      ${pinList(c, 'tour', { edit: true })}
       ${review ? '<div class="stack"><button class="btn wide" data-t2="talent">Next: Create Talent</button></div>' : ''}`;
   } else if (view.tab === 'talent') {
     // Two kinds of Talent (Jeremy, 2026-11-18): people (individuals, agencies) and tools (Squarespace, Claude, ...).
     // The toggle picks which list is being edited; entries made before it have no type and count as people.
     const tk = view.talentKind || 'person';
     const cr = pinsFor(c, 'talent').filter((p) => talentKind(p) === tk);
-    P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="sub">The talent behind the site. Visitors see it under “Talent”.</p>
+    P.innerHTML = `${flash}<h2>Talent <span class="opt">optional</span></h2><p class="fgroup">Let visitors know the talent and tools that created this design.</p>
       <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div id="crl">${cr.map((p) => credRow(p, tk)).join('') || `<p class="fine">${tk === 'tool' ? 'No tools yet, such as the website platform or an AI tool you used.' : 'No people yet, such as a photographer, copywriter or agency.'}</p>`}</div>
+      <div id="crl">${cr.map((p) => credRow(p, tk)).join('')}</div>
       <p><button class="btn small secondary" id="addcr">${ic('plus')} ${tk === 'tool' ? 'Tool' : 'Talent'}</button></p>
       ${review ? `<div class="stack">${unanswered(c).length ? `<p class="fine">Answer ${unanswered(c).length === 1 ? 'the font' : `the ${count(unanswered(c).length, 'font')}`} in <button class="link" data-t2="fonts">Fonts</button> first.</p>` : ''}<button class="btn wide" id="acc" ${unanswered(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
@@ -746,7 +746,7 @@ async function accept(id) {
   copyPage(id);
 }
 
-const TALENT_KINDS = [['person', 'People'], ['tool', 'Tools']];
+const TALENT_KINDS = [['person', 'Talent'], ['tool', 'Tools']];  // toggle labels (Jeremy, 2026-11-23: "Talent", not "People")
 const talentKind = (p) => (p.meta?.type === 'tool' ? 'tool' : 'person');
 const credRow = (p, kind) => `<div class="cred" data-cid="${p?.id ?? ''}" data-kind="${kind}"><input placeholder="${kind === 'tool' ? 'Used for, e.g. Website platform' : 'Role, e.g. Photography'}" value="${esc(p?.meta?.role || '')}" data-f="role"><input placeholder="${kind === 'tool' ? 'Name, e.g. Squarespace' : 'Name'}" value="${esc(p?.body || '')}" data-f="name"><input placeholder="Link (optional)" value="${esc(p?.meta?.url || '')}" data-f="url"><button class="link" data-crm>Remove</button></div>`;
 function wireCred(id) {
