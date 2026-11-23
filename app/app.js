@@ -283,6 +283,9 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Every font that needs a license asks in the Fonts step (Jeremy, 2026-11-18): a font the owner added to their site
 // is confirmed there ("I have the rights to use it here") or swapped for its lookalike. Until then it stays as on the
 // site, and the confirmation at Accept covers whatever is still unanswered or uploaded.
+// Fonts the Fonts step lists. Once Adobe Fonts is connected, a font it serves isn't mentioned in review at all
+// (Jeremy, 2026-11-23): the lapse fallback is explained in the help guide and Terms instead.
+const fontsShown = (c) => (c.fonts || []).filter((f) => !adobeHas(f));
 const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && !adobeHas(f));
 const keptFonts = (c) => (c.fonts || []).filter((f) => f.holder === 'user' ? !f.decision || f.decision === 'upload' : f.decision === 'upload' || (!!f.covered && !f.decision));
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
@@ -306,7 +309,7 @@ function copyPage(id) {
     return;
   }
   const review = c.status === 'review';
-  const steps = review ? [...(c.fonts?.length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['talent', 'Talent']] : [];
+  const steps = review ? [...(fontsShown(c).length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['talent', 'Talent']] : [];
   const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
     // Accepted: the captured page can never change again (Jeremy, 2026-10-28), so there is no issue reporting here;
     // only the Tour, Talent, link name and Live/Archived stay editable.
@@ -578,7 +581,7 @@ function panel(c, review) {
     loadLookalikes(c);
     P.innerHTML = `<h2>Fonts</h2>
       <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Here’s what your Preserve uses for each one. Changing a font takes seconds and doesn’t use a refinement.</p>
-      ${c.fonts.map((f) => fontRow(c, f)).join('')}
+      ${fontsShown(c).map((f) => fontRow(c, f)).join('')}
       <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>
       <input type="file" id="fontfile" accept=".woff2,.woff,.otf,.ttf" style="display:none">`;
   } else if (view.tab === 'tour') {
