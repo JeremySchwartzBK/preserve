@@ -144,7 +144,8 @@ export const store = {
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
     if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan’s Preserves are all in use. Archive one or upgrade your plan to make another.` };
-    const known = SEED_COPIES.find((s) => new URL(s.url).hostname === u.hostname);
+    const bare = (h) => h.replace(/^www\./, '');
+    const known = SEED_COPIES.find((s) => bare(new URL(s.url).hostname) === bare(u.hostname));  // the hint says "xanadu.nyc"; the seed is www.xanadu.nyc
     const id = known ? known.id : Math.random().toString(36).slice(2, 10);
     let name = (known?.name || u.hostname.replace(/^www\./, '').split('.')[0]).replace(/[^a-z0-9]+/g, '-');
     while (db.copies.some((c) => c.name === name && c.status !== 'deleted')) name += '-2';
