@@ -287,7 +287,7 @@ const KIND_FOR = { check: 'issue', tour: 'tour' };
 // Adobe serves once Adobe Fonts is connected (the lapse fallback is in the help guide and Terms), and a font already
 // covered by a licensed file the studio uploaded earlier (the Preserve simply uses it).
 const fontsShown = (c) => (c.fonts || []).filter((f) => !adobeHas(f) && !(f.covered && !f.decision));
-const fontsToCheck = (c) => (c.fonts || []).filter((f) => !f.decision && !f.covered && !adobeHas(f));
+const fontsToCheck = (c) => unanswered(c);
 // Pins to fix: new since the last refinement, or still different from the live site after it (a pin is never needed twice).
 const toFix = (c) => pinsFor(c, 'check').filter((p) => !c.lastRoundAt || p.at > c.lastRoundAt || p.meta?.round_result === 'still-different').length + c.pins.filter((p) => p.kind === 'finding' && p.meta.verdict === 'fix').length;
 
@@ -579,11 +579,8 @@ function panel(c, review) {
 </div>`;
   } else if (view.tab === 'fonts') {
     loadLookalikes(c);
-    P.innerHTML = `<h2>Fonts</h2>
-      <p class="sub">Some fonts on your site are licensed, so your Preserve can only use them if you hold the license. Here’s what your Preserve uses for each one. Changing a font takes seconds and doesn’t use a refinement.</p>
-      ${fontsShown(c).map((f) => fontRow(c, f)).join('')}
-      <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>
-      <input type="file" id="fontfile" accept=".woff2,.woff,.otf,.ttf" style="display:none">`;
+    P.innerHTML = `<h2>Fonts</h2>${fontGroups(c)}
+      <div class="stack"><button class="btn wide" data-t2="check">Next: Look and Feel</button></div>`;
   } else if (view.tab === 'tour') {
     const lost = pinsFor(c, 'tour').filter((p) => view.missing.includes(p.blockId)).length;
     P.innerHTML = `${flash}<h2>Tour <span class="opt">optional</span></h2><p class="sub">Create a tour through your Preserve by directing visitors to components that reflect your strategic, creative, or technical work.</p>
@@ -636,19 +633,6 @@ function panel(c, review) {
     showFont(f); copyPage(id);
   }));
   P.querySelectorAll('[data-adobe]').forEach((b) => (b.onclick = () => adobeCard(c)));
-  P.querySelectorAll('[data-upload]').forEach((b) => (b.onclick = () => { const inp = $('#fontfile'); inp.value = ''; inp.dataset.fid = b.dataset.upload; inp.click(); }));
-  const ff = $('#fontfile');
-  if (ff) ff.onchange = async () => {
-    const fid = ff.dataset.fid, file = ff.files[0]; if (!file) return;
-    view.fontBusy = fid; view.fontErr = null; panel(store.copy(id), review);
-    if (!store.real) await new Promise((r) => setTimeout(r, 1200));   // the demo stands in for the real check
-    const err = await store.uploadFont(id, fid, file);
-    view.fontBusy = null;
-    view.fontErr = err ? { fid, text: err } : null;
-    if (!err) { const f = (store.copy(id).fonts || []).find((x) => x.id === fid); store.certifyFont?.(id, { certified: [f?.name || fid], wording: UPLOAD_RIGHTS, file: file.name }); }
-    if (!err) toast(store.real ? 'Font uploaded. We’re checking the file now.' : 'Font updated. Your Preserve now uses your file.');
-    copyPage(id);
-  };
   on('#refine', () => store.refine(id));
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => embedCard(c));
@@ -674,40 +658,32 @@ const lookOf = (f) => {
   return { weight: face?.look.weight || f.fox?.weight || '400', caps: !!(f.fox?.caps || face?.look.caps) };
 };
 const fontDate = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// The Fonts step in groups, each with one line saying what it needs (Jeremy, 2026-11-23); no overview paragraph.
+//   Licensed fonts: ones the owner added to their site; the person confirms their rights or picks the substitute.
+//   Adobe fonts: shown with their lookalike; what the line says depends on the Adobe connection.
+function fontGroups(c) {
+  const shown = fontsShown(c), adobe = store.adobe?.();
+  const lic = shown.filter((f) => f.holder !== 'platform'), ado = shown.filter((f) => f.holder === 'platform');
+  const steps = '<button class="link" data-adobe="1">these steps</button>';
+  const adoLine = !adobe ? `The following fonts require you to connect an Adobe Creative Cloud subscription or will be replaced by a lookalike. To connect your account, follow ${steps}.`
+    : adobe.state === 'checking' ? 'Connecting to your Adobe account. Until it’s connected, these fonts show their lookalike.'
+    : adobe.state === 'ok' ? 'Your Adobe account can’t show these fonts, so they will be replaced by a lookalike.'
+    : `We can’t reach your Adobe account, so these fonts will be replaced by a lookalike. Connect again with a new token by following ${steps}.`;
+  return (lic.length ? `<p class="fgroup"><b>Licensed fonts</b>: Confirm you have the right to use these fonts or select the substitute.</p>${lic.map((f) => fontRow(c, f)).join('')}` : '')
+    + (ado.length ? `<p class="fgroup"><b>Adobe fonts</b>: ${adoLine}</p>${ado.map((f) => fontRow(c, f)).join('')}` : '');
+}
 function fontRow(c, f) {
-  const saved = f.covered && store.studioFonts().find((x) => x.id === f.covered);
-  const adobeOn = adobeHas(f), adobe = store.adobe?.();
-  const look = !adobeOn && (f.decision === 'lookalike' || (f.holder === 'platform' && f.decision !== 'upload'));
-  const lookName = esc(f.look || 'a standard font');
-  const state = adobeOn ? `Shown from your Adobe Fonts account. If your Adobe subscription ends, your Preserve uses the lookalike, ${lookName}.`
-    : f.holder === 'platform' && adobe?.state === 'checking' ? 'Connecting to your Adobe Fonts account…'
-    : adobeNotInPlan(f) ? `Your Adobe plan doesn’t include ${esc(f.name)}, so your Preserve uses a lookalike, ${lookName}.`
-    : f.holder === 'platform' && adobe?.state === 'ok' ? `${esc(f.name)} isn’t in Adobe Fonts, so your Preserve uses a lookalike, ${lookName}.`
-    : f.holder === 'platform' && adobe ? `We can’t reach your Adobe Fonts account right now, so your Preserve uses a lookalike, ${lookName}. Check your Adobe subscription, or connect again with a new token.`
-    : f.checking ? `Checking your file ${esc(f.file)}. Your Preserve uses it as soon as it passes.`
-    : f.decision === 'upload' ? `Using your file ${esc(f.file)}, uploaded ${fontDate(f.uploadedAt)}. It’s saved to Your fonts, so later Preserves use it too.`
-    : saved ? `Needs a license: covered by your upload ${esc(saved.file)} (${fontDate(saved.at)}).`
-    : f.holder === 'platform' ? `${esc(f.name)} comes from Adobe Fonts through Squarespace, so your Preserve uses a lookalike, ${lookName}. If you have Adobe Creative Cloud, connect it to show ${esc(f.name)} itself.`
-    : f.decision === 'lookalike' ? `Your Preserve uses a lookalike, ${lookName}.`
-    : f.decision === 'keep' ? 'You confirmed you have the rights to use this font here, so your Preserve keeps it.'
-    : `You uploaded this font to your site. Use it if you have the rights to use it in this Preserve; otherwise use the substitute, ${lookName}.`;
+  const adobeFont = f.holder === 'platform';
+  const look = adobeFont || f.decision === 'lookalike';
   const chip = (v, t) => `<button class="chip ${f.decision === v ? 'on' : ''}" data-font="${v}" data-fid="${f.id}">${t}</button>`;
-  const actions = adobeOn || (f.holder === 'platform' && adobe?.state === 'checking') ? ''
-    : f.holder === 'platform' && !(adobe?.state === 'ok') && f.decision !== 'upload' && !saved ? `<button class="chip" data-adobe="1">${adobe ? 'Connect again' : 'Connect Adobe Fonts'}</button>${chip('lookalike', 'Keep the lookalike')}`
-    : view.fontBusy === f.id || f.checking ? '<span class="fine"><span class="spin"></span> Checking the file and rebuilding the fonts…</span>'
-    : f.decision === 'upload' || saved ? `<button class="link" data-font="lookalike" data-fid="${f.id}">Use the lookalike instead</button><button class="link" data-upload="${f.id}">Replace the file</button>`
-    : f.holder === 'platform' ? `${chip('lookalike', 'Keep the lookalike')}<button class="chip" data-upload="${f.id}">Upload my licensed file</button>`
-    // Two choices only (Jeremy, 2026-11-18): uploading a different licensed copy was too rare to be worth the confusion.
-    : `${chip('keep', 'Use the font (I have the rights)')}${chip('lookalike', 'Use the substitute')}`;
+  // Fonts whose file was uploaded on this Preserve before uploads were dropped (2026-11-23) keep using it.
+  const actions = adobeFont ? ''
+    : f.decision === 'upload' ? `<span class="fine">Using your file ${esc(f.file)}.</span>${chip('lookalike', 'Use substitute')}`
+    : `${chip('keep', 'I have the rights')}${chip('lookalike', 'Use substitute')}`;
   // "The quick brown fox" in both fonts (Jeremy, 2026-11-16): a picture of it drawn by the live site in the original
   // (capture.mjs foxPicture; Adobe files can't be shipped, pictures can), and the same words set here in the lookalike,
   // same size, weight and style. Preserves captured before that have a picture of the page's own words instead.
   const fam = (n) => `font-family:'${esc(n || '')}',sans-serif`;
-  // The second row is always the lookalike, so there's something to compare (Jeremy, 2026-11-16: two identical
-  // pictures for a font kept as on the site told the person nothing). Labelled "In your Preserve" when it’s what the
-  // Preserve uses, and "Lookalike" when it's the alternative to keeping the font. A font the Preserve draws from the
-  // person's own uploaded file has no second row: that file is the font on their site.
-  const own = f.decision === 'upload' || !!saved;
   let site, alt = null;
   if (f.fox) {
     site = `<img class="fox" src="${esc(f.fox.file)}" alt="${FOX} in ${esc(f.name)}">`;
@@ -721,20 +697,17 @@ function fontRow(c, f) {
     site = f.sample ? `<img src="${esc(f.sample)}" alt="${esc(words)} in ${esc(f.name)}">` : `<span class="fsample">${esc(words)}</span>`;
     if (f.look) alt = `<span class="fsample" style="${fam(f.look)}">${esc(words)}</span>`;
   }
-  // A font kept as on the site says so on its first row, so the lookalike below can't be taken for what viewers see.
-  const second = own || !alt ? '' : `<span class="fl">${look ? 'In your Preserve' : adobeOn ? 'Lookalike, if Adobe stops serving it' : 'Substitute, only if you choose it'}</span>${alt}`;
-  return `<div class="font ${!f.decision && !saved ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
-    <p class="fine">${state}</p>
+  // The second row is always the lookalike, so there's something to compare (Jeremy, 2026-11-16).
+  const second = f.decision === 'upload' || !alt ? '' : `<span class="fl">${look ? `In your Preserve: ${esc(f.look)}` : `Substitute: ${esc(f.look)}`}</span>${alt}`;
+  return `<div class="font ${!adobeFont && !f.decision ? 'todo' : ''}"><div class="row spread"><b>${esc(f.name)}</b><button class="link" data-showfont="${f.id}">${view.fontShown === f.id ? 'Hide on page' : 'Show on page'}</button></div>
     <div class="fsamples ${f.fox ? 'fox' : ''}"><span class="fl">${look ? 'On your site' : 'On your site and in your Preserve'}</span>${site}
       ${second}</div>
-    <div class="row wrap">${actions}</div>${actions.includes('data-upload') ? `<p class="fine">${UPLOAD_RIGHTS}</p>` : ''}
+    ${actions ? `<div class="row wrap">${actions}</div>` : ''}
     ${view.fontErr?.fid === f.id ? `<p class="fine bad">${esc(view.fontErr.text)}</p>` : f.problem ? `<p class="fine bad">${esc(f.problem)}</p>` : ''}</div>`;
 }
 // No checkbox above Accept (Jeremy, 2026-11-23): each right is confirmed where it's given, one font at a time, and
-// recorded with who and when: "Use the font (I have the rights)", or the line beside an upload. Accept waits only for
-// fonts the owner uploaded to their site that haven't been answered yet.
+// recorded with who and when ("I have the rights"). Accept waits only for licensed fonts that haven't been answered.
 const unanswered = (c) => (c.fonts || []).filter((f) => f.holder === 'user' && !f.decision && !f.covered);
-const UPLOAD_RIGHTS = 'By uploading, you confirm you have the rights to use this font in your Preserves.';
 let lookLoaded = '';
 function loadLookalikes(c) {
   const fams = [...new Set(c.fonts.map((f) => f.look).filter(Boolean))].sort();
