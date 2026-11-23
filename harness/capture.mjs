@@ -9,6 +9,7 @@ import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
 import { LISTEN_INIT, recordInteractions } from './interact.mjs';
+import { PARALLAX_SCRIPT } from './build.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -524,7 +525,8 @@ export async function scrollShown(page) {
     let k = 0;
     for (const e of document.body.querySelectorAll('*')) {
       const cs = getComputedStyle(e);
-      if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]')) continue;
+      // Section backgrounds pinned to the window fade in by section (build.mjs SECTION_FADE_SCRIPT), not once past a point.
+      if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]') || e.matches('section.page-section > .section-border')) continue;
       if (e.querySelectorAll('*').length > 20 || e.textContent.trim().length > 40) continue;
       const r = e.getBoundingClientRect();
       if (r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05) continue;
@@ -1323,6 +1325,10 @@ export async function capture(url, outDir) {
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });
+    // Parallax backgrounds framed as the copy frames them (and as live does at the top of the page): the live effect was
+    // swapped for its plain picture above, so without this the reference showed the picture unzoomed and the copy was
+    // counted as different (Frankly's hero, 21% of the first screen, 2026-11-23). Added after the page was saved.
+    if (info.mediaBackgrounds?.[prof]?.parallax) await page.addScriptTag({ content: PARALLAX_SCRIPT.replace(/^<script[^>]*>|<\/script>$/g, '') }).catch(() => {});
     await sleep(300);
     await page.screenshot({ path: path.join(outDir, `ref-${prof}.png`) });
     await page.screenshot({ path: path.join(outDir, `ref-full-${prof}.png`), fullPage: true }).catch(() => {});

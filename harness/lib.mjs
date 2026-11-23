@@ -90,6 +90,9 @@ export const OVERLAY_SELECTORS = [
   '[id^="fbt-ribbon"]',
   '[class*="Friendbuy-ribbon"]',
   '[data-preserve-promo]',
+  // Klaviyo's signup tab on the side of the window (Honeybelle's "Honey Club", 2026-11-23): it only opens the signup
+  // popup, and without the app it was left at the bottom over "Shop now". The popup itself is caught by markPromos.
+  '[class*="kl-teaser"]',
   // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
   ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
