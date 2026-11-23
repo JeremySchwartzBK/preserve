@@ -598,7 +598,7 @@ function panel(c, review) {
       <div class="seg tk">${TALENT_KINDS.map(([k, l]) => `<button data-tk="${k}" class="${k === tk ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="crl">${cr.map((p) => credRow(p, tk)).join('')}</div>
       <p><button class="btn small secondary" id="addcr">${ic('plus')} ${tk === 'tool' ? 'Tool' : 'Talent'}</button></p>
-      ${review ? `<div class="stack">${unanswered(c).length ? `<p class="fine">Answer ${unanswered(c).length === 1 ? 'the font' : `the ${count(unanswered(c).length, 'font')}`} in <button class="link" data-t2="fonts">Fonts</button> first.</p>` : ''}<button class="btn wide" id="acc" ${unanswered(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
+      ${review ? `<div class="stack">${unanswered(c).length ? `<p class="fine">Before you can accept this Preserve, you’ll need to complete the <button class="link" data-t2="fonts">Font</button> review.</p>` : ''}<button class="btn wide" id="acc" ${unanswered(c).length ? 'disabled' : ''}>Accept Preserve</button></div>` : ''}`;
   } else if (view.tab === 'share') {
     const base = store.link({ name: '' }).slice(0, -1);
     P.innerHTML = `${flash}<h2>Share</h2><label>Link <span class="fine">(click the name to change it)</span>
