@@ -12,6 +12,8 @@ import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, useOriginalFont
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
 import { probeBehavior, compareBehavior } from './behavior.mjs';
+import { probeVisitor, compareVisitor } from './visitor.mjs';
+import { inventory } from './inventory.mjs';
 import { probeLayout, compareLayout, LAYOUT_WIDTHS } from './layout.mjs';
 import { policyHeaders } from './policy.mjs';
 
@@ -36,6 +38,18 @@ const BEHAVIOR_CHECK = process.env.PRESERVE_BEHAVIOR_CHECK !== '0';
 // Part-by-part check (layout.mjs): each block's size, place, text wrapping, pictures and embedded widgets against the
 // same block on the live page, at desktop, tablet and phone widths. On by default; PRESERVE_LAYOUT_CHECK=0 turns it off.
 const LAYOUT_CHECK = process.env.PRESERVE_LAYOUT_CHECK !== '0';
+// Visitor check (visitor.mjs; Jeremy, 2026-11-23): what a visitor does, done on both pages: scrolling down slowly,
+// hovering, opening menus and accordions, gallery arrows, pictures that open, video play, jump links; and contact details
+// left showing. On by default; PRESERVE_VISITOR_CHECK=0 turns it off.
+const VISITOR_CHECK = process.env.PRESERVE_VISITOR_CHECK !== '0';
+const VISITOR_TEXT = {
+  'appear-effect-lost': 'something that fades or slides in as you scroll down on the live page just sits there',
+  'hover-effect-lost': 'something that reacts to the mouse on the live page doesn\u2019t',
+  'click-does-nothing': 'something that opens or changes when clicked on the live page does nothing',
+  'jump-link-broken': 'a link that moves to another place on the page doesn\u2019t',
+  'video-does-not-play': 'a video that plays when clicked on the live page shows its still picture',
+  'contact-details-left': 'contact details still show as they are on the live page',
+};
 const LAYOUT_TEXT = {
   'part-size-differs': 'a part of the page is a different size than on the live page',
   'part-moved': 'a part of the page sits in a different place than on the live page',
@@ -78,6 +92,7 @@ async function liveSelfDiff(url, siteDir) {
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
         out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
         if (BEHAVIOR_CHECK) out[prof].behavior = await probeBehavior(browser, url, prof); // and what reacts to hover, drag, scroll
+        if (VISITOR_CHECK) out[prof].visitor = await probeVisitor(browser, url, prof); // and what a visitor's actions do
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
     }
@@ -272,6 +287,8 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
   const base = `http://127.0.0.1:${srv.address().port}`;
   info.layouts = {};
   mark('live-page');
+  // Which effects the page uses, from its code (inventory.mjs): recorded with the verdict, to learn which ones copy well.
+  try { info.inventory = inventory(fs.readFileSync(path.join(siteDir, 'server.html'), 'utf8')); } catch {}
   info.liveSelfDiff = await liveSelfDiff(url, siteDir);
   try {
     for (const prof of ['desktop', 'mobile']) {
@@ -346,6 +363,22 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
           if (!list.length) continue;
           layoutSpots[code] = list.slice(0, 3).map((x) => x.at);
           fail(code, L(`${list.length > 1 ? list.length + ' places: ' : ''}${BEHAVIOR_TEXT[code]} (${list.slice(0, 3).map((x) => x.detail).join('; ')})`));
+        }
+      }
+      if (VISITOR_CHECK) {
+        mark(`${prof}-visitor`);
+        const copyV = await withBrowser((b) => probeVisitor(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+        const liveV = info.liveSelfDiff[prof]?.visitor;
+        if (liveV?.error) warnings.push(L(`visitor check on the live page: ${liveV.error}`));
+        if (copyV.error) warnings.push(L(`visitor check on the copy: ${copyV.error}`));
+        // Kept without the hover thumbnails, which are only for comparing.
+        const slim = (v) => v && { ...v, act: Object.fromEntries(Object.entries(v.act || {}).map(([k, a]) => [k, { kind: a.kind, changed: a.changed, moved: a.moved, back: a.back, blank: a.blank }])) };
+        info.visitor = { ...(info.visitor || {}), [prof]: { live: slim(liveV), copy: slim(copyV) } };
+        for (const [code, list] of Object.entries(compareVisitor(liveV, copyV))) {
+          if (!list.length || (code === 'contact-details-left' && prof === 'mobile' && reasons.some((r) => r.code === code))) continue;
+          layoutSpots[code] = list.filter((x) => x.at).slice(0, 3).map((x) => x.at);
+          // Videos that only show their still are a known limitation (1): a note, not a hold.
+          fail(code, L(`${list.length > 1 ? list.length + ' places: ' : ''}${VISITOR_TEXT[code]} (${list.slice(0, 3).map((x) => x.detail).join('; ')})`), code === 'video-does-not-play' ? 1 : null);
         }
       }
       if (c.pageErrors) warnings.push(L(`${c.pageErrors} script errors: ${c.errorSamples.join(' | ').slice(0, 200)}`));
@@ -483,7 +516,8 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
   for (let i = 0; i + 1 < marks.length; i++) info.timings[marks[i][0]] = (info.timings[marks[i][0]] || 0) + Math.round((marks[i + 1][1] - marks[i][1]) / 1000);
   console.error(`  check timings (s): ${Object.entries(info.timings).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   const result = reasons.length ? 'fail' : notes.length ? 'ship-with-note' : 'pass';
-  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, timings: info.timings, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(info.behavior ? { behavior: info.behavior } : {}), ...(info.layoutParts ? { layoutParts: info.layoutParts } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
+  for (const p of Object.values(info.liveSelfDiff || {})) if (p && typeof p === 'object') delete p.visitor;  // kept slim in info.visitor
+  const verdict = { result, reasons, notes, warnings, info: { detected: info.detected, timings: info.timings, liveSelfDiff: info.liveSelfDiff, ...(info.loadTime ? { loadTime: info.loadTime } : {}), ...(info.resize ? { resize: info.resize } : {}), ...(info.ownCss ? { ownCss: info.ownCss } : {}), ...(info.fonts ? { fonts: info.fonts } : {}), ...(info.motion ? { motion: info.motion } : {}), ...(info.behavior ? { behavior: info.behavior } : {}), ...(info.visitor ? { visitor: info.visitor } : {}), ...(info.inventory ? { inventory: info.inventory } : {}), ...(info.layoutParts ? { layoutParts: info.layoutParts } : {}), ...(steadyReport ? { steady: { frozen: steadyReport.frozen } } : {}), ...(info.pins ? { pins: info.pins } : {}), layouts: Object.fromEntries(Object.entries(info.layouts).map(([k, c]) => [k, { diffFirstScreen: c.diffFirstScreen, diffFullPage: c.diffFullPage, stuckInvisible: c.stuckInvisible, stuckSamples: c.stuckSamples, replicaProbe: c.replicaProbe, brokenImages: c.brokenImages, blankImages: c.blankImages, mobileMenu: c.mobileMenu, dropdown: c.dropdown, gallery: c.gallery, galleries: c.galleries, replicaNotice: c.replicaNotice, pageErrors: c.pageErrors, externalRequests: c.externalRequests }])) } };
   fs.writeFileSync(path.join(siteDir, 'verdict.json'), JSON.stringify(verdict, null, 1));
   return verdict;
 }
