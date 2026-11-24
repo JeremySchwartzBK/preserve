@@ -206,6 +206,7 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .font .spin{display:inline-block;width:12px;height:12px;border-width:2px;border-color:var(--line);border-top-color:var(--accent);vertical-align:-1px;margin-right:4px}
 .pins small.ok{display:block;color:var(--ok)}.pins small.warn{display:block}
+.pins small.fnote{display:block;margin-top:4px;color:var(--sub,#666)}
 /* Phones and tablets. iOS zooms the page when a field under 16px gets focus, and the page stays zoomed afterwards,
    which also pushes the top bar off both edges. Every typed field is 16px on touch screens and narrow windows. */
 @media (pointer:coarse),(max-width:860px){input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,select{font-size:16px!important}}

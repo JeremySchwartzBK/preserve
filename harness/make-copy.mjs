@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runGate } from './gate.mjs';
 import { loadPins } from './pins.mjs';
-import { aiEnabled, triagePins } from './ai-pins.mjs';
+import { triagePins } from './ai-pins.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -116,10 +116,11 @@ function mergeVerdicts(vs) {
 let verdict;
 try {
   for (const p of pages) { verdict = await checkUrl(p); if (verdict) break; }
-  // A refinement with AI turned on: a model picks a fix for each of the person's pins first (ai-pins.mjs); capture and
-  // the quality check then read the picks from the same pins file.
-  if (!verdict && aiEnabled() && process.env.PRESERVE_VIEW_BASE && loadPins().length) {
-    const picked = await step('read-pins', () => triagePins(loadPins(), { liveUrl: url, preserveBase: process.env.PRESERVE_VIEW_BASE, dir: path.join(siteDir, 'pin-evidence') }));
+  // A refinement: each confirmed issue gets a targeted, untried fix first (fix-menu.mjs, ai-pins.mjs; with AI on, a model
+  // picks among several and reads the person's own pins); capture and the quality check then read the picks from the
+  // same pins file.
+  if (!verdict && loadPins().length) {
+    const picked = await step('read-pins', () => triagePins(loadPins(), { liveUrl: url, preserveBase: process.env.PRESERVE_VIEW_BASE || '', dir: path.join(siteDir, 'pin-evidence') }));
     const f = path.join(siteDir, 'pins-picked.json');
     fs.writeFileSync(f, JSON.stringify(picked, null, 1));
     process.env.PRESERVE_PINS = f;

@@ -8,6 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
+import { MOVE_FAMILY, codeOf } from './fix-menu.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
@@ -453,6 +454,20 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
   for (const [n, what] of Object.entries(info.detected)) {
     if (NOTE[n]) notes.push({ limitation: +n, text: NOTE[n], detail: what });
     else warnings.push(`known limitation #${n} (ships): ${what}`);
+  }
+
+  // A confirmed movement issue (a drag, a timer, dots) is rechecked by this round's own movement tests, which tried the
+  // movement on the live page and the copy, not by comparing pictures: a drag doesn't show in a still picture (Jeremy,
+  // 2026-11-24: the maria dubin carousel read "looks fixed" while it still didn't drag). Still there when any code of the
+  // same family is reported on the same part this round, or on no part at all.
+  if (info.pins) {
+    const found = [...reasons, ...notes].filter((r) => MOVE_FAMILY[r.code]);
+    info.pins = info.pins.map((p) => {
+      const fam = MOVE_FAMILY[codeOf(p)];
+      if (!fam) return p;
+      const still = found.some((r) => MOVE_FAMILY[r.code] === fam && (!r.spots?.length || r.spots.some((x) => x.blockId === p.block_id)));
+      return { ...p, result: still ? 'still-different' : 'looks-fixed', how: 'tried-movement' };
+    });
   }
 
   mark('end');
