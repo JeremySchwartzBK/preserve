@@ -26,7 +26,7 @@ async function refresh() {
   const [{ data: person }, { data: st }, { data: cs }, { data: nt }, { data: sf }, { data: ad }] = await Promise.all([
     sb.from('person').select('*').eq('id', uid).maybeSingle(),
     sb.from('studio').select('*').limit(1).maybeSingle(),
-    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at,started_at,tries,code:verdict->reasons->0->>code), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
+    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at,started_at), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
     sb.from('notification').select('*').order('created_at', { ascending: false }).limit(30),
     sb.from('studio_font').select('id,font_key,name,file_name,asset,state,problem,created_at').order('created_at', { ascending: false }),
     // The Adobe Fonts connection (schema-adobe.sql): whether it works, never the key.
@@ -68,7 +68,7 @@ function shape(r) {
     notes: (last?.notes || []).map((f) => f.text || f),
     pins: (r.copy_pin || []).filter((p) => !p.resolved_at && (p.kind !== 'finding' || r.status === 'review')).sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at)).map((p) => ({ id: p.id, kind: p.kind, body: p.body, blockId: p.block_id, x: p.x, y: p.y, layout: p.layout, label: p.meta?.label, meta: p.meta || {}, at: p.created_at })),
     // The job being made now (or the last one), for the progress bar and time estimate on the dashboard (app.js eta).
-    job: job ? { state: job.state, step: job.step, attempt: job.attempt, tries: job.tries || 0, queuedAt: job.queued_at, startedAt: job.started_at } : null,
+    job: job ? { state: job.state, step: job.step, attempt: job.attempt, tries: 0, queuedAt: job.queued_at, startedAt: job.started_at } : null,
     rounds: Math.max(0, jobs.length - 1), // When the last round that went through started. A failed or cancelled job doesn't count, so pins sent with it are
     // still waiting and the Refine button stays (Xanadu, 2026-11-24).
     lastRoundAt: jobs.filter((j) => j.state !== 'failed').map((j) => j.queued_at).sort().at(-1) || null,
