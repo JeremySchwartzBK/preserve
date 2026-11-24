@@ -3,20 +3,28 @@
 // answers, isn't behind a password, and is on Squarespace. When it can't tell in time it says nothing, and the copy's own
 // first step still checks.
 
-// Same patterns as harness/make-copy.mjs checkUrl; keep the two in step.
+// Platforms we cover, and how a page shows it's built on one (the same signs as harness/make-copy.mjs checkUrl; keep
+// the two in step). No platform is named to the person (Jeremy, 2026-11-24), so adding one is a line here and there.
+export const PLATFORM_SIGNS = {
+  squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i,
+  shopify: /cdn\.shopify\.com|Shopify\.theme|shopify-features/i,
+};
+export const COVERED = ['squarespace'];
+export const platformsSeen = (html) => Object.keys(PLATFORM_SIGNS).filter((k) => PLATFORM_SIGNS[k].test(html));
+
 export function pageProblem(status, html, url) {
-  const squarespace = /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html);
+  const covered = platformsSeen(html).some((k) => COVERED.includes(k));
   const passwordPage = /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html);
   // An address with ?password= is opened with the password during the copy; this check can't, so it lets it through.
   if (passwordPage) return /[?&]password=/.test(url) ? null : 'password-protected';
   if (status >= 400) return 'page-unreachable';
-  if (!squarespace) return 'not-squarespace';
+  if (!covered) return 'not-supported';
   return null;
 }
 
 // What the person reads (the same words as platform/runner.mjs FAILED).
 export const PROBLEM_TEXT = {
-  'not-squarespace': 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.',
+  'not-supported': 'We can’t preserve this site yet. We’ll let you know when we’ve expanded coverage to this site.',
   'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
   'password-protected': 'This page is password protected, so we couldn’t preserve it.',
 };

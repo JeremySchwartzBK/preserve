@@ -65,18 +65,26 @@ async function step(name, fn) {
 const pages = [{ path: '', url, siteDir, stage }];
 job.pages = pages.map((p) => ({ path: p.path, url: p.url }));
 
-// 1. Is this a page we can copy at all? (v1: Squarespace only) A reason not to is returned as a failed verdict.
+// 1. Is this a page we can copy at all? A reason not to is returned as a failed verdict. Which platforms we cover is a
+// list (Jeremy, 2026-11-24: the check and its wording name no platform, so more can be added): Squarespace today.
+// platform/host/src/page-check.js runs the same test the moment the address is submitted; keep the two in step.
+const PLATFORM_SIGNS = {
+  squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i,
+  shopify: /cdn\.shopify\.com|Shopify\.theme|shopify-features/i,
+};
+// Prototype (not for production): PRESERVE_PLATFORMS=shopify adds Shopify to the covered list.
+const COVERED = ['squarespace', ...(process.env.PRESERVE_PLATFORMS || '').split(',').filter((x) => PLATFORM_SIGNS[x])];
 async function checkUrl(p) {
   const pre = await step('check-url', async () => {
     const r = await fetch(p.url, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(30000) });
     const html = await r.text();
-    return { status: r.status, finalUrl: r.url, squarespace: /<!-- This is Squarespace\. -->|static1\.squarespace\.com|assets\.squarespace\.com|Static\.SQUARESPACE_CONTEXT/i.test(html), shopify: /cdn\.shopify\.com|Shopify\.theme|shopify-features/i.test(html), passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
+    const seen = Object.keys(PLATFORM_SIGNS).filter((k) => PLATFORM_SIGNS[k].test(html));
+    return { status: r.status, finalUrl: r.url, seen, platform: COVERED.find((k) => seen.includes(k)) || null, passwordPage: /sqs-slide-container|squarespace-locked|lock-screen|password-page/i.test(html) && !/<main|<article/i.test(html) };
   });
   if (p.path === '') job.preflight = pre;
-  // Prototype (not for production): PRESERVE_PLATFORMS=shopify lets Shopify pages through the Squarespace-only check.
-  if (pre.shopify && !pre.squarespace && (process.env.PRESERVE_PLATFORMS || '').split(',').includes('shopify')) { pre.squarespace = true; pre.platform = 'shopify'; process.env.PRESERVE_PLATFORM = 'shopify'; }
-  // A Squarespace lock screen answers HTTP 401 with the password form, so name the lock before the status code.
-  if (pre.status >= 400 || !pre.squarespace || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.passwordPage ? 'password-protected' : pre.status >= 400 ? 'page-unreachable' : 'not-squarespace', limitation: pre.squarespace ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}` }], notes: [], warnings: [] };
+  if (pre.platform && pre.platform !== 'squarespace') process.env.PRESERVE_PLATFORM = pre.platform;
+  // A lock screen answers HTTP 401 with the password form, so name the lock before the status code.
+  if (pre.status >= 400 || !pre.platform || pre.passwordPage) return { result: 'fail', reasons: [{ code: pre.passwordPage ? 'password-protected' : pre.status >= 400 ? 'page-unreachable' : 'not-supported', limitation: pre.platform ? null : 13, detail: `HTTP ${pre.status} ${pre.finalUrl}${pre.seen.length ? ` (seen: ${pre.seen.join(', ')})` : ''}` }], notes: [], warnings: [] };
   return null;
 }
 
@@ -147,7 +155,7 @@ job.finishedAt = new Date().toISOString();
 job.minutes = +((Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 60e3).toFixed(1);
 // Jeremy (2026-10-15): a copy that fails the check still goes to the user for review, with the check's findings shown
 // as "we noticed" items, and they may keep it. Only a page we couldn't copy at all ends the job.
-const HARD = ['not-squarespace', 'page-unreachable', 'password-protected', 'job-error', 'copy-did-not-load'];
+const HARD = ['not-supported', 'not-squarespace', 'page-unreachable', 'password-protected', 'job-error', 'copy-did-not-load'];
 const hard = verdict.result === 'fail' && verdict.reasons.some((r) => HARD.includes(r.code));
 if (verdict.result === 'fail') fs.appendFileSync(path.join(WORK, 'gaps.jsonl'), JSON.stringify({ at: new Date().toISOString(), id, url, reasons: verdict.reasons }) + '\n');
 if (hard) {
