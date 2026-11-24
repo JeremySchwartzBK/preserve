@@ -23,7 +23,7 @@ import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
-import { spotMessage, pageMessage, HIDDEN } from '../app/review-messages.js';
+import { spotMessage, pageMessage, groupMessage, MOVES, HIDDEN } from '../app/review-messages.js';
 import { adobe, ensureKit, syncFamilies, checkConnection } from './adobe.mjs';
 
 if (!process.env.NODE_USE_ENV_PROXY) {
@@ -249,8 +249,16 @@ async function main() {
     // They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
     const pageHtml = Object.fromEntries(['desktop', 'mobile'].map((l) => { try { return [l, fs.readFileSync(path.join(dir, `${l}.html`), 'utf8')]; } catch { return [l, '']; } }));
-    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }))
-      .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
+    let findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }));
+    // Everything about how one slideshow moves is one issue with one marker, placed on the part of it that shows
+    // (Jeremy, 2026-11-23). Other kinds of finding on it (sizes, images) stay their own.
+    { const groups = new Map(), rest = [];
+      for (const p of findingPins) { const k = p.comp?.key && MOVES[p.code] ? p.layout + '|' + p.comp.key : null; if (!k) { rest.push(p); continue; } if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+      for (const list of groups.values()) {
+        const codes = [...new Set(list.map((p) => p.code))], at = list.find((p) => p.comp.at)?.comp.at || list[0];
+        rest.push({ ...list[0], blockId: at.blockId, x: at.x, y: at.y, pageY: at.pageY ?? list[0].pageY, code: codes[0], codes, noun: 'slideshow', text: groupMessage(codes) });
+      }
+      findingPins = rest.sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0)); }
     // What the check couldn't place on the page is answered like any other suspected issue (Jeremy, 2026-11-21: all
     // issues under Suspected issues): a pin with no block and no layout, which the app lists in both views, unlettered.
     for (const r of shown) if (!r.spots?.length) findingPins.push({ blockId: null, layout: null, code: r.code, text: pageMessage(r.code) });
@@ -270,18 +278,8 @@ async function main() {
       if (here) p.verdict = here.verdict;
       else if (last && fine(last.verdict)) p.verdict = last.verdict;
     }
-    // The "Your site" and "Preserve" pictures for each finding (finding-crops.mjs), kept with this version and shown
-    // in review through the viewer (findings/ route, owner's signed link only). Missing pictures never stop a copy.
-    try {
-      const cropDir = path.join(work, j.copy_id, 'finding-crops'), pinsFile = path.join(work, j.copy_id, 'finding-pins.json');
-      fs.rmSync(cropDir, { recursive: true, force: true });
-      fs.writeFileSync(pinsFile, JSON.stringify(findingPins.map((p, i) => ({ i, layout: p.layout, blockId: p.blockId, pageY: p.pageY, firstScreen: p.code === 'first-screen-differs' }))));
-      const { stdout } = await promisify(execFile)('node', ['finding-crops.mjs', path.join(work, j.copy_id), dir, j.url, pinsFile, cropDir], { cwd: HARNESS, timeout: 300e3, env: jobEnv() });
-      for (const i of JSON.parse(stdout.slice(stdout.indexOf('[')))) {
-        for (const w of ['site', 'preserve']) await store.put(`copies/${j.copy_id}/v${next}/p/${j.page_id}/findings/${i}-${w}.webp`, fs.readFileSync(path.join(cropDir, `${i}-${w}.webp`)), 'image/webp');
-        findingPins[i].crop = `v${next}/${i}`;
-      }
-    } catch (e) { log('finding pictures not made', j.copy_id, e.message.slice(0, 200)); }
+    // No "Your site" / "Preserve" pictures any more: the review relies on the markers and a short description
+    // (Jeremy, 2026-11-23). finding-crops.mjs stays in the harness, unused.
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
     const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
@@ -296,7 +294,7 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);

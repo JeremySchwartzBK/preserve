@@ -93,8 +93,20 @@ export const ANCHOR = () => {
     const mid = (a1, a2, b1, b2) => { const lo = Math.max(a1, b1), hi = Math.min(a2, b2); return hi > lo ? (lo + hi) / 2 : (a1 + a2) / 2; };
     const cx = px ?? mid(er.left, er.right, r.left, r.right), cy = py ?? mid(er.top, er.bottom, r.top, r.bottom);
     const f = (v) => +Math.min(1, Math.max(0, v)).toFixed(3);
-    return { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
+    const out = { blockId: id, x: f((cx - r.left) / (r.width || 1)), y: f((cy - r.top) / (r.height || 1)), pageY: Math.round(cy + scrollY), label: (b.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
+    // The slideshow or gallery it belongs to, if any (Jeremy, 2026-11-23: five findings on one hero slideshow are one
+    // issue). comp.key names the slideshow on this page; comp.at is where its marker goes: the middle of what shows of
+    // it, so a slide parked off to the side never holds the marker.
+    const g = e && e.closest && e.closest(window.__pvCompSel);
+    if (g && !(px != null)) {
+      const gr = g.getBoundingClientRect(), mx = Math.min(innerWidth - 4, Math.max(4, gr.left + gr.width / 2)), my = Math.min(innerHeight - 4, Math.max(4, gr.top + Math.min(gr.height, innerHeight) / 2));
+      const hit = gr.top < innerHeight && gr.bottom > 0 ? document.elementFromPoint(mx, my) : null;
+      const at = hit && g.contains(hit) && hit !== e ? window.__preserveAnchor(hit, mx, my) : null;
+      out.comp = { key: 'g' + Math.round(gr.top + scrollY) + ':' + Math.round(gr.height), at: at ? { blockId: at.blockId, x: at.x, y: at.y, pageY: at.pageY } : null };
+    }
+    return out;
   };
+  window.__pvCompSel = '.swiper, [data-pv-gal], [data-pv-swiper], .gallery-fullscreen-slideshow, .gallery-slideshow, .gallery-reel, .user-items-list-carousel, .user-items-list-banner-slideshow, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .flickity-enabled, .slick-slider, .splide, .glide';
 };
 
 const shotHash = async (loc) => { try { const b = await loc.screenshot({ timeout: 3000 }); return b.toString('base64').length + ':' + b.subarray(b.length / 2, b.length / 2 + 64).toString('hex'); } catch { return null; } };
@@ -104,6 +116,8 @@ const shotHash = async (loc) => { try { const b = await loc.screenshot({ timeout
 // does it move by itself (watched for a few seconds once it holds still), does its "next" arrow move it, and does every slide it shows draw
 // its picture. Galleries are keyed by block id so gate.mjs can hold the copy's to the live page's.
 const SETTLE_MS = 5000, WATCH_MS = 7000, MAX_GALLERIES = 6;
+// A slideshow's dots (Swiper, Squarespace's fullscreen slideshow and list sections, and generic names).
+const DOT_SEL = '.swiper-pagination-bullet, .gallery-fullscreen-slideshow-bullet, .user-items-list-banner-slideshow__nav-button, .gallery-slideshow-bullet, .slick-dots button, .flickity-page-dot, .glide__bullet, .splide__pagination__page, button[aria-label^="Go to slide" i], button[aria-label^="slide " i]';
 const sha = (b) => crypto.createHash('sha1').update(b).digest('hex');
 
 export async function probeGalleries(browser, url, profileName, { isCopy = false } = {}) {
@@ -201,7 +215,42 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
         const h1 = await state(g.i);
         if (h1 != null && h1 !== h0) { r.autoplay = true; break; }
       }
+      if (r.autoplay) {
+        const p0 = await shot(g.i); let seen = false;
+        for (let t = 0; t < WATCH_MS + SETTLE_MS && p0; t += 1000) { await sleep(1000); const p1 = await shot(g.i); if (p1 && p1 !== p0) { seen = true; break; } }
+        if (p0 && !seen) { r.autoplay = false; r.stateOnly = true; }
+      }
       if (r.autoplay) { await sleep(1200); r.blankSlides = Math.max(r.blankSlides, await blank(g.i)); }
+      // Its dots: a dot other than the current one must change the picture (right after a step, like the arrow below).
+      const dot = await page.evaluate((i) => {
+        const g = document.querySelector(`[data-pv-g="${i}"]`); if (!g) return null;
+        const block = g.closest('[id^="block-"],.sqs-block,.ps-block,[data-block-id],section[data-section-id]') || g;
+        const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.top >= 0 && r.bottom <= innerHeight && getComputedStyle(e).visibility !== 'hidden'; };
+        const all = [...new Set([...g.querySelectorAll(DOT_SEL), ...block.querySelectorAll(DOT_SEL)])].filter(shown);
+        if (all.length < 2) return null;
+        const on = (e) => /active|current|selected/i.test(e.className + ' ' + (e.getAttribute('aria-current') || '') + (e.getAttribute('aria-selected') === 'true' ? ' selected' : ''));
+        const pick = all.find((e, k) => k > 0 && !on(e)) || all.find((e) => !on(e)) || all[all.length - 1];
+        const r = pick.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, at: window.__preserveAnchor(pick) };
+      }, g.i).catch(() => null);
+      r.dots = 'n/a';
+      if (dot) {
+        const before = await shot(g.i);
+        await page.mouse.click(dot.x, dot.y); await sleep(1200); await page.mouse.move(0, 0); await sleep(200);
+        const after = await shot(g.i);
+        r.dots = !before || !after ? 'unknown' : before !== after ? 'pass' : 'fail'; r.dot = dot.at;
+      }
+      // Dragging it sideways (mouse; phones swipe the same way): the picture must change.
+      {
+        const box = await page.evaluate((i) => { const r = document.querySelector(`[data-pv-g="${i}"]`)?.getBoundingClientRect(); return r && r.width > 200 ? { x: r.left + r.width / 2, y: Math.max(20, Math.min(innerHeight - 20, r.top + r.height / 2)), w: Math.min(r.width, innerWidth) } : null; }, g.i);
+        r.drag = 'n/a';
+        if (box) {
+          const before = await shot(g.i);
+          await page.mouse.move(box.x + box.w * 0.2, box.y); await page.mouse.down(); await page.mouse.move(box.x - box.w * 0.2, box.y, { steps: 12 }); await page.mouse.up();
+          await sleep(1200); await page.mouse.move(0, 0); await sleep(200);
+          const after = await shot(g.i);
+          r.drag = !before || !after ? 'unknown' : before !== after ? 'pass' : 'fail';
+        }
+      }
       // Its arrow: right after an autoplay step (or any time, if it is still), so the next step can't be mistaken for it.
       if (g.arrow) {
         const before = await shot(g.i);
@@ -435,6 +484,23 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
       out.dropdown = opened ? 'pass' : await page.evaluate(() => { const c = document.querySelector('.header-nav-item--folder:hover .header-nav-folder-content, .header-nav-folder-content'); if (!c) return 'fail'; const s = getComputedStyle(c); return s.visibility !== 'hidden' && +s.opacity > 0.5 && c.getBoundingClientRect().height > 10 ? 'pass' : 'fail'; });
       if (out.dropdown === 'fail') spot('dropdown-broken', [await folder.evaluate((e) => window.__preserveAnchor(e)).catch(() => null)].filter(Boolean));
     } else out.dropdown = 'n/a';
+  }
+
+  if (profileName === 'desktop') {
+    out.pointer = 'n/a';
+    for (const [x, y] of [0.5, 0.3, 0.7].map((f, k) => [Math.round(prof.context.viewport.width * f), [450, 300, 600][k]])) {
+      await page.mouse.move(x, y, { steps: 3 }); await sleep(250);
+      if ((await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? getComputedStyle(e).cursor : ''; }, [x, y])) !== 'none') continue;
+      const look = () => page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const s = getComputedStyle(e); if (s.pointerEvents !== 'none' || !/fixed|absolute/.test(s.position) || s.visibility === 'hidden' || s.display === 'none' || +s.opacity < 0.1) return false; const r = e.getBoundingClientRect(); return r.width > 2 && r.width < 200 && r.height > 2 && r.height < 200; }).map((e) => { const r = e.getBoundingClientRect(); return [r.left, r.top]; }));
+      const a = await look();
+      await page.mouse.move(x + 60, y + 40, { steps: 6 }); await sleep(600);
+      const b = await look();
+      const follows = b.some(([bx, by]) => a.some(([ax, ay]) => Math.abs(bx - ax - 60) < 20 && Math.abs(by - ay - 40) < 20));
+      out.pointer = follows ? 'pass' : 'fail';
+      if (!follows) spot('pointer-missing', [await page.evaluate(([x, y]) => window.__preserveAnchor(document.elementFromPoint(x, y)), [x + 60, y + 40]).catch(() => null)].filter(Boolean));
+      break;
+    }
+    await page.mouse.move(0, 0);
   }
 
   // Galleries / carousels / slideshows: see probeGalleries. out.gallery sums them up for older readers.
