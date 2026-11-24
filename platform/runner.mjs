@@ -25,6 +25,13 @@ import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
 import { spotMessage, pageMessage, groupMessage, MOVES, HIDDEN } from '../app/review-messages.js';
 import { adobe, ensureKit, syncFamilies, checkConnection } from './adobe.mjs';
+import { MOVE_FAMILY, codeOf } from '../harness/fix-menu.mjs';
+
+// Our findings and the person's pins come back each round; a fix tried on one in an earlier round is never tried on it
+// again (fix-menu.mjs). A finding is the same issue as an earlier one on the same part when its kind is the same, or of
+// the same movement family (a drag found by two different tests).
+const sameKind = (a, b) => a === b || (!!MOVE_FAMILY[a] && MOVE_FAMILY[a] === MOVE_FAMILY[b]);
+const triedFor = (rows, code, blockId) => [...new Set(rows.filter((r) => r.block_id === blockId && sameKind(r.code, code)).flatMap((r) => r.tried || []))];
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -182,7 +189,18 @@ async function main() {
     fs.mkdirSync(work, { recursive: true });
     const notesFile = path.join(work, `${j.copy_id}.user-notes.json`);
     fs.rmSync(notesFile, { force: true });
-    if (j.user_context?.length) fs.writeFileSync(notesFile, JSON.stringify(j.user_context, null, 1));
+    if (j.user_context?.length) {
+      // What was already tried on each pin in earlier rounds, so this round tries something else.
+      const rows = await sql(`select kind, block_id, meta->>'code' as code, created_at, coalesce(meta->'tried', '[]'::jsonb) as tried from copy_pin
+        where copy_id = ${lit(j.copy_id)} and kind in ('finding', 'issue')`).catch(() => []);
+      const pins = j.user_context.map((p) => {
+        const code = codeOf(p);
+        const tried = code ? triedFor(rows.filter((r) => r.kind === 'finding'), code, p.block_id)
+          : [...new Set(rows.filter((r) => r.kind === 'issue' && r.block_id === p.block_id && +new Date(r.created_at) === +new Date(p.at)).flatMap((r) => r.tried || []))];
+        return tried.length ? { ...p, tried } : p;
+      });
+      fs.writeFileSync(notesFile, JSON.stringify(pins, null, 1));
+    }
     const jobFile = path.join(work, j.copy_id, 'job.json');
     fs.rmSync(jobFile, { force: true });
     let lastStep = null;
@@ -284,6 +302,11 @@ async function main() {
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
     const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
     const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
+    // The fixes tried so far on each finding, carried to this round's row for the same issue (with this round's own).
+    { const rows = await sql(`select block_id, meta->>'code' as code, coalesce(meta->'tried', '[]'::jsonb) as tried from copy_pin
+        where copy_id = ${lit(j.copy_id)} and kind = 'finding'`).catch(() => []);
+      const now = (v.info?.pins || []).filter((r) => codeOf(r) && r.ai?.action && r.ai.action !== 'none').map((r) => ({ block_id: r.block_id, code: codeOf(r), tried: [r.ai.action] }));
+      for (const p of findingPins) { const t = triedFor([...rows, ...now], p.code, p.blockId); if (t.length) p.tried = t; } }
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
     const fonts = fontRows(v.info?.fonts || v.pages?.[0]?.info?.fonts);
@@ -294,8 +317,9 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}), ...(p.tried ? { tried: p.tried } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
+          || jsonb_build_object('tried', (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from jsonb_array_elements_text(coalesce(meta->'tried', '[]'::jsonb) || ${lit(JSON.stringify(r.ai?.action && !['none', 'fonts', 'by-design', 'live-same'].includes(r.ai.action) ? [r.ai.action] : []))}::jsonb) x))
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
     log('ready for review', j.copy_id, 'v' + next, v.result, up.files, 'files');

@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
-import { loadPins, focusPins, markPinStills } from './pins.mjs';
+import { loadPins, focusPins, markPinStills, applyGalleryFixes, recordLonger } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
 import { LISTEN_INIT, recordInteractions } from './interact.mjs';
 
@@ -197,9 +197,13 @@ export async function recordGalleries(page, opts = {}) {
       for (const dx of [-45, -30, -15, 0]) { await move(dx); await sleep(30); }
       await upp(); await sleep(900);
       const xs2 = await page.evaluate(() => window.__pvXs());
-      const d = xs1.map((x, j) => x - xs0[j]).filter((v, j) => Math.abs(xs0[j]) < 4000 && Math.abs(xs1[j]) < 4000);
-      // Most slides came along (one may have changed places with its double as the drag began).
-      d.sort((a, b) => a - b); const md = d.length ? d[d.length >> 1] : 0;
+      // The slides on show came along with the pointer. Compared as places on screen, not slide by slide: an endless
+      // carousel keeps doubles of its slides and may swap which copy is on show as a drag begins (maria dubin's list
+      // carousel, 2026-11-24: its real slides jumped off screen and their doubles took over, so it read "no drag").
+      const vis = (xs) => xs.filter((x) => Math.abs(x) < 4000).sort((a, b) => a - b);
+      const v0 = vis(xs0), d = vis(xs1).map((x) => { const n = v0.reduce((m, y) => (Math.abs(x - y) < Math.abs(x - m) ? y : m), Infinity); return Math.abs(x - n) < 150 ? x - n : null; }).filter((v) => v !== null && Math.abs(v) > 2);
+      // (Doubles left behind where a slide was don't move, so only places that moved count; at least two must have.)
+      d.sort((a, b) => a - b); const md = d.length >= 2 ? d[d.length >> 1] : 0;
       r.strip.drag = md < -35 && md > -75;
       r.strip.dragRest = xs2.every((x, j) => Math.abs(x - xs0[j]) < 2);
       await page.evaluate(([drag, back, xs0]) => {
@@ -1302,7 +1306,9 @@ export async function capture(url, outDir) {
     (info.placeholders ||= {})[prof] = await loadPlaceholders(page);
     // Back to where the page was scrolled: the header's look (shrunk or not) is saved with the page.
     const y0 = await page.evaluate(() => scrollY);
-    (info.galleries ||= {})[prof] = await recordGalleries(page);
+    (info.galleries ||= {})[prof] = await recordGalleries(page, recordLonger(pins) ? { watchMs: 24000, maxSteps: 40, maxMs: 120000 } : {});
+    // A refinement's targeted fixes for how slideshows move (fix-menu.mjs): drag, or playing by themselves.
+    if (pins.length) (info.galleryFixes ||= {})[prof] = await applyGalleryFixes(page, prof, pins);
     await page.evaluate((y) => scrollTo(0, y), y0); await sleep(500);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);

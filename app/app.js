@@ -490,9 +490,10 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.pinFor) { vi
 function noteDialog(kind, current, save) {
   const dlg = $('#dlg'), f = $('#dlgf');
   const tour = kind === 'tour';
-  f.innerHTML = `<h2>${tour ? (current ? 'Edit tour stop' : 'New tour stop') : 'What’s wrong here?'}</h2>
+  const fnote = kind === 'finding';
+  f.innerHTML = `<h2>${tour ? (current ? 'Edit tour stop' : 'New tour stop') : fnote ? 'Add a note' : 'What’s wrong here?'}</h2>
     ${tour ? `<label>Title<input name="title" value="${esc(current?.meta?.title || '')}" placeholder="Layered hero portrait" required></label>` : ''}
-    <label>${tour ? 'Note' : 'Describe it in your own words'}<textarea name="body" rows="4" required placeholder="${tour ? 'What visitors should notice here, and why it matters.' : 'For example: this slideshow doesn’t move, or the logo is the wrong color.'}">${esc(current?.body || '')}</textarea></label>
+    <label>${tour ? 'Note' : fnote ? 'What do you see? Anything you add helps us fix it.' : 'Describe it in your own words'}<textarea name="body" rows="4" required placeholder="${tour ? 'What visitors should notice here, and why it matters.' : fnote ? 'For example: on my site you can drag the pictures sideways.' : 'For example: this slideshow doesn’t move, or the logo is the wrong color.'}">${esc(current?.body || '')}</textarea></label>
     <div class="row end"><button class="btn secondary" value="cancel" formnovalidate>Cancel</button><button class="btn" value="ok">Save</button></div>`;
   f.onsubmit = (e) => { if (e.submitter?.value !== 'ok') return; const v = Object.fromEntries(new FormData(f)); if (!v.body?.trim()) return; save({ title: (v.title || '').trim(), body: v.body.trim() }); };
   dlg.showModal();
@@ -568,8 +569,8 @@ function panel(c, review) {
         : ''}
       ${found.length || older.length || gone.length || otherN ? '<p class="fgroup"><b>Our review</b>: Let us know whether issues we identified through an automated quality check should be fixed.</p>' : ''}
       ${found.length || older.length ? `
-        <ol class="pins findings">${found.map((p, i) => `<li class="${p.blockId ? '' : 'nopin'}">${p.blockId ? `<b class="ltr">${letter(i)}</b>` : ''}<span class="pbody">${esc(fText(p))}</span>${cropPair(c, p)}
-          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}" data-n="${letter(i)}">Show</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
+        <ol class="pins findings">${found.map((p, i) => `<li class="${p.blockId ? '' : 'nopin'}">${p.blockId ? `<b class="ltr">${letter(i)}</b>` : ''}<span class="pbody">${esc(fText(p))}</span>${cropPair(c, p)}${p.meta?.note ? `<small class="fnote">${esc(p.meta.note)}</small>` : ''}
+          <span class="row wrap">${VERDICTS.map(([v, t]) => `<button class="chip ${verdictOf(p) === v ? 'on' : ''}" data-verdict="${v}" data-fid="${p.id}">${t}</button>`).join('')}${p.blockId ? `<button class="link" data-goto="${esc(p.blockId)}" data-n="${letter(i)}">Show</button>` : ''}${verdictOf(p) === 'fix' ? `<button class="link" data-fnote="${p.id}">${p.meta?.note ? 'Edit note' : 'Add note'}</button>` : ''}${isSaved(p) ? SAVED_TICK : ''}</span></li>`).join('')}${older.map((f) => `<li class="nopin"><span class="pbody">${esc(f.text)}</span></li>`).join('')}</ol>` : ''}
       ${gone.length ? `<details class="dismissed"><summary>${cap(count(gone.length, 'issue'))} you said ${gone.length === 1 ? 'is' : 'are'} fine</summary>
         <ul class="pins findings">${gone.map((p) => `<li><span class="pbody">${esc(fText(p))}</span>
           <span class="row wrap"><button class="chip on" data-verdict="not-a-problem" data-fid="${p.id}" title="Press to ask about it again">Not an issue</button></span></li>`).join('')}</ul></details>` : ''}
@@ -626,6 +627,9 @@ function panel(c, review) {
     markSaved({ id: p.id });
     store.updatePin(id, p.id, { body: p.body, meta: { ...p.meta, verdict: v, marked_at: v ? new Date().toISOString() : null } });
   }));
+  // A note on one of our findings (Jeremy, 2026-11-24): what the person sees, in their words. The refinement reads it
+  // with our description when it picks a fix.
+  P.querySelectorAll('[data-fnote]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.fnote); noteDialog('finding', { body: p.meta?.note || '' }, async (v) => { markSaved({ id: p.id }); await store.updatePin(id, p.id, { body: p.body, meta: { ...p.meta, note: v.body } }); }); }));
   P.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => { const p = c.pins.find((x) => String(x.id) === b.dataset.edit); noteDialog('tour', p, async (v) => { markSaved({ id: p.id }); await store.updatePin(id, p.id, { body: v.body, meta: { ...p.meta, title: v.title } }); toast('Tour stop saved'); }); }));
   P.querySelectorAll('[data-t2]').forEach((b) => (b.onclick = () => { view.tab = b.dataset.t2; view.pinFor = null; sendMode(); copyPage(id); }));
   on('#acc', () => accept(id));

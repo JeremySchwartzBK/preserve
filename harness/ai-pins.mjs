@@ -11,6 +11,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { PROFILES, launch, sleep } from './lib.mjs';
 import { diffPct } from './check.mjs';
+import { codeOf, optionsFor, ACTION_IDS } from './fix-menu.mjs';
 
 export const AI_MODEL = 'claude-opus-5-5';
 const MAX_PINS = 6; // per round; the rest get today's careful re-capture
@@ -23,8 +24,13 @@ export const ACTIONS = {
   fonts: 'The difference is the font itself (a different typeface, or a stand-in font). Refinements don\'t change fonts; the person chooses in the Fonts step.',
   'by-design': 'The person is asking about something Preserves do on purpose (see by_design).',
   'live-same': 'The live site shows the same thing at this spot as the Preserve does, so there is nothing for a refinement to change.',
-  'try-again': 'None of the above fits, or you can\'t tell. The refinement re-captures the spot carefully, as it always does.',
+  'add-drag': 'A slideshow, carousel or gallery that follows a drag or swipe on the live site but not in the Preserve. The refinement makes the slideshows in this spot follow a drag or swipe.',
+  'record-longer': 'A slideshow, carousel or gallery that changes on the live site (by itself, with its arrows or its dots) but is stuck or shows the wrong slide in the Preserve. The refinement watches it and steps through it for much longer while saving it.',
+  'play-on-timer': 'A slideshow that plays by itself on the live site but sits still in the Preserve. The refinement makes it play by itself, on its own timing or every five seconds.',
+  none: 'None of the above fits, or you can\'t tell. The refinement has no specific fix for this spot (it never just does the same thing again).',
 };
+// Judgments rather than fixes: never "tried", always on the menu for the person's own pins.
+const JUDGMENTS = ['fonts', 'by-design', 'live-same', 'none'];
 export const BY_DESIGN = {
   'contact-details': 'email addresses, phone numbers and street addresses are replaced with placeholders',
   'pop-ups': 'pop-ups, announcement bars, cookie banners and promo tabs are removed',
@@ -35,7 +41,7 @@ export const BY_DESIGN = {
 };
 const KINDS = ['missing-content', 'image-or-video', 'layout-or-size', 'font', 'motion', 'menu-or-clicks', 'widget', 'colour', 'by-design', 'other'];
 
-const SYSTEM = `You help make Preserves: frozen copies of a designer's web page, saved as it looked at one moment. A person reviewing a Preserve has pinned a spot and written a note about what is wrong there. You get their note, one picture and some measurements of that spot, and you choose ONE fix from a fixed menu. You never write code or CSS.
+const SYSTEM = `You help make Preserves: frozen copies of a designer's web page, saved as it looked at one moment. A person reviewing a Preserve has pinned a spot and written a note about what is wrong there. You get their note (or, for an issue our automated quality check found and the person confirmed, the check's description plus any note they added), one picture and some measurements of that spot, and you choose ONE fix from a fixed menu. Only the actions listed as allowed for this spot can be chosen: fixes already tried on it in earlier refinements are left out, because a refinement never repeats what didn't work. You never write code or CSS.
 
 The picture has two rows of frames of the pinned spot, left to right about one second apart: the TOP row is the live site, the BOTTOM row is the Preserve. A row is missing when the spot could not be found on that side (see the measurements).
 
@@ -135,19 +141,21 @@ async function sheet(rows, out) {
   return out;
 }
 
-async function ask(client, pin, facts, picture) {
+async function ask(client, pin, facts, picture, menu) {
+  const schema = { ...SCHEMA, properties: { ...SCHEMA.properties, action: { type: 'string', enum: menu } } };
+  const code = codeOf(pin);
   const res = await client.beta.messages.create({
     model: AI_MODEL,
     max_tokens: 4000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
     system: SYSTEM,
     messages: [{
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(picture).toString('base64') } },
-        { type: 'text', text: `Layout: ${pin.layout || 'desktop'}\nThe person's note: ${JSON.stringify(pin.body || '')}\nMeasurements of the pinned spot: ${JSON.stringify(facts)}` },
+        { type: 'text', text: `Layout: ${pin.layout || 'desktop'}\n${code ? `Found by our quality check (${code}) and confirmed by the person: ${JSON.stringify(pin.body || '')}` : `The person's note: ${JSON.stringify(pin.body || '')}`}\nAlready tried on this spot: ${JSON.stringify(pin.tried || [])}\nAllowed actions: ${JSON.stringify(menu)}\nMeasurements of the pinned spot: ${JSON.stringify(facts)}` },
       ],
     }],
   });
@@ -157,37 +165,51 @@ async function ask(client, pin, facts, picture) {
   return { ...out, model: res.model, tokens: { in: res.usage?.input_tokens ?? null, out: res.usage?.output_tokens ?? null } };
 }
 
-// The pins with a pick each (pin.ai), for the person's own pins; findings from the quality check and anything past the
-// cap pass through unchanged. Never throws: a pin whose look-up fails keeps today's behaviour, with ai.error saying why.
+// A pick for each pin (pin.ai). Our confirmed findings get an untried action from their kind's list (fix-menu.mjs): none
+// left means no action; one left is used as is; several go to the AI, which picks among them (or, with AI off, the first
+// is used). The person's own pins go to the AI with the whole menu less what was tried, and pass through unchanged with
+// AI off. Never throws: a pin whose look-up fails gets the first untried action (findings) or nothing (the person's),
+// with ai.error saying why.
 export async function triagePins(pins, { liveUrl, preserveBase, dir, dry = false }) {
-  if ((!dry && !aiEnabled()) || !pins.length) return pins;
-  const client = dry ? null : new (await import('@anthropic-ai/sdk')).default({ timeout: 90_000, maxRetries: 2 });
-  fs.mkdirSync(dir, { recursive: true });
-  const browser = await launch();
+  if (!pins.length) return pins;
+  const on = (dry || aiEnabled()) && !!preserveBase;
+  let client = null, browser = null;
   const out = [];
   let asked = 0;
   try {
     for (const [i, p] of pins.entries()) {
-      if ((p.from && p.from !== 'person') || !p.block_id || asked >= MAX_PINS) { out.push(p); continue; }
+      const code = codeOf(p);
+      let menu;
+      if (code) {
+        const opts = optionsFor(p);
+        if (!opts.length) { out.push({ ...p, ai: { action: 'none', why: 'nothing-left' } }); continue; }
+        if (opts.length === 1 || !on || !p.block_id || asked >= MAX_PINS) { out.push({ ...p, ai: { action: opts[0], why: 'next-on-list' } }); continue; }
+        menu = opts;
+      } else {
+        if (!on || !p.block_id || asked >= MAX_PINS) { out.push(p); continue; }
+        menu = Object.keys(ACTIONS).filter((a) => JUDGMENTS.includes(a) || !(p.tried || []).includes(a));
+      }
       asked++;
+      if (!browser) { browser = await launch(); fs.mkdirSync(dir, { recursive: true }); if (!dry) client = new (await import('@anthropic-ai/sdk')).default({ timeout: 90_000, maxRetries: 2 }); }
+      const fallback = code ? { action: menu[0], why: 'next-on-list' } : {};
       const pd = path.join(dir, `pin${i}`); fs.mkdirSync(pd, { recursive: true });
       try {
         const prof = p.layout || 'desktop';
         const live = await frames(browser, liveUrl, p, pd, 'live');
         const copy = await frames(browser, `${preserveBase.replace(/\/$/, '')}/${prof}?review=${process.env.PRESERVE_REVIEW_TOKEN || 1}`, p, pd, 'copy');
-        if (!live.files.length && !copy.files.length) { out.push({ ...p, ai: { error: 'spot not found on either side' } }); continue; }
+        if (!live.files.length && !copy.files.length) { out.push({ ...p, ai: { ...fallback, error: 'spot not found on either side' } }); continue; }
         const picture = await sheet([live.files.length ? live.files : [], copy.files.length ? copy.files : []].filter((r) => r.length), path.join(pd, 'sheet.png'));
         const facts = { liveSite: live.facts, preserve: copy.facts };
-        if (dry) { out.push({ ...p, ai: { dry: true, facts, picture } }); continue; }
-        const pick = await ask(client, p, facts, picture);
+        if (dry) { out.push({ ...p, ai: { dry: true, facts, picture, menu } }); continue; }
+        const pick = await ask(client, p, facts, picture, menu);
         // A picture in place of a widget can't be undone within the Preserve: only when the model is fairly sure.
-        if (pick.action === 'still' && pick.confidence === 'low') pick.action = 'try-again';
+        if (pick.action === 'still' && pick.confidence === 'low') pick.action = menu.find((a) => a !== 'still' && ACTION_IDS.includes(a)) || 'none';
         out.push({ ...p, ai: pick });
       } catch (e) {
-        out.push({ ...p, ai: { error: String(e.message || e).split('\n')[0].slice(0, 200) } });
+        out.push({ ...p, ai: { ...fallback, error: String(e.message || e).split('\n')[0].slice(0, 200) } });
       }
     }
-  } finally { await browser.close(); }
+  } finally { if (browser) await browser.close(); }
   return out;
 }
 
