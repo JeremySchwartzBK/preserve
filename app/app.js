@@ -70,6 +70,54 @@ function fillThumbs(root) {
     (store.reviewToken ? store.reviewToken(id).catch(() => null) : Promise.resolve(null)).then((t) => { thumbTokens[id] = { t, at: Date.now() }; show(t); });
   });
 }
+// Time estimate for a pending Preserve (Jeremy, 2026-11-24: a progress bar and the time until it's ready to review,
+// as a range, instead of the steps). From production copy jobs, 2026-11-16 to 11-24 (146 finished): the median seconds
+// to the end of each step the runner reports. A first copy takes about 23 minutes at the median, a refinement about 27
+// (its check takes longer); one in ten takes over 50. The range is the middle estimate rounded down to five minutes,
+// plus ten.
+const STEP_END = { 'check-url': 5, 'capture-and-build': 205, export: 420, fonts: 420, scrub: 440, 'quality-check': 1360 };
+const COPY_S = 1360, REFINE_EXTRA_S = 260, LONG_MIN = 55;
+const demoSpeed = () => (store.real ? 1 : 60);   // the demo runs a minute of the real thing in a second
+const etaSeen = {};                              // copy id -> highest progress shown, so the bar never goes backwards
+function eta(c) {
+  const j = c.job || {}, refine = (j.attempt || 1) > 1, total = COPY_S + (refine ? REFINE_EXTRA_S : 0);
+  const now = Date.now();
+  let remS, doneS = 0, long = (j.tries || 0) > 1;   // tried again after a hiccup on our side
+  if (j.state !== 'working' || !j.startedAt) {
+    // Waiting in line: the jobs ahead, two made at a time (copy_queue, schema-queue.sql); unknown counts as none.
+    const q = c.queue || { ahead: 0, working: 0, slots: 2 }, inLine = q.ahead + q.working;
+    remS = total + (inLine < q.slots ? 0 : (Math.floor((inLine - q.slots) / q.slots) + 0.5) * COPY_S);
+  } else {
+    doneS = Math.max(0, (now - Date.parse(j.startedAt)) / 1000) * (j.speed ?? demoSpeed());
+    const end = (STEP_END[j.step] ?? 5) + (refine && j.step === 'quality-check' ? REFINE_EXTRA_S : 0);
+    remS = Math.max(end - doneS, j.step === 'quality-check' ? 180 : 60) + (total - end);
+    if (doneS / 60 > LONG_MIN) long = true;
+  }
+  const pct = Math.max(etaSeen[c.id] || 0, j.state === 'working' ? Math.min(95, Math.max(5, (100 * doneS) / (doneS + remS))) : 3);
+  etaSeen[c.id] = pct;
+  return { pct, long, words: long ? null : rangeWords(remS / 60) };
+}
+// "about 20 to 30 minutes", "less than 10 minutes", "about four to five hours".
+function rangeWords(m) {
+  if (m < 10) return 'less than 10 minutes';
+  if (m < 80) { const lo = Math.max(10, Math.floor(m / 5) * 5); return `about ${lo} to ${lo + 10} minutes`; }
+  const h = Math.max(1, Math.floor(m / 60));
+  return `about ${num(h)} to ${num(h + 1)} hours`;
+}
+const etaLine = (e) => (e.long ? 'Taking longer than usual' : `${cap(e.words)} left`);
+// Just after starting a Preserve or a refinement: back to the dashboard, with a note that it's underway. It closes with
+// its button or a click anywhere outside it (Jeremy, 2026-11-24).
+function underwayCard(c, refine, then) {
+  const dlg = $('#cdlg');
+  const e = c ? eta(c) : { words: 'about 20 to 30 minutes' };
+  dlg.innerHTML = `<form method="dialog" class="underway"><h2>Your ${refine ? 'refinement' : 'Preserve'} is underway</h2>
+    <p class="sub">${e.long ? 'It’s taking a little longer than usual.' : `It should be ready to review in ${e.words}.`} We’ll email you when it’s ready.</p>
+    <div class="row end"><button class="btn" value="ok">Back to Dashboard</button></div></form>`;
+  dlg.returnValue = '';
+  dlg.onclick = (ev) => { if (ev.target === dlg) dlg.close(); };   // a click on the backdrop
+  dlg.onclose = () => { dlg.onclick = null; if (routeWaiting) { routeWaiting = false; setTimeout(route); } then?.(); };
+  dlg.showModal();
+}
 // A still that isn't made yet (a new Preserve, or one the runner hasn't reached) falls back to the name.
 const noShot = (img) => { const d = document.createElement('div'); d.className = 'noshot'; d.textContent = img.alt; img.replaceWith(d); };
 window.preserveNoShot = noShot;
@@ -192,7 +240,10 @@ const inFilter = (c, f) => f === 'all' || (f === 'live' ? ['ready', 'paused'].in
 const hostOf = (c) => new URL(c.url).hostname.replace(/^www\./, '');
 let dash = { q: '', filter: 'all', page: 0 };
 
+let etaTimer = null;
 function dashboard() {
+  clearInterval(etaTimer);
+  etaTimer = setInterval(() => { if ($('#dashq') && !$('#cdlg').open && store.copies().some((c) => c.status === 'processing')) drawList(); else if (!$('#dashq')) clearInterval(etaTimer); }, store.real ? 30000 : 1000);
   if ($('#dashq')) { refreshHeader(); drawList(); return; }
   shell(`<div class="head"><div><h1>Your Preserves</h1><p class="sub" id="cap"></p></div><a href="#/new" class="btn">${ic('plus')} New Preserve</a></div>
     <div class="dashbar"><input id="dashq" type="search" placeholder="Search by site name or address" value="${esc(dash.q)}" aria-label="Search your Preserves">
@@ -226,49 +277,78 @@ function drawList() {
     else toast('Archived. Its link now shows “preview paused”.', async () => { const e2 = await store.setStatus(id, 'ready'); toast(e2 || 'Live again'); });
   }));
   app.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (await confirmDelete()) { await store.remove(b.dataset.del); toast('Deleted'); } }));
+  // Clicking a pending picture opens nothing, only a short note (Jeremy, 2026-11-24).
+  app.querySelectorAll('[data-pending]').forEach((b) => (b.onclick = () => { const e = eta(store.copy(b.dataset.pending)); toast(e.long ? 'Still working. It’s taking longer than usual.' : `Still working, ${e.words} left.`); }));
+  // A failed Preserve has nothing to keep, so Remove needs no confirmation.
+  app.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { await store.remove(b.dataset.rm); toast('Removed'); }));
+  app.querySelectorAll('[data-readdr]').forEach((b) => (b.onclick = () => { const c = store.copy(b.dataset.readdr); newFrom = { url: c.url, replace: c.id }; location.hash = '#/new'; }));
 }
 
+const shotOf = (c, t) => {
+  const img = t ? `<img ${t.signed ? `data-still="${c.id}" data-src="${esc(t.src)}"` : `src="${esc(t.src)}"`} alt="${esc(c.title)}" loading="lazy" onerror="preserveNoShot(this)">` : `<div class="noshot">${esc(c.title)}</div>`;
+  if (c.status === 'processing') return `<button type="button" class="shot" data-pending="${c.id}" aria-label="${esc(c.title)}: still working">${img}<div class="veil"><div class="spin"></div></div></button>`;
+  if (c.status === 'failed') return `<div class="shot">${img}</div>`;
+  return `<a href="#/copy/${c.id}" class="shot">${img}</a>`;
+};
+// Failed (Jeremy, 2026-11-24): an address we can't use says why and lets the person fix it; anything on our side says
+// we're on it (it has already been tried twice, runner.mjs).
+const failedBody = (c) => c.failKind === 'address'
+  ? `<p class="fail"><b>We couldn’t open this page</b>${esc(c.message || '')}</p><div class="actions"><button class="btn small" data-readdr="${c.id}">Edit address</button><button class="btn small secondary" data-rm="${c.id}">Remove</button></div>`
+  : `<p class="fail"><b>We couldn’t finish this Preserve</b>We’ve been told and we’re on it.</p><div class="actions"><button class="btn small secondary" data-rm="${c.id}">Remove</button></div>`;
 function card(c) {
   const [label, tone] = STATUS[c.status] || ['', 'muted'];
   const t = thumb(c);
   const accepted = ['ready', 'paused', 'archived'].includes(c.status);
   const del = `<button class="link danger" data-del="${c.id}">Delete</button>`;
+  // A pending or failed Preserve has no page to open (Jeremy, 2026-11-24): its picture only shows how it's going.
+  const pending = c.status === 'processing', open = !pending && c.status !== 'failed', e = pending ? eta(c) : null;
   return `<article class="copy">
-    <a href="#/copy/${c.id}" class="shot">${t ? `<img ${t.signed ? `data-still="${c.id}" data-src="${esc(t.src)}"` : `src="${esc(t.src)}"`} alt="${esc(c.title)}" loading="lazy" onerror="preserveNoShot(this)">` : `<div class="noshot">${esc(c.title)}</div>`}${c.status === 'processing' ? `<div class="veil"><div class="spin"></div>${esc(c.stepNames?.[c.step] || 'Starting')}…</div>` : ''}</a>
-    <div class="meta"><a href="#/copy/${c.id}" class="title">${c.status === 'review' ? '<i class="dot" aria-hidden="true"></i>' : ''}${esc(c.title)}</a><span class="pill ${tone}">${label}</span></div>
+    ${shotOf(c, t)}
+    <div class="meta">${open ? `<a href="#/copy/${c.id}" class="title">` : '<span class="title">'}${c.status === 'review' ? '<i class="dot" aria-hidden="true"></i>' : ''}${esc(c.title)}${open ? '</a>' : '</span>'}<span class="pill ${tone}">${label}</span></div>
     <div class="sub">${esc(hostOf(c))} · ${day(c.created)}</div>
+    ${pending ? `<div class="eta"><div class="bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(e.pct)}"><i style="width:${e.pct.toFixed(1)}%"></i></div><p class="sub">${etaLine(e)}</p></div>` : ''}
+    ${c.refineFailed ? '<p class="note small">This refinement didn’t finish and we’re investigating.</p>' : ''}
     ${accepted ? `<div class="actions"><button class="btn small" data-link="${c.id}">Copy link</button><button class="btn small secondary" data-embed="${c.id}">Copy embed code</button></div>
       <div class="actions minor"><label class="switch"><input type="checkbox" data-live="${c.id}" ${c.status === 'archived' ? '' : 'checked'}><span class="knob"></span><span class="on">Live</span><span class="off">Archived</span></label>
         <a class="link" href="#/copy/${c.id}">Open</a><span class="push"></span>${del}</div>`
       : c.status === 'review' ? `<div class="actions"><a class="btn small" href="#/copy/${c.id}">Review</a></div><div class="actions minor">${del}</div>`
-      : c.status === 'failed' ? `<p class="sub">${esc(c.message || '')}</p><div class="actions minor">${del}</div>` : ''}
+      : c.status === 'failed' ? failedBody(c) : ''}
   </article>`;
 }
 
 // 3. New Preserve ----------------------------------------------------------------------------------------------
-// The Preserve just made from this page: the page shows "We're on it" until the person goes elsewhere (kept here, not
-// only drawn once, so a redraw from a store change doesn't put the empty form back).
-let justMade = null;
+// The address is checked at once (is the page there, public and on Squarespace?) and a problem is said right here, so a
+// Preserve that can't work never reaches the dashboard. Then it's back to the dashboard with a note that it's underway
+// (Jeremy, 2026-11-24; the screen of steps is gone). newFrom: "Edit address" on a failed card fills in its address and
+// removes that card once the new one starts.
+let newFrom = null;
+// Draw the dashboard now (the hash change redraws later, once the note on top of it closes).
+const goDashboard = () => { history.pushState(null, '', '#/'); dashboard(); };
 function newCopy() {
-  if (justMade) {
-    shell(`<div class="card narrow center" id="onit"><div class="spin big"></div><h1>We’re on it</h1><p class="lede">Your Preserve is being made. It usually takes a few minutes, and you don’t need to keep this page open. When it’s ready to review, it moves to the top of your Preserves.</p><a class="btn" href="#/">Back to your Preserves</a></div>`, { back: '#/' });
-    return;
-  }
+  const from = newFrom;
   shell(`<div class="card narrow"><h1>New Preserve</h1><p class="lede">Paste the address of a page you designed. We’ll preserve that page as it looks right now, on phone and desktop. We swap emails, phone numbers and addresses for placeholders.</p>
-    <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus></label>
-    <p class="err" id="err" hidden></p><button class="btn wide">Create Preserve</button></form>
-    <p class="fine">Takes a few minutes. You can leave this page; it moves to the top of your Preserves when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
+    <form id="f"><label>Page address<input id="u" placeholder="https://www.clientsite.com/" required autofocus value="${esc(from?.url || '')}"></label>
+    <p class="err" id="err" hidden></p><button class="btn wide" id="go">Create Preserve</button></form>
+    <p class="fine">It usually takes about 20 to 30 minutes. We’ll email you when it’s ready to review.${store.real ? '' : ' Try one of the test sites: minaab.com, breathpod.com, xanadu.nyc.'}</p></div>`, { back: '#/' });
+  const fail = (m) => { $('#err').textContent = m; $('#err').hidden = false; $('#go').disabled = false; $('#go').textContent = 'Create Preserve'; };
   $('#f').onsubmit = async (e) => {
     e.preventDefault();
-    const r = await store.create($('#u').value.trim());
-    if (r.error) { $('#err').textContent = r.error; $('#err').hidden = false; return; }
-    justMade = r.id; newCopy();
+    const url = $('#u').value.trim();
+    $('#err').hidden = true; $('#go').disabled = true; $('#go').textContent = 'Checking the address…';
+    const problem = store.checkPage ? await store.checkPage(url) : null;
+    if (problem) return fail(problem);
+    const r = await store.create(url);
+    if (r.error) return fail(r.error);
+    if (from?.replace && from.replace !== r.id && store.copy(from.replace)?.status === 'failed') store.remove(from.replace);
+    newFrom = null;
     // Adobe Fonts first thing (Jeremy, 2026-11-22): a quick look at the page's own HTML says whether it loads Adobe
-    // fonts, so the connect card opens now, before any lookalike choice. Anything it misses is asked at first review.
-    if (store.adobeCheck && store.adobe && !store.adobe() && !adobeLater()) {
-      const yes = await store.adobeCheck(r.id);
-      if (yes && justMade === r.id && location.hash === '#/new' && !store.adobe() && !$('#cdlg').open) { view.adobeAsked = r.id; adobeCard(null, { found: true }); }
-    }
+    // fonts, so the connect card opens as soon as the note closes, before any substitute choice. Anything it misses is
+    // asked at first review.
+    const adobe = store.adobeCheck && store.adobe && !store.adobe() && !adobeLater() ? store.adobeCheck(r.id) : Promise.resolve(false);
+    goDashboard();
+    underwayCard(store.copy(r.id), false, async () => {
+      if (await adobe && !store.adobe() && !$('#cdlg').open) { view.adobeAsked = r.id; adobeCard(null, { found: true }); }
+    });
   };
 }
 
@@ -295,19 +375,9 @@ function copyPage(id) {
   const c = store.copy(id);
   if (!c || c.status === 'deleted') { location.hash = '#/'; return; }
   if (view.id !== id) view = { ...view, id, tab: null, pinFor: null, frameKey: null, flash: null, missing: [], fontShown: null };
-  if (c.status === 'processing') {
-    view.frameKey = null;
-    shell(`<div class="card narrow"><h1 class="name">${esc(c.title)}</h1><p class="sub">${esc(c.url)}</p>
-      <ol class="steps">${(c.stepNames || []).map((s, i) => `<li class="${i < c.step ? 'done' : i === c.step ? 'now' : ''}">${esc(s)}</li>`).join('')}</ol>
-      <p class="fine">You can leave this page. When it’s ready to review, it moves to the top of your Preserves.</p></div>`, { back: '#/' });
-    return;
-  }
-  if (c.status === 'failed') {
-    view.frameKey = null;
-    shell(`<div class="card narrow"><h1>We couldn’t preserve this page yet</h1><p class="lede">${esc(c.message || 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.')}</p><button class="btn secondary" id="del">Delete</button></div>`, { back: '#/' });
-    $('#del').onclick = async () => { if (await confirmDelete()) { await store.remove(id); location.hash = '#/'; } };
-    return;
-  }
+  // Pending (a first copy or a refinement) and failed Preserves have no page of their own: no access while a refinement
+  // runs, Tour and Talent included (Jeremy, 2026-11-24). Their dashboard card says how it's going.
+  if (c.status === 'processing' || c.status === 'failed') { view.frameKey = null; location.hash = '#/'; return; }
   const review = c.status === 'review';
   const steps = review ? [...(fontsShown(c).length ? [['fonts', 'Fonts']] : []), ['check', 'Look and Feel'], ['tour', 'Tour'], ['talent', 'Talent']] : [];
   const tabs = review ? steps.map(([k, l], i) => [k, `${i + 1}. ${l}`])
@@ -565,7 +635,7 @@ function panel(c, review) {
     const older = found.some((p) => !p.blockId) ? [] : (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f))
       .filter((f) => !f.pinned && !HIDDEN.has(f.code) && !/pixels wide|browser window/.test(f.text || ''))
       .map((f) => ({ ...f, text: f.code ? pageMessage(f.code) : f.text }));
-    P.innerHTML = `<h2>Look and Feel</h2>
+    P.innerHTML = `<h2>Look and Feel</h2>${c.refineFailed ? '<p class="note">This refinement didn’t finish and we’re investigating.</p>' : ''}
       <p class="fgroup">You can flag components that don’t match the look and feel of the live site, and we’ll attempt to address by refining this Preserve.</p>
       <p class="fgroup"><b>Your review</b>: Flag and describe anything that doesn’t match the look and feel of the live site.</p>
       <p>${pinButton('check', `${ic('plus')} Issue`)}</p>
@@ -646,7 +716,13 @@ function panel(c, review) {
     showFont(f); copyPage(id);
   }));
   P.querySelectorAll('[data-adobe]').forEach((b) => (b.onclick = () => adobeCard(c)));
-  on('#refine', () => store.refine(id));
+  on('#refine', async () => {
+    await store.refine(id);
+    const c2 = store.copy(id);
+    if (c2?.status !== 'processing') return;   // the database said no (the reason was shown)
+    goDashboard();
+    underwayCard(c2, true);
+  });
   on('#cl', () => copyText(store.link(c), 'Link'));
   on('#ce', () => embedCard(c));
   P.querySelectorAll('[data-tk]').forEach((b) => (b.onclick = () => { view.talentKind = b.dataset.tk; panel(c, review); }));
@@ -823,7 +899,7 @@ function route() {
   if (h !== '/') location.hash = '#/';
   dashboard();
 }
-addEventListener('hashchange', () => { justMade = null; view.pinFor = null; view.flash = null; route(); });
+addEventListener('hashchange', () => { view.pinFor = null; view.flash = null; route(); });
 store.onChange(route);
 route();
 

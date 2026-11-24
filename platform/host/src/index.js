@@ -5,6 +5,8 @@
 //     RUNNERS_MAX; each goes back to sleep by itself when the queue is empty;
 //   - GET /adobe-check?copy=<id> (from the app right after "Create Preserve") says whether the page loads Adobe fonts,
 //     so the app can offer the Adobe Fonts connection at once (adobe-sniff.js);
+//   - GET /page-check?url=<address> (from the app on "Create Preserve", signed in) says at once whether the address
+//     will work: the page is there, public and on Squarespace (page-check.js);
 //   - when it has been quiet for sleepAfter, the container is asked whether it's still busy (its /health page) and is
 //     stopped only if it isn't. On stop (SIGTERM) the runner hands any running job back to the queue.
 import { Container } from '@cloudflare/containers';
@@ -12,6 +14,7 @@ import postgres from 'postgres';
 import { WINDOW_MIN, readState, alertFor, alertsOn, sendAlert } from './alerts.js';
 import { runnersMax, runnersNeeded } from './scale.js';
 import { adobeCheck } from './adobe-sniff.js';
+import { pageCheck, supabaseSignedIn } from './page-check.js';
 
 export class Runner extends Container {
   defaultPort = 8080;
@@ -88,6 +91,9 @@ export default {
         try { const [r] = await db`select source_url from copy where id = ${id} and created_at > now() - interval '15 minutes'`; return r?.source_url || null; }
         finally { await db.end(); }
       } });
+    }
+    if (url.pathname === '/page-check' && (req.method === 'GET' || req.method === 'OPTIONS')) {
+      return pageCheck(req, { signedIn: supabaseSignedIn(env) });
     }
     return new Response(null, { status: 404 });
   },

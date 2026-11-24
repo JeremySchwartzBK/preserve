@@ -6,11 +6,11 @@ import { PLANS } from './store-local.js';
 import { SUPABASE_URL, SUPABASE_KEY, VIEW, HOST } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
-const STEP_NAMES = { 'check-url': 'Checking the address', 'capture-and-build': 'Opening the page on phone and desktop', export: 'Saving images, fonts and video', fonts: 'Building your Preserve', scrub: 'Removing trackers and contact details', 'quality-check': 'Comparing it with the live site' };
-const STEP_KEYS = Object.keys(STEP_NAMES);
+// Address problems: the person can fix these by giving another address (runner.mjs FAILED, platform/host/src/alerts.js).
+const ADDRESS_CODES = ['not-squarespace', 'page-unreachable', 'password-protected'];
 const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.', 'not-an-adobe-key': 'That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.', 'not-connected': 'Connect your Adobe Fonts account first.' };
 
-let me = null, studio = null, copies = [], notes = [], studioFonts = [], ready = false, timer = null, adobeConn = null;
+let me = null, studio = null, copies = [], queue = null, notes = [], studioFonts = [], ready = false, timer = null, adobeConn = null;
 // Font files uploaded in this browser, kept as data: addresses so the preview shows them while the file is checked.
 const justUploaded = {};
 const listeners = new Set();
@@ -26,7 +26,7 @@ async function refresh() {
   const [{ data: person }, { data: st }, { data: cs }, { data: nt }, { data: sf }, { data: ad }] = await Promise.all([
     sb.from('person').select('*').eq('id', uid).maybeSingle(),
     sb.from('studio').select('*').limit(1).maybeSingle(),
-    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
+    sb.from('copy').select('*, copy_name(name,is_current,created_at), copy_version(version,verdict,findings,notes,fonts,created_at), copy_job(attempt,state,step,error,queued_at,started_at,tries,code:verdict->reasons->0->>code), copy_pin(*), copy_font(*)').order('created_at', { ascending: false }),
     sb.from('notification').select('*').order('created_at', { ascending: false }).limit(30),
     sb.from('studio_font').select('id,font_key,name,file_name,asset,state,problem,created_at').order('created_at', { ascending: false }),
     // The Adobe Fonts connection (schema-adobe.sql): whether it works, never the key.
@@ -38,6 +38,14 @@ async function refresh() {
   studio = st;
   notes = (nt || []).map((n) => ({ at: n.created_at, copy: n.copy_id, text: n.body, read: !!n.read_at, id: n.id }));
   copies = (cs || []).map(shape);
+  // How many Preserves are ahead in line (schema-queue.sql), for the time estimate on pending cards. Until that function
+  // is in the database the estimate leaves the line out.
+  queue = null;
+  for (const c of copies.filter((x) => x.status === 'processing' && x.job?.state === 'queued')) {
+    const { data, error } = await sb.rpc('copy_queue', { cid: c.id });
+    if (error) break;
+    if (data) c.queue = { ahead: data.ahead ?? 0, working: data.working ?? 0, slots: data.slots ?? 2 };
+  }
   ready = true;
   emit();
   clearTimeout(timer);
@@ -59,9 +67,14 @@ function shape(r) {
     findings: r.status === 'review' ? (last?.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f)) : [],
     notes: (last?.notes || []).map((f) => f.text || f),
     pins: (r.copy_pin || []).filter((p) => !p.resolved_at && (p.kind !== 'finding' || r.status === 'review')).sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at)).map((p) => ({ id: p.id, kind: p.kind, body: p.body, blockId: p.block_id, x: p.x, y: p.y, layout: p.layout, label: p.meta?.label, meta: p.meta || {}, at: p.created_at })),
-    stepNames: Object.values(STEP_NAMES), step: Math.max(0, STEP_KEYS.indexOf(job?.step)),
+    // The job being made now (or the last one), for the progress bar and time estimate on the dashboard (app.js eta).
+    job: job ? { state: job.state, step: job.step, attempt: job.attempt, tries: job.tries || 0, queuedAt: job.queued_at, startedAt: job.started_at } : null,
     rounds: Math.max(0, jobs.length - 1), lastRoundAt: jobs.length ? jobs.map((j) => j.queued_at).sort().at(-1) : null,
     message: r.status === 'failed' ? (job?.error || null) : null,
+    // Why it failed: an address the person can change, or something on our side (anything else).
+    failKind: r.status === 'failed' ? (ADDRESS_CODES.includes(job?.code) || /^(This page isn’t on|We couldn’t open this page|This page is password)/.test(job?.error || '') ? 'address' : 'ours') : null,
+    // The latest refinement didn't finish: the earlier version is still the one in review.
+    refineFailed: r.status === 'review' && job?.state === 'failed' && job.attempt > 1,
     fonts: r.status === 'review' || last?.fonts?.length ? fontsOf(r, last) : null,
   };
 }
@@ -171,6 +184,17 @@ export const store = {
   async approve(id, fontCert) {
     if (fontCert) { try { await rpc('certify_fonts', { cid: id, cert: fontCert }); } catch (e) { alert(say(e)); return; } }
     return act('approve_copy', { cid: id, ver: copies.find((c) => c.id === id).versions.at(-1).v });
+  },
+  // The quick address check before a Preserve is made (platform/host/src/page-check.js): is the page there, public, and
+  // on Squarespace? Returns the problem in words, or null when it's fine or the check couldn't tell in time (the copy
+  // itself checks again).
+  async checkPage(url) {
+    let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return 'That doesn’t look like a web address.'; }
+    const { data: { session } } = await sb.auth.getSession();
+    try {
+      const r = await fetch(`${HOST}/page-check?url=${encodeURIComponent(u.href)}`, { headers: { authorization: `Bearer ${session?.access_token || ''}` }, signal: AbortSignal.timeout(12000) });
+      return r.ok ? (await r.json()).problem || null : null;
+    } catch { return null; }
   },
   async create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
