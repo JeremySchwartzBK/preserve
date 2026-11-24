@@ -17,9 +17,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runGate } from './gate.mjs';
+import { runGate, serve } from './gate.mjs';
 import { loadPins } from './pins.mjs';
 import { triagePins } from './ai-pins.mjs';
+import { vetFindings } from './ai-vet.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -129,6 +130,13 @@ try {
   if (!verdict) {
     for (const p of pages) await pageTask(p);
     verdict = await finish();
+    // The AI looks at each suspected issue before the person does: false alarms out, real ones in plain words (ai-vet.mjs).
+    if (pages.length === 1 && verdict.reasons?.some((r) => r.spots?.length)) {
+      const srv = await serve(path.dirname(pages[0].stage));
+      try { verdict = await step('vet-findings', () => vetFindings(verdict, { liveUrl: pages[0].url, copyBase: `http://127.0.0.1:${srv.address().port}/${path.basename(pages[0].stage)}`, dir: path.join(pages[0].siteDir, 'vet-evidence') })); }
+      catch (e) { log('vetting skipped', String(e.message).slice(0, 200)); }
+      finally { srv.close(); }
+    }
   }
 } catch (e) {
   verdict = { result: 'fail', reasons: [{ code: 'job-error', detail: String(e.message).slice(0, 500) }], notes: [], warnings: [] };

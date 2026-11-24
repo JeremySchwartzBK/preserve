@@ -76,7 +76,7 @@ const FIND = (id) => {
 };
 
 // Frames of the pinned block on one side, plus what's in it. Pictures at 1 CSS pixel per pixel, to keep them small.
-async function frames(browser, url, pin, dir, side) {
+export async function frames(browser, url, pin, dir, side) {
   const prof = pin.layout || 'desktop';
   const ctx = await browser.newContext({ ...PROFILES[prof].context, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
@@ -122,7 +122,7 @@ async function frames(browser, url, pin, dir, side) {
 }
 
 // Live frames on top, Preserve frames below, each frame fitted into a cell; at most about 1500 px wide.
-async function sheet(rows, out) {
+export async function sheet(rows, out) {
   const cellW = Math.floor(1500 / FRAMES), heights = [];
   const cells = [];
   for (const [r, files] of rows.entries()) {

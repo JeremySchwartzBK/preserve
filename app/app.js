@@ -419,7 +419,8 @@ const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-prob
 // layouts (their text names a width but no layout).
 const reviewable = (p) => !HIDDEN.has(p.meta.code) && !(/pixels wide/.test(p.body || '') && !/on (computers|phones)/.test(p.body || ''));
 // Shown in today's wording, by kind (review-messages.js); the stored text stays as it was.
-const fText = (p) => (!p.meta.code ? p.body : p.meta.codes ? groupMessage(p.meta.codes) : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
+// The AI's plain description of this very spot (ai-vet.mjs) when it looked; otherwise today's wording for the kind.
+const fText = (p) => (!p.meta.code ? p.body : p.meta.codes ? groupMessage(p.meta.codes) : p.meta.say ? p.meta.say : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
 // A finding the check couldn't place on the page has no block and no layout (runner.mjs): it is listed in both views,
 // after the lettered ones, and answered like any other.
 const inView = (p, layout) => p.layout === layout || !p.layout;
