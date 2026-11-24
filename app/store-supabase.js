@@ -69,7 +69,9 @@ function shape(r) {
     pins: (r.copy_pin || []).filter((p) => !p.resolved_at && (p.kind !== 'finding' || r.status === 'review')).sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at)).map((p) => ({ id: p.id, kind: p.kind, body: p.body, blockId: p.block_id, x: p.x, y: p.y, layout: p.layout, label: p.meta?.label, meta: p.meta || {}, at: p.created_at })),
     // The job being made now (or the last one), for the progress bar and time estimate on the dashboard (app.js eta).
     job: job ? { state: job.state, step: job.step, attempt: job.attempt, tries: job.tries || 0, queuedAt: job.queued_at, startedAt: job.started_at } : null,
-    rounds: Math.max(0, jobs.length - 1), lastRoundAt: jobs.length ? jobs.map((j) => j.queued_at).sort().at(-1) : null,
+    rounds: Math.max(0, jobs.length - 1), // When the last round that went through started. A failed or cancelled job doesn't count, so pins sent with it are
+    // still waiting and the Refine button stays (Xanadu, 2026-11-24).
+    lastRoundAt: jobs.filter((j) => j.state !== 'failed').map((j) => j.queued_at).sort().at(-1) || null,
     message: r.status === 'failed' ? (job?.error || null) : null,
     // Why it failed: an address the person can change, or something on our side (anything else).
     failKind: r.status === 'failed' ? (ADDRESS_CODES.includes(job?.code) || /^(This page isn’t on|We couldn’t open this page|This page is password)/.test(job?.error || '') ? 'address' : 'ours') : null,
