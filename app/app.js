@@ -402,8 +402,8 @@ function sendPins(c, force) {
   // While checking, the quality check's findings show too, lettered A, B, C… (grey once marked).
   // Every suspected issue has its own letter (Jeremy, 2026-11-21); the page nudges markers on the same spot apart so
   // none hides another. One about the whole page (the first screen, or no one block) shows as a band, not a dot.
-  if (view.tab === 'check') placedOf(c).forEach((p, i) => pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: p.x, y: p.y, body: fText(p), n: letter(i),
-    ...(pageWide(p) ? { wide: true, top: p.meta.code === 'first-screen-differs' ? 0 : p.meta.pageY ?? 0 } : {}) }));
+  if (view.tab === 'check') placedOf(c).forEach((p, i) => { const at = spotIn(p); pins.push({ kind: p.meta.verdict ? 'finding-done' : 'finding', blockId: p.blockId, x: at.x, y: at.y, body: fText(p), n: letter(i),
+    ...(pageWide(p) ? { wide: true, top: p.meta.code === 'first-screen-differs' ? 0 : at.pageY ?? 0 } : {}) }); });
   const key = JSON.stringify(pins);
   if (key === lastPins && !force) return;   // unchanged: don't touch the page
   lastPins = key;
@@ -422,9 +422,13 @@ const reviewable = (p) => !HIDDEN.has(p.meta.code) && !(/pixels wide/.test(p.bod
 const fText = (p) => (!p.meta.code ? p.body : p.meta.codes ? groupMessage(p.meta.codes) : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
 // A finding the check couldn't place on the page has no block and no layout (runner.mjs): it is listed in both views,
 // after the lettered ones, and answered like any other.
-const inView = (p, layout) => p.layout === layout || !p.layout;
+// One issue found on both layouts is one item (runner.mjs, Jeremy 2026-11-24): it lives on desktop and also shows in the
+// phone view, at its phone spot (meta.spots), with the same answer.
+const inView = (p, layout) => p.layout === layout || !p.layout || !!p.meta?.spots?.[layout];
+const spotIn = (p, layout = view.layout) => (p.layout !== layout && p.meta?.spots?.[layout]) || { x: p.x, y: p.y, pageY: p.meta?.pageY };
 const dismissedOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && inView(p, layout) && reviewable(p) && dismissedEarlier(p));
-const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && inView(p, layout) && reviewable(p) && !dismissedEarlier(p)).sort((a, b) => !a.blockId - !b.blockId || (a.meta.pageY ?? 1e9) - (b.meta.pageY ?? 1e9) || a.sort - b.sort);
+// Letters are given out fresh, in page order, every time the list is drawn, so none is skipped.
+const findingsOf = (c, layout = view.layout) => c.pins.filter((p) => p.kind === 'finding' && inView(p, layout) && reviewable(p) && !dismissedEarlier(p)).sort((a, b) => !a.blockId - !b.blockId || (spotIn(a, layout).pageY ?? 1e9) - (spotIn(b, layout).pageY ?? 1e9) || a.sort - b.sort);
 const placedOf = (c, layout = view.layout) => findingsOf(c, layout).filter((p) => p.blockId);
 const letter = (i) => String.fromCharCode(65 + (i % 26));
 const pageWide = (p) => p.meta.code === 'first-screen-differs' || p.blockId === 'el:body';
@@ -554,7 +558,7 @@ function panel(c, review) {
   if (view.tab === 'check') {
     const capped = (c.rounds || 0) >= store.MAX_ROUNDS;
     const found = findingsOf(c), gone = dismissedOf(c);
-    const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).filter((p) => p.layout === other).length;
+    const other = view.layout === 'desktop' ? 'mobile' : 'desktop', otherN = findingsOf(c, other).filter((p) => p.layout === other && !inView(p, view.layout)).length;
     // Preserves checked before unplaced findings became answerable (2026-11-21) keep them only as text: listed with the
     // rest, without buttons.
     const older = found.some((p) => !p.blockId) ? [] : (c.findings || []).map((f) => (typeof f === 'string' ? { text: f } : f))
