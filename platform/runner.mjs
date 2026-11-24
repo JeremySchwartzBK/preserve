@@ -245,7 +245,16 @@ async function main() {
     if (job.state === 'failed') {
       const r0 = (v.reasons || [])[0] || {};
       const msg = FAILED[r0.code] || GENERIC;
-      await sql(`update copy_job set state = 'failed', step = null, finished_at = now(), verdict = ${lit(JSON.stringify(v))}::jsonb, error = ${lit(msg)}, internal_error = ${lit(((v.reasons || []).map((r) => `${r.code}: ${r.detail || ''}`).join('; ') + ' | steps: ' + JSON.stringify(job.steps || [])).slice(0, 1000))} where id = ${lit(j.id)};
+      const why = ((v.reasons || []).map((r) => `${r.code}: ${r.detail || ''}`).join('; ') + ' | steps: ' + JSON.stringify(job.steps || [])).slice(0, 1000);
+      // A failure on our side (a crash or a time limit, not the address) gets one more try before the person hears about
+      // it: every such failure up to 2026-11-24 copied fine on another run (thread "Replace progress screen with dashboard
+      // progress"). The claim counts tries; the second failure is reported.
+      if (!FAILED[r0.code] && j.tries < 2) {
+        await sql(`update copy_job set state = 'queued', step = null, worker_id = null, lease_until = null, internal_error = ${lit('tried again after: ' + why)} where id = ${lit(j.id)} and worker_id = ${lit(WORKER)}`);
+        log('trying again', j.copy_id, r0.code);
+        return;
+      }
+      await sql(`update copy_job set state = 'failed', step = null, finished_at = now(), verdict = ${lit(JSON.stringify(v))}::jsonb, error = ${lit(msg)}, internal_error = ${lit(why)} where id = ${lit(j.id)};
         update copy set status = case when live_version is null and not exists (select 1 from copy_version where copy_id = ${lit(j.copy_id)}) then 'failed' else 'review' end, updated_at = now() where id = ${lit(j.copy_id)};`);
       await notify(j.copy_id, 'copy-failed', `We couldn’t copy ${new URL(j.url).hostname.replace(/^www\./, '')}.`);
       log('failed', j.copy_id, r0.code);

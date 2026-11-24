@@ -23,7 +23,9 @@
     }
   ],
   // How many runners the host may have awake when a queue builds up (src/scale.js). 1 = one runner, as before.
-  "vars": { "RUNNERS_MAX": "1" },
+  "vars": { "RUNNERS_MAX": "1",
+    // Public: the app's own Supabase address and publishable key (app/config.js), to check sign-ins for /page-check.
+    "SUPABASE_URL": "https://uzgprpbhhrctklzumikn.supabase.co", "SUPABASE_KEY": "sb_publishable_jTU8T_Yd-vjaiZ9ysU94ww_2pJzFvCL" },
   "durable_objects": { "bindings": [{ "name": "RUNNER", "class_name": "Runner" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Runner"] }],
   // The safety net: once a minute, start the runner if there's work it hasn't picked up.

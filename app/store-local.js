@@ -1,7 +1,7 @@
 // Demo data store: keeps everything in this browser (localStorage) so the screens can be clicked through before the
 // real database is connected. Same shape as platform/schema.sql; store-supabase.js will replace it with no screen changes.
 // New copies are simulated here: the real copy job runs on a server, which this demo doesn't have.
-const KEY = 'preserve-demo-v5';
+const KEY = 'preserve-demo-v6';
 const VIEW = 'https://view.preserve.studio';
 const now = () => new Date().toISOString();
 const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
@@ -36,6 +36,17 @@ const SEED_FONTS = { '9x2arj4e': [
 ] };
 // The studio's saved font files ("Your fonts"): a later Preserve using the same font is covered by the upload.
 const SEED_STUDIO_FONTS = [{ id: 'gt-standard', name: 'GT Standard', file: 'GTStandard-M-Regular.woff2', at: ago(15) }];
+// ?demo&states: sample cards for every pending and failed state, to review the dashboard (2026-11-24). They run in
+// real time (speed 1); a Preserve made in the demo runs a minute a second.
+const SAMPLE_STATES = typeof location !== 'undefined' && /[?&]states\b/.test(location.search);
+const minsAgo = (m) => new Date(Date.now() - m * 60e3).toISOString();
+const SAMPLES = () => [
+  { id: 'smpl0001', name: 'saltandsage', title: 'Salt & Sage', url: 'https://www.saltandsage.studio/', status: 'processing', created: minsAgo(8), job: { state: 'working', step: 'export', attempt: 1, startedAt: minsAgo(7), speed: 1 } },
+  { id: 'smpl0002', name: 'northfield', title: 'Northfield Ceramics', url: 'https://www.northfieldceramics.com/', status: 'processing', created: minsAgo(2), job: { state: 'queued', attempt: 1, speed: 1 }, queue: { ahead: 8, working: 2, slots: 2 } },
+  { id: 'smpl0003', name: 'oakandiron', title: 'Oak & Iron', url: 'https://www.oakandiron.co/', status: 'processing', created: minsAgo(70), job: { state: 'working', step: 'quality-check', attempt: 1, startedAt: minsAgo(62), speed: 1 } },
+  { id: 'smpl0004', name: 'bluehour', title: 'bluehour.design', url: 'https://bluehour.design/', status: 'failed', created: minsAgo(30), failKind: 'address', message: 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.' },
+  { id: 'smpl0005', name: 'fernway', title: 'fernway.com', url: 'https://www.fernway.com/', status: 'failed', created: minsAgo(90), failKind: 'ours', message: '' },
+].map((c) => ({ notes: [], pins: [], versions: [], live: null, fonts: null, ...c }));
 const FONT_FILE = /\.(woff2|woff|otf|ttf)$/i;
 const squash = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -51,6 +62,18 @@ let db = load();
 const listeners = new Set();
 const emit = () => { save(db); listeners.forEach((f) => f()); };
 
+// Simulated copy job: the runner's steps (runner.mjs STEP), each its median length (app.js STEP_END) at a minute a second.
+const DEMO_STEPS = [['check-url', 0.1], ['capture-and-build', 3.3], ['export', 3.6], ['scrub', 0.3], ['quality-check', 15.3]];
+function run(c, attempt, finish) {
+  c.job = { state: 'working', step: DEMO_STEPS[0][0], attempt, startedAt: now() }; emit();
+  let i = 0;
+  const next = () => {
+    if (c.status !== 'processing') return;
+    if (++i >= DEMO_STEPS.length) return finish();
+    c.job = { ...c.job, step: DEMO_STEPS[i][0] }; emit(); setTimeout(next, DEMO_STEPS[i][1] * 1000 + (attempt > 1 && DEMO_STEPS[i][0] === 'quality-check' ? 4300 : 0));
+  };
+  setTimeout(next, DEMO_STEPS[0][1] * 1000);
+}
 export const store = {
   view: VIEW,
   onChange(f) { listeners.add(f); return () => listeners.delete(f); },
@@ -58,7 +81,7 @@ export const store = {
   me() { return db?.person || null; },
   signIn(email, name) {
     db = { person: { email, name: name || email.split('@')[0] }, studio: { slug: 'demo', name: (name || 'My') + ' Studio', plan: 'studio', fonts: SEED_STUDIO_FONTS },
-      copies: SEED_COPIES.map((c) => ({ ...c, fonts: SEED_FONTS[c.id] ? SEED_FONTS[c.id].map((x) => ({ ...x })) : null, pins: (SEED_FINDINGS[c.id] || []).map((p, i) => ({ ...p, id: 'f' + i, at: c.created })), versions: [{ v: 1, at: c.created }], live: c.status === 'ready' ? 1 : null })), notifications: [] };
+      copies: [...(SAMPLE_STATES ? SAMPLES() : []), ...SEED_COPIES.map((c) => ({ ...c, fonts: SEED_FONTS[c.id] ? SEED_FONTS[c.id].map((x) => ({ ...x })) : null, pins: (SEED_FINDINGS[c.id] || []).map((p, i) => ({ ...p, id: 'f' + i, at: c.created })), versions: [{ v: 1, at: c.created }], live: c.status === 'ready' ? 1 : null, ...(SAMPLE_STATES && c.id === '9x2arj4e' ? { refineFailed: true } : {}) }))], notifications: [] };
     emit();
   },
   signOut() { db = null; emit(); },
@@ -141,7 +164,13 @@ export const store = {
   },
   // Accepting goes live if the plan has room, and otherwise starts archived (approve_copy in schema-review-flow.sql).
   approve(id, fontCert) { const c = this.copy(id); if (fontCert) (c.fontLog ||= []).push({ ...fontCert, by: db.person.email, at: now() }); c.status = this.liveCount() < this.plan().copies ? 'ready' : 'archived'; c.live = c.versions.at(-1).v; c.findings = []; c.pins = c.pins.filter((p) => (p.kind !== 'issue' || p.meta?.report) && p.kind !== 'finding'); emit(); },
-  // Simulated copy job. The steps and timing mirror the real one (harness/make-copy.mjs, 2-4 minutes), sped up.
+  // The quick address check (store-supabase.js checkPage): the demo can only make its five test sites.
+  checkPage(url) {
+    let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return 'That doesn’t look like a web address.'; }
+    const bare = (h) => h.replace(/^www\./, '');
+    return SEED_COPIES.some((x) => bare(new URL(x.url).hostname) === bare(u.hostname)) ? null : 'This demo can only preserve its five test sites: minaab.com, breathpod.com, designforward.live, xanadu.nyc and hello-world-kosa.squarespace.com.';
+  },
+  // A new Preserve, simulated (run, above).
   create(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return { error: 'That doesn’t look like a web address.' }; }
     if (this.inUse() >= this.plan().copies) return { error: `Your ${this.plan().name} plan’s Preserves are all in use. Archive one or upgrade your plan to make another.` };
@@ -150,31 +179,22 @@ export const store = {
     const id = known ? known.id : Math.random().toString(36).slice(2, 10);
     let name = (known?.name || u.hostname.replace(/^www\./, '').split('.')[0]).replace(/[^a-z0-9]+/g, '-');
     while (db.copies.some((c) => c.name === name && c.status !== 'deleted')) name += '-2';
-    const c = { id, name, title: known?.title || u.hostname.replace(/^www\./, ''), url: u.href, status: 'processing', step: 0, created: now(), notes: [], pins: [], versions: [], live: null, simulated: !known };
+    const c = { id, name, title: known?.title || u.hostname.replace(/^www\./, ''), url: u.href, status: 'processing', created: now(), notes: [], pins: [], versions: [], live: null, simulated: !known };
     db.copies.unshift(c); emit();
-    const steps = ['Checking the address', 'Opening the page on phone and desktop', 'Saving images, fonts and video', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
-    const tick = () => {
-      if (c.status !== 'processing') return;
-      c.step++;
-      if (c.step < steps.length) { emit(); setTimeout(tick, 1600); return; }
-      if (!known) { c.status = 'failed'; c.message = 'This demo can only preserve the five test sites. Real Preserves are made on our server, which the demo doesn’t use.'; }
+    // The real steps (runner.mjs), each as long as its median, at a minute a second: about 23 seconds in all.
+    run(c, 1, () => {
+      if (!known) { c.status = 'failed'; c.failKind = 'ours'; c.message = ''; }
       else { c.status = 'review'; c.versions.push({ v: 1, at: now() }); c.findings = known.findings || []; c.notes = known.notes; }
-      db.notifications.unshift({ at: now(), copy: c.id, text: c.status === 'review' ? `Your Preserve of ${c.title} is ready to review.` : `We couldn’t preserve ${c.title}.`, read: false });
       emit();
-    };
-    c.stepNames = steps;
-    setTimeout(tick, 1200);
+    });
     return { id };
   },
   // A refinement round, guided by the user's pinned notes (at least one new since the last round); up to 20 per copy.
   MAX_ROUNDS: 20,
   refine(id) {
-    const c = this.copy(id); c.status = 'processing'; c.step = 0; c.rounds = (c.rounds || 0) + 1; c.lastRoundAt = now(); emit();
+    const c = this.copy(id); c.status = 'processing'; c.refineFailed = false; c.rounds = (c.rounds || 0) + 1; c.lastRoundAt = now();
     // The demo can't compare with the live site: the oldest open pin stays "still different", the rest "look fixed".
     const judge = () => c.pins.filter((p) => p.kind === 'issue' && !p.meta?.report).forEach((p, i) => { p.meta = { ...p.meta, round_result: i === 0 ? 'still-different' : 'looks-fixed', round_version: c.versions.length + 1 }; });
-    const finish = () => { judge(); c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); db.notifications.unshift({ at: now(), copy: c.id, text: `Refinement ${c.rounds} of ${c.title} is ready to review.`, read: false }); emit(); };
-    const tick = () => { if (c.status !== 'processing') return; c.step++; if (c.step < c.stepNames.length) { emit(); setTimeout(tick, 1400); } else finish(); };
-    c.stepNames = c.stepNames || ['Re-reading your notes', 'Opening the page again', 'Adjusting the capture', 'Building your Preserve', 'Removing trackers and contact details', 'Comparing it with the live site'];
-    setTimeout(tick, 1200);
+    run(c, c.rounds + 1, () => { judge(); c.status = 'review'; c.pins = c.pins.filter((p) => p.kind !== 'finding'); c.findings = []; c.versions.push({ v: c.versions.length + 1, at: now(), from: 'refinement' }); emit(); });
   },
 };
