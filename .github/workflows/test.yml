@@ -20,6 +20,9 @@ jobs:
       - name: Addresses the runner refuses
         working-directory: platform
         run: node test-address-guard.mjs
+      - name: One issue is one item
+        working-directory: platform
+        run: node test-finding-items.mjs
       - name: Deleting a Preserve removes its files
         working-directory: platform
         run: node test-delete-files.mjs

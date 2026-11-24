@@ -26,11 +26,11 @@ import { mintReviewToken } from './review-token.mjs';
 import { spotMessage, pageMessage, groupMessage, MOVES, HIDDEN } from '../app/review-messages.js';
 import { adobe, ensureKit, syncFamilies, checkConnection } from './adobe.mjs';
 import { MOVE_FAMILY, codeOf } from '../harness/fix-menu.mjs';
+import { oneItemPerIssue, carryAnswers, sameKind } from './finding-items.mjs';
 
 // Our findings and the person's pins come back each round; a fix tried on one in an earlier round is never tried on it
 // again (fix-menu.mjs). A finding is the same issue as an earlier one on the same part when its kind is the same, or of
 // the same movement family (a drag found by two different tests).
-const sameKind = (a, b) => a === b || (!!MOVE_FAMILY[a] && MOVE_FAMILY[a] === MOVE_FAMILY[b]);
 const triedFor = (rows, code, blockId) => [...new Set(rows.filter((r) => r.block_id === blockId && sameKind(r.code, code)).flatMap((r) => r.tried || []))];
 
 if (!process.env.NODE_USE_ENV_PROXY) {
@@ -277,6 +277,8 @@ async function main() {
         rest.push({ ...list[0], blockId: at.blockId, x: at.x, y: at.y, pageY: at.pageY ?? list[0].pageY, code: codes[0], codes, noun: 'slideshow', text: groupMessage(codes) });
       }
       findingPins = rest.sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0)); }
+    // One issue is one item on both layouts (finding-items.mjs).
+    findingPins = oneItemPerIssue(findingPins);
     // What the check couldn't place on the page is answered like any other suspected issue (Jeremy, 2026-11-21: all
     // issues under Suspected issues): a pin with no block and no layout, which the app lists in both views, unlettered.
     for (const r of shown) if (!r.spots?.length) findingPins.push({ blockId: null, layout: null, code: r.code, text: pageMessage(r.code) });
@@ -288,14 +290,8 @@ async function main() {
     const answered = await sql(`select meta->>'code' as code, block_id, layout, coalesce(meta->>'verdict', '') as verdict, resolved_at is null as current,
         coalesce((meta->>'carried')::boolean, false) as carried from copy_pin
       where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)} and kind = 'finding' order by created_at desc, id desc`);
-    const fine = (v) => ['not-a-problem', 'fine', 'ignore'].includes(v);
-    for (const p of findingPins) {
-      const same = answered.filter((x) => x.code === p.code && x.block_id === p.blockId);
-      const here = same.find((x) => x.current && x.layout === p.layout && x.verdict);
-      const last = same.find((x) => x.verdict || x.carried);   // the newest answer, or a cleared one
-      if (here) p.verdict = here.verdict;
-      else if (last && fine(last.verdict)) p.verdict = last.verdict;
-    }
+    // Answers carry to the same issue in later rounds (finding-items.mjs).
+    carryAnswers(findingPins, answered);
     // No "Your site" / "Preserve" pictures any more: the review relies on the markers and a short description
     // (Jeremy, 2026-11-23). finding-crops.mjs stays in the harness, unused.
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
@@ -317,7 +313,7 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}), ...(p.tried ? { tried: p.tried } : {}), ...(p.say && !p.codes ? { say: p.say } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}), ...(p.tried ? { tried: p.tried } : {}), ...(p.spots ? { spots: p.spots } : {}), ...(p.say && !p.codes ? { say: p.say } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
           || jsonb_build_object('tried', (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from jsonb_array_elements_text(coalesce(meta->'tried', '[]'::jsonb) || ${lit(JSON.stringify(r.ai?.action && !['none', 'fonts', 'by-design', 'live-same'].includes(r.ai.action) ? [r.ai.action] : []))}::jsonb) x))
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
