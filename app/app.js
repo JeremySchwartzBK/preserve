@@ -3,7 +3,7 @@
 // Plain JS, no build step. Routes: #/ dashboard, #/new, #/copy/<id>, #/plan.
 import { store, PLANS } from './store.js';
 import { GOOGLE } from './config.js';
-import { spotMessage, pageMessage, HIDDEN } from './review-messages.js';
+import { spotMessage, pageMessage, groupMessage, HIDDEN } from './review-messages.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -419,7 +419,7 @@ const dismissedEarlier = (p) => !!p.meta.carried && verdictOf(p) === 'not-a-prob
 // layouts (their text names a width but no layout).
 const reviewable = (p) => !HIDDEN.has(p.meta.code) && !(/pixels wide/.test(p.body || '') && !/on (computers|phones)/.test(p.body || ''));
 // Shown in today's wording, by kind (review-messages.js); the stored text stays as it was.
-const fText = (p) => (!p.meta.code ? p.body : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
+const fText = (p) => (!p.meta.code ? p.body : p.meta.codes ? groupMessage(p.meta.codes) : p.blockId ? spotMessage(p.meta.code, p.meta.noun) : pageMessage(p.meta.code));
 // A finding the check couldn't place on the page has no block and no layout (runner.mjs): it is listed in both views,
 // after the lettered ones, and answered like any other.
 const inView = (p, layout) => p.layout === layout || !p.layout;
@@ -431,6 +431,7 @@ const pageWide = (p) => p.meta.code === 'first-screen-differs' || p.blockId === 
 // The "Your site" and "Preserve" pictures the runner cut for a finding (finding-crops.mjs), from the viewer on the
 // owner's signed link. A picture that can't load takes its pair away rather than leave a broken image.
 function cropPair(c, p) {
+  return '';   // Pictures taken out of the review (Jeremy, 2026-11-23): markers and short descriptions only.
   const src = p.meta.demoCrop ? (w) => `${p.meta.demoCrop}-${w}.webp`
     : p.meta.crop && store.view ? (w) => `${store.view}/c/${c.id}/findings/${p.meta.crop}-${w}.webp?review=${encodeURIComponent(view.reviewToken?.t || 1)}` : null;
   if (!src) return '';

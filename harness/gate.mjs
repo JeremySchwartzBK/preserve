@@ -271,18 +271,24 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       // Each gallery against the same one on the live page (by block): an arrow that moves it there must move it here,
       // one that plays by itself there must play here, and every slide shown must draw its picture.
       const liveG = new Map((info.liveSelfDiff[prof]?.galleries || []).map((g) => [g.key, g]));
-      const gal = { 'gallery-does-not-advance': [], 'gallery-does-not-autoplay': [], 'gallery-blank-slide': [] };
+      const gal = { 'gallery-does-not-advance': [], 'gallery-does-not-autoplay': [], 'gallery-blank-slide': [], 'gallery-dots-broken': [], 'gallery-drag-broken': [] };
       for (const g of c.galleries || []) {
         const lv = liveG.get(g.key);
         if (g.next === 'fail' && lv?.next !== 'fail') gal['gallery-does-not-advance'].push(g.arrow || g.anchor);
         if (lv?.autoplay && !g.autoplay) gal['gallery-does-not-autoplay'].push(g.anchor);
         if (g.blankSlides > (lv?.blankSlides || 0)) gal['gallery-blank-slide'].push(g.anchor);
+        // Its dots and dragging it (Studiomama, 2026-11-23): what changes the picture live must change it here.
+        if (lv?.dots === 'pass' && g.dots === 'fail') gal['gallery-dots-broken'].push(g.dot || g.anchor);
+        if (lv?.drag === 'pass' && g.drag === 'fail') gal['gallery-drag-broken'].push(g.anchor);
       }
       for (const [code, list] of Object.entries(gal)) if (list.length) layoutSpots[code] = list.slice(0, 3);
       const n = (k) => (gal[k].length > 1 ? `${gal[k].length} galleries: ` : '');
       if (gal['gallery-does-not-advance'].length) fail('gallery-does-not-advance', L(n('gallery-does-not-advance') + 'gallery/slideshow "next" does nothing'), 9);
       if (gal['gallery-does-not-autoplay'].length) fail('gallery-does-not-autoplay', L(n('gallery-does-not-autoplay') + 'a slideshow that plays by itself on the live page stays still'), 9);
       if (gal['gallery-blank-slide'].length) fail('gallery-blank-slide', L(n('gallery-blank-slide') + 'a gallery shows a slide whose picture never draws'));
+      if (gal['gallery-dots-broken'].length) fail('gallery-dots-broken', L(n('gallery-dots-broken') + 'a slideshow dot that changes the picture on the live page does nothing'), 9);
+      if (gal['gallery-drag-broken'].length) fail('gallery-drag-broken', L(n('gallery-drag-broken') + 'dragging a slideshow that moves on the live page does nothing'), 9);
+      if (c.pointer === 'fail') fail('pointer-missing', L('the pointer is hidden and nothing follows the mouse'), 9);
       // A part that moves by itself on the live page must move in the copy too (galleries have their own check above).
       {
         mark(`${prof}-motion`);
@@ -309,7 +315,11 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
         if (liveB?.error) warnings.push(L(`behavior check on the live page: ${liveB.error}`));
         if (copyB.error) warnings.push(L(`behavior check on the copy: ${copyB.error}`));
         info.behavior = { ...(info.behavior || {}), [prof]: { live: liveB, copy: copyB } };
-        for (const [code, list] of Object.entries(compareBehavior(liveB, copyB, prof))) {
+        // A section holding a slideshow that plays by itself changes while the live page scrolls just from playing; the
+        // gallery check above judges that (Arts & Parts, 2026-11-23: its hero showed up as a lost scroll effect).
+        const playsLive = new Set((info.liveSelfDiff[prof]?.galleries || []).filter((g) => g.autoplay).map((g) => g.key));
+        for (const [code, all] of Object.entries(compareBehavior(liveB, copyB, prof))) {
+          const list = code === 'scroll-effect-lost' ? all.filter((x) => !playsLive.has(x.at?.blockId) && !(x.at?.comp && playsLive.size)) : all;
           if (!list.length) continue;
           layoutSpots[code] = list.slice(0, 3).map((x) => x.at);
           fail(code, L(`${list.length > 1 ? list.length + ' places: ' : ''}${BEHAVIOR_TEXT[code]} (${list.slice(0, 3).map((x) => x.detail).join('; ')})`));
