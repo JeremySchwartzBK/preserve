@@ -37,25 +37,31 @@ const LOCAL = /^https?:\/\/([^/?#]*\.)?(localhost|local|internal|lan|home|corp|t
 
 // GET /page-check?url=<address> from the app, signed in (the person's sign-in token, checked with Supabase), so it isn't
 // a way for anyone to have us fetch pages. Answers { problem: code or null, message }.
-export async function pageCheck(req, { signedIn, fetch: f = fetch, timeoutMs = 8000 }) {
+// record(personId, url, seen): keeps a site we don't cover yet on the list, so the person can hear when we do (best effort).
+export async function pageCheck(req, { signedIn, record = async () => {}, fetch: f = fetch, timeoutMs = 8000 }) {
   const origin = req.headers.get('origin') || '';
   const cors = ORIGINS.includes(origin) ? { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization', vary: 'origin' } : {};
   const answer = (body, status = 200) => Response.json(body, { status, headers: { ...cors, 'cache-control': 'no-store' } });
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   const url = new URL(req.url).searchParams.get('url') || '';
   if (url.length > 2000 || !OK_URL.test(url) || LOCAL.test(url)) return answer({ error: 'bad-url' }, 400);
-  if (!(await signedIn((req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).catch(() => false))) return answer({ error: 'not-signed-in' }, 401);
+  const who = await signedIn((req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')).catch(() => null);
+  if (!who) return answer({ error: 'not-signed-in' }, 401);
   try {
     const r = await f(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs), headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36', accept: 'text/html' } });
     const html = (await r.text()).slice(0, MAX_BYTES);
     const problem = pageProblem(r.status, html, url);
+    if (problem === 'not-supported') await record(who.id, r.url || url, platformsSeen(html)).catch(() => {});
     return answer({ problem, message: problem ? PROBLEM_TEXT[problem] : null });
   } catch { return answer({ problem: null }); }  // slow or a network hiccup: let the copy's own check decide
 }
 
 // Is this a live sign-in token for our Supabase project? Asks Supabase (its user endpoint), with the public key.
+// The signed-in person ({ id }), or null.
 export const supabaseSignedIn = (env, f = fetch) => async (token) => {
-  if (!token || !env.SUPABASE_URL || !env.SUPABASE_KEY) return false;
+  if (!token || !env.SUPABASE_URL || !env.SUPABASE_KEY) return null;
   const r = await f(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_KEY, authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
-  return r.ok;
+  if (!r.ok) return null;
+  const u = await r.json().catch(() => null);
+  return u?.id ? { id: u.id } : null;
 };

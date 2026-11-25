@@ -14,10 +14,12 @@ ok('a lock screen is named before its 401', pageProblem(401, LOCK, 'https://www.
 ok('a locked page with ?password= is let through', pageProblem(401, LOCK, 'https://www.clientsite.com/?password=abc') === null);
 
 const req = (url, { token = 'good', origin = 'https://app.preserve.studio' } = {}) => new Request(`https://host/page-check?url=${encodeURIComponent(url)}`, { headers: { origin, authorization: `Bearer ${token}` } });
-const signedIn = async (t) => t === 'good';
+const signedIn = async (t) => (t === 'good' ? { id: 'u1' } : null);
+const recorded = [];
+const record = async (...a) => { recorded.push(a); };
 const page = (html, status = 200) => async () => new Response(html, { status });
 {
-  const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, fetch: page('<html>Shopify</html>') });
+  const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, record, fetch: page('<html><script src="https://cdn.shopify.com/a.js"></script></html>') });
   const j = await r.json();
   ok('says what is wrong, in words, with CORS for the app', j.problem === 'not-supported' && /expanded coverage/.test(j.message) && !/Squarespace/.test(j.message) && r.headers.get('access-control-allow-origin') === 'https://app.preserve.studio');
 }
@@ -37,5 +39,6 @@ const page = (html, status = 200) => async () => new Response(html, { status });
   const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, fetch: page(SQS) });
   ok('fine page: no problem', (await r.json()).problem === null);
 }
+ok('a site we don\'t cover is put on the list, with who and what was seen', recorded.length === 1 && recorded[0][0] === 'u1' && recorded[0][2].join() === 'shopify');
 console.log(fails ? `${fails} failed` : 'all passed');
 process.exit(fails ? 1 : 0);

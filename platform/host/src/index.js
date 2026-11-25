@@ -93,7 +93,16 @@ export default {
       } });
     }
     if (url.pathname === '/page-check' && (req.method === 'GET' || req.method === 'OPTIONS')) {
-      return pageCheck(req, { signedIn: supabaseSignedIn(env) });
+      // A site we don't cover yet goes on the list (schema-unsupported.sql), once per person and site.
+      const record = async (personId, page, seen) => {
+        const db = postgres(env.DATABASE_URL, { max: 1, prepare: false });
+        try {
+          await db`insert into unsupported_site (person_id, studio_id, url, host, seen, source)
+            values (${personId}, (select studio_id from studio_member where person_id = ${personId} limit 1), ${page}, ${new URL(page).hostname.replace(/^www\./, '')}, ${seen}, 'start')
+            on conflict (person_id, host) do nothing`;
+        } finally { await db.end(); }
+      };
+      return pageCheck(req, { signedIn: supabaseSignedIn(env), record });
     }
     return new Response(null, { status: 404 });
   },
