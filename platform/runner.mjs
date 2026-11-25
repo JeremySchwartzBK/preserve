@@ -315,6 +315,9 @@ async function main() {
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
     const fonts = fontRows(v.info?.fonts || v.pages?.[0]?.info?.fonts);
+    // In the pin updates below, the list of tried actions is built under the alias t(action): copy_pin has its own column
+    // x, so a bare x would name the pin's column and Postgres refuses the update ("aggregate functions are not allowed in
+    // UPDATE"). Comments go here, never inside the SQL text: Postgres reads // as an error.
     await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format, fonts)
         values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)}, 2, ${lit(JSON.stringify(fonts))}::jsonb);
       update copy_job set state = ${lit(job.state)}, step = null, finished_at = now(), version = ${next}, verdict = ${lit(JSON.stringify(v))}::jsonb where id = ${lit(j.id)};
@@ -323,8 +326,6 @@ async function main() {
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
         values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}), ...(p.tried ? { tried: p.tried } : {}), ...(p.spots ? { spots: p.spots } : {}), ...(p.say && !p.codes ? { say: p.say } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
-      // The list of tried actions is built under the alias t(action): copy_pin has its own column x, so a bare x here would
-      // name the pin's column and Postgres refuses the update ("aggregate functions are not allowed in UPDATE").
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
           || jsonb_build_object('tried', (select coalesce(jsonb_agg(distinct t.action), '[]'::jsonb) from jsonb_array_elements_text(coalesce(meta->'tried', '[]'::jsonb) || ${lit(JSON.stringify(r.ai?.action && !['none', 'fonts', 'by-design', 'live-same'].includes(r.ai.action) ? [r.ai.action] : []))}::jsonb) as t(action)))
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
