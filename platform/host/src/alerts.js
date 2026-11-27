@@ -4,7 +4,7 @@
 // ALERT_FROM are set on the host (the mail service needs a sending domain first).
 
 // Failures that are the page's doing, not ours: the person is told why in the app, and there is nothing for us to fix.
-export const NOT_OURS = ['not-squarespace', 'page-unreachable', 'password-protected'];
+export const NOT_OURS = ['not-supported', 'not-squarespace', 'page-unreachable', 'password-protected'];
 export const WINDOW_MIN = 15;      // how often the check runs, and how far back it looks for failures
 export const QUEUE_MAX_MIN = 15;   // a job waiting longer than this means the queue is backing up
 

@@ -290,9 +290,12 @@ const shotOf = (c, t) => {
   if (c.status === 'failed') return `<div class="shot">${img}</div>`;
   return `<a href="#/copy/${c.id}" class="shot">${img}</a>`;
 };
-// Failed (Jeremy, 2026-11-24): an address we can't use says why and lets the person fix it; anything on our side says
+// Failed (Jeremy, 2026-11-24): a site we don't cover yet says we'll let them know (no platform named); an address we
+// can't open says why and lets the person fix it; anything on our side says
 // we're on it (it has already been tried twice, runner.mjs).
-const failedBody = (c) => c.failKind === 'address'
+const failedBody = (c) => c.failKind === 'unsupported'
+  ? `<p class="fail"><b>We can’t preserve this site yet</b>We’ll let you know when we’ve expanded coverage to this site.</p><div class="actions"><button class="btn small secondary" data-rm="${c.id}">Remove</button></div>`
+  : c.failKind === 'address'
   ? `<p class="fail"><b>We couldn’t open this page</b>${esc(c.message || '')}</p><div class="actions"><button class="btn small" data-readdr="${c.id}">Edit address</button><button class="btn small secondary" data-rm="${c.id}">Remove</button></div>`
   : `<p class="fail"><b>We couldn’t finish this Preserve</b>We’ve been told and we’re on it.</p><div class="actions"><button class="btn small secondary" data-rm="${c.id}">Remove</button></div>`;
 function card(c) {

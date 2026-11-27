@@ -7,18 +7,21 @@ const SQS = '<!-- This is Squarespace. --><html><main>Hello</main></html>';
 const LOCK = '<html><div class="squarespace-locked">Enter password</div></html>';
 
 ok('a Squarespace page is fine', pageProblem(200, SQS, 'https://www.clientsite.com/') === null);
-ok('another platform is named', pageProblem(200, '<html><main>Wix</main></html>', 'https://www.clientsite.com/') === 'not-squarespace');
+ok('a platform we don\'t cover is not supported', pageProblem(200, '<html><main>Wix</main></html>', 'https://www.clientsite.com/') === 'not-supported');
+ok('Shopify is seen but not covered yet', pageProblem(200, '<script src="https://cdn.shopify.com/x.js"></script><main></main>', 'https://shop.clientsite.com/') === 'not-supported');
 ok('a missing page is unreachable', pageProblem(404, SQS, 'https://www.clientsite.com/x') === 'page-unreachable');
 ok('a lock screen is named before its 401', pageProblem(401, LOCK, 'https://www.clientsite.com/') === 'password-protected');
 ok('a locked page with ?password= is let through', pageProblem(401, LOCK, 'https://www.clientsite.com/?password=abc') === null);
 
 const req = (url, { token = 'good', origin = 'https://app.preserve.studio' } = {}) => new Request(`https://host/page-check?url=${encodeURIComponent(url)}`, { headers: { origin, authorization: `Bearer ${token}` } });
-const signedIn = async (t) => t === 'good';
+const signedIn = async (t) => (t === 'good' ? { id: 'u1' } : null);
+const recorded = [];
+const record = async (...a) => { recorded.push(a); };
 const page = (html, status = 200) => async () => new Response(html, { status });
 {
-  const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, fetch: page('<html>Shopify</html>') });
+  const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, record, fetch: page('<html><script src="https://cdn.shopify.com/a.js"></script></html>') });
   const j = await r.json();
-  ok('says what is wrong, in words, with CORS for the app', j.problem === 'not-squarespace' && /Squarespace/.test(j.message) && r.headers.get('access-control-allow-origin') === 'https://app.preserve.studio');
+  ok('says what is wrong, in words, with CORS for the app', j.problem === 'not-supported' && /expanded coverage/.test(j.message) && !/Squarespace/.test(j.message) && r.headers.get('access-control-allow-origin') === 'https://app.preserve.studio');
 }
 {
   const r = await pageCheck(req('https://www.clientsite.com/', { token: 'bad' }), { signedIn, fetch: page(SQS) });
@@ -36,5 +39,6 @@ const page = (html, status = 200) => async () => new Response(html, { status });
   const r = await pageCheck(req('https://www.clientsite.com/'), { signedIn, fetch: page(SQS) });
   ok('fine page: no problem', (await r.json()).problem === null);
 }
+ok('a site we don\'t cover is put on the list, with who and what was seen', recorded.length === 1 && recorded[0][0] === 'u1' && recorded[0][2].join() === 'shopify');
 console.log(fails ? `${fails} failed` : 'all passed');
 process.exit(fails ? 1 : 0);
