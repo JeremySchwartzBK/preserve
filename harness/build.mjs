@@ -789,10 +789,13 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)}
 // page switching on its own raced it and left the wrong layout showing.
 const BREAKPOINT = 768;
 const LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<script>location.replace(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
+<script>location.replace((Math.min(document.documentElement.clientWidth||innerWidth,screen.width||1e9)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
 <body><noscript><a href="desktop.html">Open the preview</a></noscript></body></html>`;
+// The width that picks a layout is never more than the screen's: on a phone, something reaching past the screen's edge
+// makes the page wider than the screen (the browser zooms out to fit it), which once flipped Honeybelle's phone copy
+// to its computer layout (2026-11-27). A computer's screen is at least as wide as its window, so there nothing changes.
 const widthScript = (layout) => `<script id="preserve-width">(function(){if(window.top!==window)return;var m=${layout === 'mobile' ? 'true' : 'false'},t;
-function w(){return document.documentElement.clientWidth||innerWidth}
+function w(){return Math.min(document.documentElement.clientWidth||innerWidth,screen.width||1e9)}
 addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((w()<${BREAKPOINT})===m)return;
 var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}
 if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
