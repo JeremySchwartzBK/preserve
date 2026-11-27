@@ -15,7 +15,8 @@ export const FIXES = {
   'drag-lost': ['add-drag'],
   'gallery-drag-broken': ['add-drag'],
   'gallery-does-not-autoplay': ['record-longer', 'play-on-timer'],
-  'widget-frozen': ['record-longer', 'play-on-timer', 'still'],
+  // No photograph here: a part that should move can't be fixed by a picture that doesn't (Xanadu, 2026-11-27).
+  'widget-frozen': ['record-longer', 'play-on-timer'],
   'gallery-does-not-advance': ['record-longer'],
   'gallery-dots-broken': ['record-longer'],
   'gallery-blank-slide': ['record-longer', 'wait-longer'],
