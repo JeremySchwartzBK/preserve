@@ -16,11 +16,11 @@ const CT = { html: 'text/html; charset=utf-8', css: 'text/css', js: 'application
 
 // What the page shows, without what changes on its own by design (classes and styles, which our slideshows and
 // entrance animations set) or what is ours (preserve-* scripts and pins).
-function snapshot() {
+function snapshot(withText = true) {
   const out = [];
   const walk = (n) => {
     for (const c of n.childNodes) {
-      if (c.nodeType === 3) { const t = c.textContent.replace(/\s+/g, ' ').trim(); if (t) out.push('"' + t); continue; }
+      if (c.nodeType === 3) { const t = withText && c.textContent.replace(/\s+/g, ' ').trim(); if (t) out.push('"' + t); continue; }
       if (c.nodeType !== 1 || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(c.tagName) || /^preserve-/.test(c.id || '')) continue;
       out.push('<' + c.tagName + ['src', 'href', 'alt', 'aria-label'].map((a) => (c.getAttribute(a) ? ` ${a}=${c.getAttribute(a)}` : '')).join(''));
       walk(c);
@@ -51,14 +51,14 @@ export async function steady(stage) {
   });
   const base = `http://127.0.0.1:${srv.address().port}`;
   const browser = await launch();
-  const load = async (layout, without = []) => {
+  const load = async (layout, without = [], withText = true) => {
     const ctx = await browser.newContext({ ...PROFILES[layout].context });
     await ctx.addInitScript(() => { window.__pvStill = true; });
     const page = await ctx.newPage();
     try {
       await page.goto(`${base}/${layout}.html?without=${without.join(',')}`, { waitUntil: 'load', timeout: 60000 });
       await page.waitForTimeout(SETTLE_MS);
-      return await page.evaluate(snapshot);
+      return await page.evaluate(snapshot, withText);
     } finally { await ctx.close(); }
   };
   const agree = async (layout, without) => (await load(layout, without)) === (await load(layout, without));
@@ -84,6 +84,33 @@ export async function steady(stage) {
       htmlOf[file] = html;
       r.steadyAfter = await agree(layout, []);
       report.frozen.push(...r.frozen.map((f) => ({ layout, ...f })));
+    }
+    // Owner code already ran once on the live site, and the copy is a picture of the page after it did. Code that builds
+    // something when the page opens (Samuel Sparrow's phone-menu links) would build it a second time, so the copy would
+    // show it twice. Such code is frozen: what it built is already in the copy. Code that only waits for clicks, runs a
+    // timer or changes words (a counter) leaves the page's parts as they are, and keeps running. Parts only, not words.
+    for (const layout of ['desktop', 'mobile']) {
+      const file = path.join(stage, `${layout}.html`);
+      if (!htmlOf[file]) continue;
+      const left = [...htmlOf[file].matchAll(/data-pv-owner="(\d+)"/g)].map((m) => m[1]);
+      if (!left.length) continue;
+      const r = report.layouts[layout];
+      const as = await load(layout, [], false);
+      if (as === await load(layout, left, false)) continue;
+      const redo = [];
+      for (const i of left) if (as !== await load(layout, [i], false)) redo.push(i);
+      // Each alone changes nothing, yet together they do: they work as one, so they freeze as one.
+      for (const i of redo.length ? redo : left) {
+        const m = new RegExp(`<script\\b[^>]*data-pv-owner="${i}"[^>]*>([\\s\\S]*?)</script>`).exec(htmlOf[file]);
+        const f = { script: i, why: 'builds again what the copy already shows', what: (m?.[1] || '').replace(/^(document\.addEventListener\('DOMContentLoaded',function\(\)\{)?\{const Date=[^;]*;try\{/, '').trim().slice(0, 140) };
+        (r.frozen ||= []).push(f); report.frozen.push({ layout, ...f });
+      }
+      htmlOf[file] = (redo.length ? redo : left).reduce((h, i) => h.replace(new RegExp(`<script\\b[^>]*data-pv-owner="${i}"[^>]*>[\\s\\S]*?</script>`), ''), htmlOf[file]);
+      fs.writeFileSync(file, htmlOf[file]);
+    }
+    // With all its users frozen, our copy of jQuery has nothing left to do.
+    for (const [file, html] of Object.entries(htmlOf)) {
+      if (!/data-pv-lib=/.test(html) && /id="preserve-lib-jquery"/.test(html)) fs.writeFileSync(file, html.replace(/<script id="preserve-lib-jquery"[^>]*><\/script>/, ''));
     }
   } finally { await browser.close(); srv.close(); }
   return report;

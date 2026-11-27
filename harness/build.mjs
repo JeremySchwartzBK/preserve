@@ -760,22 +760,31 @@ function classifyScript($, el) {
 // The site owner's own code (code blocks, footer injection): small inline scripts in the page body that only move
 // things on the page, such as counters, carousels and scrolling rows. They're kept in script-free copies when they
 // make no network calls and don't depend on Squarespace's or jQuery's scripts, which those copies don't load.
-function isOwnerScript($, el) {
-  if ($(el).attr('src') || !$(el).parents('body').length) return false;
+function isOwnerScript($, el) { return ownerScriptKind($, el) === 'plain'; }
+
+// Custom code stage two (Jeremy 2026-11-27): owner code written for jQuery (Xanadu's buttons that open sections, Naughty
+// Nancy's stacked pictures, Hello World's moved block) runs too, on our own copy of jQuery (harness/vendor, MIT
+// licence), never the site's or Squarespace's. It still may make no network calls and may not use Squarespace's own
+// scripts (Y, Static, Squarespace), which no copy loads. -> null (not owner code we keep), 'plain' or 'jquery'.
+const JQUERY_USE = /(^|[^\w.$])jQuery\s*[.(]|(^|[^\w.])\$\s*[.(]/;
+function ownerScriptKind($, el) {
+  if ($(el).attr('src') || !$(el).parents('body').length) return null;
   const type = ($(el).attr('type') || '').toLowerCase();
-  if (type && !/javascript|module|ecmascript/.test(type)) return false;
+  if (type && !/javascript|module|ecmascript/.test(type)) return null;
   const t = $(el).html() || '';
-  if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return false;
-  if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return false;
+  if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return null;
+  if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return null;
+  // jQuery's own ways of asking a server (and of loading another script) are network calls too.
+  if (/\$\.(get|post|getJSON|getScript|ajax)\s*\(|jQuery\.(get|post|getJSON|getScript|ajax)\s*\(|\.load\(\s*['"`]/.test(t)) return null;
   // Loaders for outside code (tag managers, referral widgets, ad pixels): they inject a script or image from another
   // host, which a copy blocks, leaving a failed request on every load. Owner code that only moves things has none.
   // Tag-manager-injected tags carry an empty id and a charset attribute.
-  if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return false;
-  if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return false;
-  if (/(^|[^\w.$])(Y|Static|Squarespace|jQuery|SQS)\s*\.|(^|[^\w.])\$\s*\(|window\.Static|fbq|gtag/.test(t)) return false;
+  if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return null;
+  if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return null;
+  if (/(^|[^\w.$])(Y|Static|Squarespace|SQS)\s*\.|window\.Static|fbq|gtag/.test(t)) return null;
   // Prototype Shopify adapter: theme and app code (anything naming Shopify, its apps' settings) is the platform's, not the owner's.
-  if (process.env.PRESERVE_PLATFORM === 'shopify' && /shopify|appstle|_ABConfig|klaviyo|judgeme|yotpo|rebuy|bold_|loox|okendo|stamped|theme\.|window\.theme/i.test(t)) return false;
-  return true;
+  if (process.env.PRESERVE_PLATFORM === 'shopify' && /shopify|appstle|_ABConfig|klaviyo|judgeme|yotpo|rebuy|bold_|loox|okendo|stamped|theme\.|window\.theme/i.test(t)) return null;
+  return JQUERY_USE.test(t) ? 'jquery' : 'plain';
 }
 
 // Kept owner code runs the same on every load (custom code stage one, Jeremy 2026-10-29): it sees a clock that reads
@@ -788,9 +797,10 @@ function PvDate(){if(!(this instanceof PvDate))return new D(now()).toString();va
 PvDate.prototype=D.prototype;PvDate.now=now;PvDate.parse=D.parse;PvDate.UTC=D.UTC;
 var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
+const JQUERY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'vendor', 'jquery-3.7.1.min.js');
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript, ownerScriptKind };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -810,10 +820,14 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
     // Scripts.
-    let owners = 0;
+    let owners = 0, jq = 0;
     $('script').each((_, el) => {
-      const c = v.scripts === 'none' ? (/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : isOwnerScript($, el) ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
+      const ok = v.scripts === 'none' && !/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? ownerScriptKind($, el) : null;
+      const c = v.scripts === 'none' ? (/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : ok === 'plain' ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : ok === 'jquery' ? { keep: true, kind: 'site owner code (uses jQuery)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
       if (c.kind === 'site owner code (self-contained)') { $(el).html(ownerWrap($(el).html())).attr('data-pv-owner', String(owners++)); }
+      // jQuery comes in after the page is read (deferred, so it never holds up the first screen), so code written for it
+      // waits for that moment; by then the page is all there, as it was when the owner's code ran on the live site.
+      if (c.kind === 'site owner code (uses jQuery)') { $(el).html(`document.addEventListener('DOMContentLoaded',function(){${ownerWrap($(el).html())}});`).attr('data-pv-owner', String(owners++)).attr('data-pv-lib', 'jquery'); jq++; }
       if (outName !== 'mobile.html') report.scripts.push({ keep: c.keep, kind: c.kind, what: (c.what || '').slice(0, 140) });
       if (!c.keep) $(el).remove();
     });
@@ -822,6 +836,11 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       const t0 = Math.round(fs.statSync(path.join(siteDir, src)).mtimeMs);
       const seed = [...(siteHost || name)].reduce((h, ch) => Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0, 2166136261);
       $('head').prepend(STEADY_SCRIPT(t0, seed));
+    }
+    if (jq) {
+      fs.mkdirSync(path.join(outDir, 'pv-lib'), { recursive: true });
+      fs.copyFileSync(JQUERY_FILE, path.join(outDir, 'pv-lib', path.basename(JQUERY_FILE)));
+      $('head').append(`<script id="preserve-lib-jquery" defer src="pv-lib/${path.basename(JQUERY_FILE)}"></script>`);
     }
     if (v.scripts === 'none') {
       $('noscript').remove();
