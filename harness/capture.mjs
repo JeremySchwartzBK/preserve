@@ -9,6 +9,7 @@ import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills, applyGalleryFixes, recordLonger } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
 import { LISTEN_INIT, recordInteractions } from './interact.mjs';
+import { PARALLAX_SCRIPT } from './build.mjs';
 
 const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
@@ -536,7 +537,8 @@ export async function scrollShown(page) {
     let k = 0;
     for (const e of document.body.querySelectorAll('*')) {
       const cs = getComputedStyle(e);
-      if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]')) continue;
+      // Section backgrounds pinned to the window fade in by section (build.mjs SECTION_FADE_SCRIPT), not once past a point.
+      if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]') || e.matches('section.page-section > .section-border')) continue;
       if (e.querySelectorAll('*').length > 20 || e.textContent.trim().length > 40) continue;
       const r = e.getBoundingClientRect();
       if (r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05) continue;
@@ -1103,6 +1105,10 @@ async function canvasStills(page, outDir, prof, info) {
         const q = op.getBoundingClientRect();
         if (q.width > 0 && q.height > 0) c.setAttribute('data-preserve-cbox', [r.left - q.left, r.top - q.top].map((v, i) => (100 * v / (i ? q.height : q.width)).toFixed(3)).concat([(100 * r.width / q.width).toFixed(3), (100 * r.height / q.height).toFixed(3)]).join(','));
       }
+      // Pinned to the window and as big as it (Hello World's full-screen drawing, sized by its own pixels): the copy
+      // keeps it filling the window at any width instead of the capture window's pixel size, which made the page wider
+      // than a smaller window.
+      if (cs.position === 'fixed' && Math.abs(r.width - innerWidth) <= 2 && Math.abs(r.height - innerHeight) <= 2) c.setAttribute('data-preserve-fullwin', '');
       out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
       // Squarespace's radial gradient background that follows the pointer: its settings, with colours resolved, so
       // our stand-in (build.mjs FOLLOW_SCRIPT) can move the glow the way the site does.
@@ -1358,6 +1364,10 @@ export async function capture(url, outDir) {
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });
+    // Parallax backgrounds framed as the copy frames them (and as live does at the top of the page): the live effect was
+    // swapped for its plain picture above, so without this the reference showed the picture unzoomed and the copy was
+    // counted as different (Frankly's hero, 21% of the first screen, 2026-11-23). Added after the page was saved.
+    if (info.mediaBackgrounds?.[prof]?.parallax) await page.addScriptTag({ content: PARALLAX_SCRIPT.replace(/^<script[^>]*>|<\/script>$/g, '') }).catch(() => {});
     await sleep(300);
     await page.screenshot({ path: path.join(outDir, `ref-${prof}.png`) });
     await page.screenshot({ path: path.join(outDir, `ref-full-${prof}.png`), fullPage: true }).catch(() => {});

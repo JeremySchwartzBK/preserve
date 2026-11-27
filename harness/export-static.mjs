@@ -392,7 +392,8 @@ for (const layout of ['desktop', 'mobile']) {
     const ptr = $(el).attr('data-pv-pointer');
     // Laid over its section (the usual background effect): fill it at any width, not the capture width's pixels.
     const cbox = ($(el).attr('data-preserve-cbox') || '').split(',').map(Number);
-    const fill = ptr || !/position\s*:\s*absolute/.test(style) ? ''
+    const fill = $(el).is('[data-preserve-fullwin]') ? ';position:fixed;left:0;top:0;width:100%;height:100%;max-width:none'
+      : ptr || !/position\s*:\s*absolute/.test(style) ? ''
       : cbox.length === 4 && cbox.every(Number.isFinite) ? `;left:${cbox[0]}%;top:${cbox[1]}%;width:${cbox[2]}%;height:${cbox[3]}%`
       : ';left:0;top:0;width:100%;height:100%';
     $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}${ptr ? ` data-pv-pointer="${ptr.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);

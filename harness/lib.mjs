@@ -35,6 +35,20 @@ export const PROFILES = {
 
 PROFILES['mobile-4g'].context = PROFILES.mobile.context;
 
+// Font changes are never a difference (Jeremy, 2026-11-23): when the copy shows a substitute (an Adobe font from
+// Squarespace's menu, a face Google Fonts lacks), the quality check shows the copy in the site's original fonts, so it
+// is compared with the live site (and capture's reference shots, taken at the same moment as the copy) in the same
+// fonts and only real differences count. The original files stay on our machine: they are only added to copy pages
+// opened by the check (served from 127.0.0.1), never to the copy itself. Set by gate.mjs for the length of a check.
+let COPY_FONT_CSS = null;
+export function useOriginalFontsInCopy(css) { COPY_FONT_CSS = css || null; }
+const addOriginalFonts = (css) => {
+  if (!/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) return;
+  // Last in the document, so these rules win over the copy's own for the same font names.
+  const add = () => { const st = document.createElement('style'); st.id = 'pv-check-original-fonts'; st.textContent = css; (document.body || document.documentElement).appendChild(st); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', add, { once: true }); else add();
+};
+
 export async function launch() {
   const proxy = process.env.HTTPS_PROXY
     ? { server: process.env.HTTPS_PROXY, bypass: '<-loopback>,localhost,127.0.0.1' }
@@ -42,7 +56,13 @@ export async function launch() {
   // Software WebGL: the runner has no GPU, and Chromium no longer falls back to software on its own, so canvas effects
   // (Squarespace's section backgrounds) never drew there and capture had nothing to keep (backbipoc, 2026-11-10).
   // PRESERVE_CHROMIUM: a browser other than Playwright's own (a dev machine whose Playwright browsers differ).
-  return chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ proxy, ...(process.env.PRESERVE_CHROMIUM ? { executablePath: process.env.PRESERVE_CHROMIUM } : {}), args: ['--disable-features=HttpsUpgrades', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  if (COPY_FONT_CSS) {
+    const css = COPY_FONT_CSS, newContext = browser.newContext.bind(browser), newPage = browser.newPage.bind(browser);
+    browser.newContext = async (o) => { const c = await newContext(o); await c.addInitScript(addOriginalFonts, css); return c; };
+    browser.newPage = async (o) => { const pg = await newPage(o); await pg.context().addInitScript(addOriginalFonts, css); return pg; };
+  }
+  return browser;
 }
 
 export async function applyThrottle(page, profile) {
@@ -70,6 +90,9 @@ export const OVERLAY_SELECTORS = [
   '[id^="fbt-ribbon"]',
   '[class*="Friendbuy-ribbon"]',
   '[data-preserve-promo]',
+  // Klaviyo's signup tab on the side of the window (Honeybelle's "Honey Club", 2026-11-23): it only opens the signup
+  // popup, and without the app it was left at the bottom over "Shop now". The popup itself is caught by markPromos.
+  '[class*="kl-teaser"]',
   // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
   ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
@@ -86,10 +109,19 @@ export const OVERLAY_SELECTORS = [
 export function markPromos() {
   const OFFER = /\d+\s*%\s*off|\$\s*\d+\s*off|discount|free shipping|refer a friend|give \$|get \$\d+|save \d+%|promo code|coupon/i;
   const CLOSE = /^\s*(x|×|✕|✖|close)\s*$/i;
+  const hasClose = (e) => [...e.querySelectorAll('*')].some((c) => CLOSE.test(c.textContent || '') || /close|dismiss/i.test(c.getAttribute('aria-label') || '') || /close|dismiss/i.test(c.className?.toString?.() || ''));
   let n = 0;
   for (const e of document.querySelectorAll('body *')) {
     const s = getComputedStyle(e);
-    if (s.position !== 'fixed' || s.display === 'none' || e.closest('header,#header,[data-preserve-promo]')) continue;
+    if (s.position !== 'fixed' || e.closest('header,#header,[data-preserve-promo]')) continue;
+    // A popup or dialog pinned to the window that asks for an email address: a newsletter signup from a form app
+    // (State of Sage's Flodesk popup has no dimmed layer, so the rule below missed it). Marked open or still closed:
+    // one that opens on a timer after this runs would otherwise be saved open. Never the site's own footer form or a
+    // signup block in the page, which are not pinned to the window.
+    // Named a popup or dialog, or carrying a close button (The Dial's form app names its layers only "animation-...").
+    if (!e.closest('nav') && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]')
+      && (/modal|popup|pop-up|dialog|lightbox/i.test(`${e.className?.toString?.() || ''} ${e.id} ${e.getAttribute('role') || ''}`) || e.getAttribute('aria-modal') === 'true' || hasClose(e))) { e.setAttribute('data-preserve-promo', ''); n++; continue; }
+    if (s.display === 'none') continue;
     const r = e.getBoundingClientRect();
     if (!r.width || !r.height) continue;
     // A layer over the whole window that dims the page behind it is a modal someone has to dismiss: a signup or
@@ -101,9 +133,16 @@ export function markPromos() {
     if (r.width * r.height > innerWidth * innerHeight * 0.2) continue;
     const text = (e.innerText || '').trim();
     if (!text || text.length > 200 || !OFFER.test(text)) continue;
-    const closeBtn = [...e.querySelectorAll('*')].some((c) => CLOSE.test(c.textContent || '') || /close|dismiss/i.test(c.getAttribute('aria-label') || '') || /close|dismiss/i.test(c.className?.toString?.() || ''));
-    if (!closeBtn) continue;
+    if (!hasClose(e)) continue;
     e.setAttribute('data-preserve-promo', ''); n++;
+  }
+  // Form apps that draw their popup inside a shadow root (The Dial's): the page only holds the host element, so a
+  // pinned email box with a close button inside it marks the host.
+  for (const h of document.querySelectorAll('body *')) {
+    if (!h.shadowRoot || h.closest('[data-preserve-promo]')) continue;
+    const pinned = [...h.shadowRoot.querySelectorAll('*')].some((e) => getComputedStyle(e).position === 'fixed'
+      && e.querySelector('input[type=email], input[name*="email" i], input[placeholder*="email" i]') && hasClose(e));
+    if (pinned) { h.setAttribute('data-preserve-promo', ''); n++; }
   }
   return n;
 }

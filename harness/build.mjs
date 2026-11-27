@@ -434,7 +434,7 @@ addEventListener('resize',function(){if(on)paint()})});
 // Squarespace's parallax background effect (capture.mjs mediaBackgrounds, data-pv-parallax): the section's picture
 // zooms by zoomStart..zoomEnd percent around its focal point, and drifts by "intensity" along "rotation", as the section
 // travels up the screen. Live draws it with WebGL; we move the picture itself with the same sums.
-const PARALLAX_SCRIPT = `<script id="preserve-parallax">(function(){
+export const PARALLAX_SCRIPT = `<script id="preserve-parallax">(function(){
 var L=[].slice.call(document.querySelectorAll('img[data-pv-parallax]')).map(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-parallax'))}catch(e){}
 var fx=c.fx==null?0.5:c.fx,fy=c.fy==null?0.5:c.fy;im.style.transformOrigin=(fx*100)+'% '+(fy*100)+'%';im.style.willChange='transform';
 var box=im.parentElement;if(box)box.style.overflow='hidden';return{im:im,c:c,fx:fx,fy:fy,box:box||im}});
@@ -591,6 +591,18 @@ else{el.style.opacity='0';el.style.visibility='hidden';el.style.pointerEvents='n
 set();addEventListener('scroll',set,{passive:true});
 if(c.top){el.style.cursor='pointer';el.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();scrollTo({top:0,behavior:'smooth'})},true)}
 });
+})();</script>`;
+
+// Squarespace's "background changes as you scroll" (Naughty Nancy, 2026-11-23): every section's background is pinned
+// to the window, later ones over earlier ones, and each fades in as its section reaches the top fifth of the window
+// (measured on live: none at 200 px from the top, all of it at the top, easing out). Saved at the top of the page, the
+// copy kept them as they were then, so the colour never changed.
+const SECTION_FADE_SCRIPT = `<script id="preserve-section-fade">(function(){
+var L=[].slice.call(document.querySelectorAll('section.page-section')).map(function(s){return{s:s,b:s.querySelector(':scope > .section-border')}}).filter(function(o){return o.b&&getComputedStyle(o.b).position==='fixed'});
+if(L.length<2)return;
+function upd(){var S=Math.min(200,innerHeight*0.22);L.forEach(function(o,i){var r=o.s.getBoundingClientRect(),p=i===0?1:Math.min(1,Math.max(0,(S-r.top)/S));
+o.b.style.opacity=String(Math.round((1-(1-p)*(1-p))*1e4)/1e4);o.b.style.visibility='visible'})}
+var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(function(){q=0;upd()})}},{passive:true});addEventListener('resize',upd);upd();
 })();</script>`;
 
 // Pointer followers (hello world studio's 3D cursor, not crispy enough's little pictures over some blocks; 2026-11-13):
@@ -882,6 +894,9 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('canvas[data-preserve-follow], img[data-pv-follow]').length) $('body').append(FOLLOW_SCRIPT);
       if ($('[data-pv-pointer]').length) $('body').append(POINTER_SCRIPT);
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
+      // Only where the saved page has the effect: two or more section backgrounds pinned to the window, some faded out.
+      { const fixedBg = $('section.page-section > .section-border').filter((_, el) => /position:\s*fixed/.test($(el).attr('style') || ''));
+        if (fixedBg.length > 1 && fixedBg.filter((_, el) => /opacity:\s*0(\.\d+)?\s*(;|$)/.test($(el).attr('style') || '')).length) $('body').append(SECTION_FADE_SCRIPT); }
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
       if ($('img[data-pv-parallax]').length) $('body').append(PARALLAX_SCRIPT);
       if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);

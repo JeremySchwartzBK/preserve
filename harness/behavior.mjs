@@ -82,7 +82,7 @@ export async function probeBehavior(browser, url, profileName, { isCopy = false 
       try {
         const res = await ctx.request.get(src, { timeout: 15000 });
         const ct = res.headers()['content-type'] || '';
-        if (res.ok() && /gif|webp|avif|png/.test(ct + src)) frames.set(src, (await sharp(await res.body(), { animated: true }).metadata()).pages || 1);
+        if (res.ok() && /gif|webp|avif|png/.test(ct + src)) frames.set(src, (await sharp(await res.body(), { animated: true, limitInputPixels: false }).metadata()).pages || 1);
       } catch { /* unreadable: counted as one frame */ }
     }
     for (const { src, at } of imgs) if ((frames.get(src) || 1) > 1) { out.animated[at.blockId] = (out.animated[at.blockId] || 0) + 1; remember(at); }
