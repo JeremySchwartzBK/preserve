@@ -447,6 +447,73 @@ o.im.style.transform='translate('+(dx/k*r.width).toFixed(2)+'px,'+(-dy/k*r.heigh
 var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(function(){q=0;upd()})}},{passive:true});addEventListener('resize',upd);upd();
 })();</script>`;
 
+// Squarespace's "liquid" image effect (capture.mjs mediaBackgrounds, data-pv-liquid; Xanadu, 2026-11-27): the picture
+// ripples slowly, as if seen through moving water. Our own drawing, not Squarespace's: smooth noise that drifts along
+// "rotation" at "speed" and changes shape at "morphSpeed" bends the picture by "intensity", in blobs sized by "scale",
+// rougher as "smoothness" drops, with "shadow" darkening the troughs. The picture is drawn as the page lays it out
+// (cover, around its focal point), in a canvas laid over it; the picture stays underneath and shows whenever the drawing
+// can't (no WebGL, picture not readable). Draws only on screen; one still frame while our checks compare pictures; the
+// plain picture for visitors who ask for less motion. Matched to the live effect by how much the picture changes over
+// 0.3 and 1.5 seconds on Xanadu (speed 50, intensity 10) and The Garret Group (speed 20, intensity 5): speed counts
+// twice over (squared), as on the live sites.
+const LIQUID_SCRIPT = `<script id="preserve-liquid">(function(){
+if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+var VS='attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}';
+var FS='precision highp float;varying vec2 v;uniform sampler2D T;uniform vec2 R,I,F;uniform float t,amp,frq,ang,spd,mor,shd,oct,sd;'+
+'float h(vec3 q){q=fract(q*.1031+sd*.013);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}'+
+'float n(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*f*(f*(f*6.-15.)+10.);'+
+'return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);}'+
+'float fb(vec3 x){float a=.5,s=0.,w=0.;for(int k=0;k<4;k++){if(float(k)>=oct)break;s+=a*n(x);w+=a;x=x*2.03+vec3(1.7,9.2,3.1);a*=.5;}return s/w;}'+
+'void main(){vec2 u=vec2(v.x,1.-v.y);float ar=R.x/R.y;vec2 d=vec2(cos(ang),-sin(ang));'+
+'vec2 q=vec2(u.x*ar,u.y)*frq-d*spd*t;float m=mor*t;'+
+'float a=fb(vec3(q,m)),b=fb(vec3(q+vec2(5.2,1.3),m+4.7));vec2 o=(vec2(a,b)-.5)*2.*amp;'+
+'vec2 w=(u-.5)*(1.-2.*amp)+.5+o;'+
+'float ri=I.x/I.y;vec2 sc=ri>ar?vec2(ar/ri,1.):vec2(1.,ri/ar);vec2 tu=F+(w-F)*sc;tu=clamp(tu,0.,1.);'+
+'vec4 c=texture2D(T,tu);c.rgb*=1.-shd*(.5-a);gl_FragColor=c;}';
+var L=[].slice.call(document.querySelectorAll('img[data-pv-liquid]'));if(!L.length)return;
+L.forEach(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-liquid'))}catch(e){return}
+var src=new Image();src.crossOrigin='anonymous';src.decoding='async';
+src.onload=function(){go(im,c,src)};
+function load(){src.src=im.currentSrc||im.src}
+if(im.complete&&(im.currentSrc||im.src))load();else im.addEventListener('load',load,{once:true});});
+function go(im,c,src){
+var cv=document.createElement('canvas');cv.setAttribute('aria-hidden','true');cv.setAttribute('data-pv-runtime','');
+cv.setAttribute('style','position:absolute;pointer-events:none;display:block;margin:0;padding:0;border:0');
+var gl=cv.getContext('webgl',{premultipliedAlpha:false,antialias:false,preserveDrawingBuffer:true});if(!gl)return;
+function sh(t,s){var o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
+var pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);
+if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return;gl.useProgram(pr);
+var bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+var pl=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pl);gl.vertexAttribPointer(pl,2,gl.FLOAT,false,0,0);
+var tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);
+try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src)}catch(e){return}
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+var U={};['T','R','I','F','t','amp','frq','ang','spd','mor','shd','oct','sd'].forEach(function(k){U[k]=gl.getUniformLocation(pr,k)});
+function cl(x,a,b){return Math.max(a,Math.min(b,x))}
+gl.uniform1i(U.T,0);gl.uniform2f(U.I,src.naturalWidth,src.naturalHeight);gl.uniform2f(U.F,cl(c.fx==null?.5:c.fx,0,1),cl(c.fy==null?.5:c.fy,0,1));
+gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0008);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,20)*0.55);gl.uniform1f(U.ang,(c.r||0)*Math.PI/180);
+gl.uniform1f(U.spd,cl(c.v||0,0,100)*cl(c.v||0,0,100)*0.0005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.003);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
+gl.uniform1f(U.oct,1+Math.round((100-cl(c.sm==null?100:c.sm,0,100))/34));gl.uniform1f(U.sd,(c.sd||0)%997);
+var box=im.parentNode;if(getComputedStyle(box).position==='static')box.style.position='relative';box.insertBefore(cv,im.nextSibling);
+var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),b=box.getBoundingClientRect(),cs=getComputedStyle(im);
+cv.style.left=(a.left-b.left-box.clientLeft)+'px';cv.style.top=(a.top-b.top-box.clientTop)+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
+cv.style.borderRadius=cs.borderRadius;cv.style.zIndex=cs.zIndex==='auto'?'':cs.zIndex;
+var dp=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(a.width*dp)),h=Math.max(1,Math.round(a.height*dp));
+if(w!==W||h!==H){W=w;H=h;cv.width=w;cv.height=h;gl.viewport(0,0,w,h);gl.uniform2f(U.R,w,h)}}
+var t0=performance.now(),on=false,raf=0,shown=false;
+function draw(){fit();gl.uniform1f(U.t,window.__pvStill?0:(performance.now()-t0)/1000);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+if(!shown){shown=true;im.style.visibility='hidden'}}
+function step(){raf=0;if(!on||document.hidden)return;draw();if(!window.__pvStill)raf=requestAnimationFrame(step)}
+draw();
+if('IntersectionObserver' in window)new IntersectionObserver(function(es){on=es[es.length-1].isIntersecting;if(on&&!raf)raf=requestAnimationFrame(step)},{rootMargin:'100px'}).observe(box);
+else{on=true;raf=requestAnimationFrame(step)}
+document.addEventListener('visibilitychange',function(){if(on&&!document.hidden&&!raf)raf=requestAnimationFrame(step)});
+addEventListener('resize',function(){if(!on)draw()});
+cv.addEventListener('webglcontextlost',function(){on=false;cv.remove();im.style.visibility=''});
+}
+})();</script>`;
+
 // Background videos hosted on Vimeo or YouTube (capture.mjs mediaBackgrounds, data-pv-bgvideo; Jeremy 2026-11-17): the
 // still from the video shows first; once the page has loaded, the provider's own background player (muted, looping, no
 // controls) goes in over it, sized to cover the section as live, and fades in only when it reports that it is playing.
@@ -906,6 +973,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
       if ($('img[data-pv-parallax]').length) $('body').append(PARALLAX_SCRIPT);
+      if ($('img[data-pv-liquid]').length) $('body').append(LIQUID_SCRIPT);
       if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);
       if ($('[data-pv-appear]').length) $('body').append(APPEAR_SCRIPT);
       if ($('[data-pv-tick]').length) $('body').append(TICKER_SCRIPT);

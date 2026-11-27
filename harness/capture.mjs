@@ -963,7 +963,7 @@ async function grabVideoFrame(page, v) {
   }).catch(() => null);
 }
 async function mediaBackgrounds(page, request, outDir, manifest) {
-  const found = { parallax: 0, videos: [] };
+  const found = { parallax: 0, liquid: 0, videos: [] };
   found.parallax = await page.evaluate(() => {
     let n = 0;
     for (const c of document.querySelectorAll('[data-controller="BackgroundImageFXParallax"]')) {
@@ -975,6 +975,31 @@ async function mediaBackgrounds(page, request, outDir, manifest) {
       c.querySelectorAll('canvas').forEach((cv) => (cv.closest('.background-fx-canvas') || cv).remove());
       im.style.visibility = 'visible';
       n++;
+    }
+    return n;
+  }).catch(() => 0);
+  // Squarespace's "liquid" image effect, on image blocks and section backgrounds (Xanadu, The Garret Group; 2026-11-27):
+  // the picture ripples slowly. Live draws it with WebGL, which a snapshot can't keep, so the copy showed a still photo
+  // of one moment. Keep the picture itself, note the effect's settings (data-pv-liquid) and drop the drawing; our own
+  // stand-in (build.mjs LIQUID_SCRIPT) redraws the ripple over the picture from those settings.
+  found.liquid = await page.evaluate(() => {
+    let n = 0;
+    const mark = (im, fx, box) => {
+      if (!im || !fx || fx.type !== 'liquid') return;
+      const f = (im.getAttribute('data-image-focal-point') || '0.5,0.5').split(',').map(Number);
+      const num = (v, d) => (Number.isFinite(+v) ? +v : d);
+      im.setAttribute('data-pv-liquid', JSON.stringify({ i: num(fx.intensity, 10), s: num(fx.scale, 2), r: num(fx.rotation, 0), v: num(fx.speed, 50), m: num(fx.morphSpeed, 5), sh: num(fx.shadow, 0), sm: num(fx.smoothness, 100), sd: num(fx.seed, 1), fx: Number.isFinite(f[0]) ? f[0] : 0.5, fy: Number.isFinite(f[1]) ? f[1] : 0.5 }));
+      box.querySelectorAll('canvas').forEach((cv) => (cv.closest('.background-fx-canvas') || cv).remove());
+      im.style.visibility = 'visible';
+      n++;
+    };
+    for (const c of document.querySelectorAll('.imageEffectContainer[data-effect]')) {
+      let fx = null; try { fx = JSON.parse(c.getAttribute('data-effect')); } catch {}
+      mark(c.parentElement && c.parentElement.querySelector('img'), fx, c);
+    }
+    for (const c of document.querySelectorAll('[data-controller="BackgroundImageFXLiquid"]')) {
+      let fx = null; try { fx = JSON.parse(c.closest('[data-current-context]').getAttribute('data-current-context')).backgroundMediaEffect; } catch {}
+      mark(c.querySelector('img.background-image-fx'), fx, c);
     }
     return n;
   }).catch(() => 0);
