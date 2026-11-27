@@ -70,6 +70,12 @@ export const OVERLAY_SELECTORS = [
   '[id^="fbt-ribbon"]',
   '[class*="Friendbuy-ribbon"]',
   '[data-preserve-promo]',
+  // Email-signup popups from the newsletter tools Squarespace sites embed. They mark themselves as popups, and open on a
+  // timer (State of Sage's Flodesk popup waits 30 seconds), so the dimmed-layer test in markPromos can miss them when
+  // they open after it runs. Their inline forms (Flodesk's data-ff-type="inline", Kit's inline format) stay.
+  '[data-ff-type="popup"]',
+  '.mc-modal', '.mc-modal-bg', '.mc-banner',
+  '.formkit-modal', 'form[data-format="modal"]', 'form[data-format="slide in"]', 'form[data-format="sticky bar"]',
   // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
   ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
