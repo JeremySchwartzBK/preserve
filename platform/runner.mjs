@@ -100,7 +100,9 @@ async function main() {
     return /<section\b/i.test(m[0]) ? 'Section' : 'Content';
   };
   const FAILED = {
-    'not-squarespace': 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.',
+    // No platform named (Jeremy, 2026-11-24); not-squarespace is the older code for the same thing.
+    'not-supported': 'We can’t preserve this site yet. We’ll let you know when we’ve expanded coverage to this site.',
+    'not-squarespace': 'We can’t preserve this site yet. We’ll let you know when we’ve expanded coverage to this site.',
     'page-unreachable': 'We couldn’t open this page. Check the address and that the site is public.',
     'password-protected': 'This page is password protected, so we couldn’t copy it.',
   };
@@ -249,6 +251,14 @@ async function main() {
       // A failure on our side (a crash or a time limit, not the address) gets one more try before the person hears about
       // it: every such failure up to 2026-11-24 copied fine on another run (thread "Replace progress screen with dashboard
       // progress"). The claim counts tries; the second failure is reported.
+      // A site on a platform we don't cover yet goes on the list, to hear when we do (schema-unsupported.sql).
+      if (['not-supported', 'not-squarespace'].includes(r0.code)) {
+        const host = new URL(j.url).hostname.replace(/^www\./, '');
+        const seen = ((r0.detail || '').match(/\(seen: ([^)]*)\)/)?.[1] || '').split(', ').filter(Boolean);
+        await sql(`insert into unsupported_site (person_id, studio_id, url, host, seen, source, copy_id)
+          select c.created_by, c.studio_id, ${lit(j.url)}, ${lit(host)}, ${lit('{' + seen.join(',') + '}')}::text[], 'copy', c.id from copy c where c.id = ${lit(j.copy_id)} and c.created_by is not null
+          on conflict (person_id, host) do nothing`).catch((e) => log('unsupported list not updated', j.copy_id, e.message));
+      }
       if (!FAILED[r0.code] && j.tries < 2) {
         await sql(`update copy_job set state = 'queued', step = null, worker_id = null, lease_until = null, internal_error = ${lit('tried again after: ' + why)} where id = ${lit(j.id)} and worker_id = ${lit(WORKER)}`);
         log('trying again', j.copy_id, r0.code);

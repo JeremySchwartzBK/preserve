@@ -7,7 +7,8 @@ import { SUPABASE_URL, SUPABASE_KEY, VIEW, HOST } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'pkce' } });
 // Address problems: the person can fix these by giving another address (runner.mjs FAILED, platform/host/src/alerts.js).
-const ADDRESS_CODES = ['not-squarespace', 'page-unreachable', 'password-protected'];
+const ADDRESS_CODES = ['page-unreachable', 'password-protected'];
+const UNSUPPORTED_CODES = ['not-supported', 'not-squarespace'];  // a site on a platform we don't cover yet
 const ERRORS = { 'not-a-font': 'That isn’t a font file. Upload a .woff2, .woff, .otf or .ttf file.', 'font-too-big': 'That file is too big for a web font. Upload one under 5 MB.', 'not-in-review': 'This Preserve has been accepted, so its fonts can’t change.', 'plan-limit': null, 'daily-limit': null, 'too-many-pins': 'This Preserve has reached its limit of 300 notes.', 'note-too-long': 'That note is too long. Keep it under 2,000 characters.', 'too-many-fonts': 'Your studio has uploaded 30 font files in the last 24 hours. You can upload more tomorrow.', 'bad-url': 'That doesn’t look like a web address.', 'name-taken': 'That name is taken in your studio.', 'bad-name': 'Use letters and numbers.', 'no-new-notes': 'Flag at least one new issue first.', 'refine-cap': 'This Preserve has had all 20 refinement rounds.', 'not-an-adobe-key': 'That doesn’t look like an Adobe Fonts API token. Copy the whole token from your Adobe Fonts token page and paste it again.', 'not-connected': 'Connect your Adobe Fonts account first.' };
 
 let me = null, studio = null, copies = [], queue = null, notes = [], studioFonts = [], ready = false, timer = null, adobeConn = null;
@@ -73,8 +74,8 @@ function shape(r) {
     // still waiting and the Refine button stays (Xanadu, 2026-11-24).
     lastRoundAt: jobs.filter((j) => j.state !== 'failed').map((j) => j.queued_at).sort().at(-1) || null,
     message: r.status === 'failed' ? (job?.error || null) : null,
-    // Why it failed: an address the person can change, or something on our side (anything else).
-    failKind: r.status === 'failed' ? (ADDRESS_CODES.includes(job?.code) || /^(This page isn’t on|We couldn’t open this page|This page is password)/.test(job?.error || '') ? 'address' : 'ours') : null,
+    // Why it failed: a site we don't cover yet, an address the person can change, or something on our side.
+    failKind: r.status === 'failed' ? (UNSUPPORTED_CODES.includes(job?.code) || /^(This page isn’t on|We can’t preserve this site yet)/.test(job?.error || '') ? 'unsupported' : ADDRESS_CODES.includes(job?.code) || /^(We couldn’t open this page|This page is password)/.test(job?.error || '') ? 'address' : 'ours') : null,
     // The latest refinement didn't finish: the earlier version is still the one in review.
     refineFailed: r.status === 'review' && job?.state === 'failed' && job.attempt > 1,
     fonts: r.status === 'review' || last?.fonts?.length ? fontsOf(r, last) : null,

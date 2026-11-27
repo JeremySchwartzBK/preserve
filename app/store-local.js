@@ -44,7 +44,8 @@ const SAMPLES = () => [
   { id: 'smpl0001', name: 'saltandsage', title: 'Salt & Sage', url: 'https://www.saltandsage.studio/', status: 'processing', created: minsAgo(8), job: { state: 'working', step: 'export', attempt: 1, startedAt: minsAgo(7), speed: 1 } },
   { id: 'smpl0002', name: 'northfield', title: 'Northfield Ceramics', url: 'https://www.northfieldceramics.com/', status: 'processing', created: minsAgo(2), job: { state: 'queued', attempt: 1, speed: 1 }, queue: { ahead: 8, working: 2, slots: 2 } },
   { id: 'smpl0003', name: 'oakandiron', title: 'Oak & Iron', url: 'https://www.oakandiron.co/', status: 'processing', created: minsAgo(70), job: { state: 'working', step: 'quality-check', attempt: 1, startedAt: minsAgo(62), speed: 1 } },
-  { id: 'smpl0004', name: 'bluehour', title: 'bluehour.design', url: 'https://bluehour.design/', status: 'failed', created: minsAgo(30), failKind: 'address', message: 'This page isn’t on Squarespace. For now we can only preserve Squarespace sites.' },
+  { id: 'smpl0004', name: 'bluehour', title: 'bluehour.design', url: 'https://bluehour.design/', status: 'failed', created: minsAgo(30), failKind: 'unsupported', message: '' },
+  { id: 'smpl0006', name: 'oldstudio', title: 'oldstudio.net', url: 'https://www.oldstudio.net/', status: 'failed', created: minsAgo(40), failKind: 'address', message: 'We couldn’t open this page. Check the address and that the site is public.' },
   { id: 'smpl0005', name: 'fernway', title: 'fernway.com', url: 'https://www.fernway.com/', status: 'failed', created: minsAgo(90), failKind: 'ours', message: '' },
 ].map((c) => ({ notes: [], pins: [], versions: [], live: null, fonts: null, ...c }));
 const FONT_FILE = /\.(woff2|woff|otf|ttf)$/i;
@@ -168,7 +169,7 @@ export const store = {
   checkPage(url) {
     let u; try { u = new URL(/^https?:/.test(url) ? url : 'https://' + url); } catch { return 'That doesn’t look like a web address.'; }
     const bare = (h) => h.replace(/^www\./, '');
-    return SEED_COPIES.some((x) => bare(new URL(x.url).hostname) === bare(u.hostname)) ? null : 'This demo can only preserve its five test sites: minaab.com, breathpod.com, designforward.live, xanadu.nyc and hello-world-kosa.squarespace.com.';
+    return SEED_COPIES.some((x) => bare(new URL(x.url).hostname) === bare(u.hostname)) ? null : /notcovered/.test(u.hostname) ? 'We can’t preserve this site yet. We’ll let you know when we’ve expanded coverage to this site.' : 'This demo can only preserve its five test sites: minaab.com, breathpod.com, designforward.live, xanadu.nyc and hello-world-kosa.squarespace.com.';
   },
   // A new Preserve, simulated (run, above).
   create(url) {
