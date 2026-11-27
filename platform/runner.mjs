@@ -305,7 +305,7 @@ async function main() {
     // (Jeremy, 2026-11-23). finding-crops.mjs stays in the harness, unused.
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
-    const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
+    const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens, ...(a.moves ? { ai_moves: true } : {}), ...(a.look_error ? { ai_look_error: a.look_error } : {}) });
     const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
     // The fixes tried so far on each finding, carried to this round's row for the same issue (with this round's own).
     { const rows = await sql(`select block_id, meta->>'code' as code, coalesce(meta->'tried', '[]'::jsonb) as tried from copy_pin

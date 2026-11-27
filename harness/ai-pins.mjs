@@ -111,7 +111,9 @@ export async function frames(browser, url, pin, dir, side) {
       const x = Math.max(0, box.x - PAD), y = Math.max(0, box.y - PAD);
       const clip = { x, y, width: Math.max(8, Math.min(vw.width - x, box.w + 2 * PAD)), height: Math.max(8, Math.min(vw.height - y, box.h + 2 * PAD, FRAME_MAX_H)) };
       const f = path.join(dir, `${side}-${i}.png`);
-      await page.screenshot({ path: f, clip });
+      // A heavy page (Xanadu's moving pictures drawn without a graphics card) can take longer than the usual 30 s per
+      // picture: allow more, and keep the frames already taken rather than lose the whole spot (2026-11-27).
+      try { await page.screenshot({ path: f, clip, timeout: 60000 }); } catch (e) { if (files.length >= 2) break; throw e; }
       files.push(f);
       if (i < FRAMES - 1) await sleep(FRAME_GAP_MS);
     }
@@ -141,7 +143,7 @@ export async function sheet(rows, out) {
   return out;
 }
 
-async function ask(client, pin, facts, picture, menu) {
+async function ask(client, pin, facts, picture, menu, moves = false) {
   const schema = { ...SCHEMA, properties: { ...SCHEMA.properties, action: { type: 'string', enum: menu } } };
   const code = codeOf(pin);
   const res = await client.beta.messages.create({
@@ -154,8 +156,8 @@ async function ask(client, pin, facts, picture, menu) {
     messages: [{
       role: 'user',
       content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(picture).toString('base64') } },
-        { type: 'text', text: `Layout: ${pin.layout || 'desktop'}\n${code ? `Found by our quality check (${code}) and confirmed by the person: ${JSON.stringify(pin.body || '')}` : `The person's note: ${JSON.stringify(pin.body || '')}`}\nAlready tried on this spot: ${JSON.stringify(pin.tried || [])}\nAllowed actions: ${JSON.stringify(menu)}\nMeasurements of the pinned spot: ${JSON.stringify(facts)}` },
+        ...(picture ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(picture).toString('base64') } }] : []),
+        { type: 'text', text: `Layout: ${pin.layout || 'desktop'}\n${code ? `Found by our quality check (${code}) and confirmed by the person: ${JSON.stringify(pin.body || '')}` : `The person's note: ${JSON.stringify(pin.body || '')}`}\nAlready tried on this spot: ${JSON.stringify(pin.tried || [])}\nAllowed actions: ${JSON.stringify(menu)}\nMeasurements of the pinned spot: ${JSON.stringify(facts)}${moves ? '\nThis spot moves by itself on the live site and stays still in the Preserve. A photograph cannot move, so "still" is not offered.' : ''}${picture ? '' : '\nNo picture: the spot could not be photographed this time. Decide from the note and the measurements.'}` },
       ],
     }],
   });
@@ -193,18 +195,33 @@ export async function triagePins(pins, { liveUrl, preserveBase, dir, dry = false
       if (!browser) { browser = await launch(); fs.mkdirSync(dir, { recursive: true }); if (!dry) client = new (await import('@anthropic-ai/sdk')).default({ timeout: 90_000, maxRetries: 2 }); }
       const fallback = code ? { action: menu[0], why: 'next-on-list' } : {};
       const pd = path.join(dir, `pin${i}`); fs.mkdirSync(pd, { recursive: true });
+      // Pictures of the spot, tried twice: a look-up that fails must not drop the issue quietly (Xanadu, 2026-11-27: one
+      // timed-out picture left a pin with nothing tried). If the pictures still fail, the model decides from the note.
+      const prof = p.layout || 'desktop';
+      let live = null, copy = null, lookErr = null;
+      for (let t = 0; t < 2 && !live; t++) {
+        try {
+          const l = await frames(browser, liveUrl, p, pd, 'live');
+          const c = await frames(browser, `${preserveBase.replace(/\/$/, '')}/${prof}?review=${process.env.PRESERVE_REVIEW_TOKEN || 1}`, p, pd, 'copy');
+          live = l; copy = c;
+        } catch (e) { lookErr = String(e.message || e).split('\n')[0].slice(0, 200); }
+      }
       try {
-        const prof = p.layout || 'desktop';
-        const live = await frames(browser, liveUrl, p, pd, 'live');
-        const copy = await frames(browser, `${preserveBase.replace(/\/$/, '')}/${prof}?review=${process.env.PRESERVE_REVIEW_TOKEN || 1}`, p, pd, 'copy');
-        if (!live.files.length && !copy.files.length) { out.push({ ...p, ai: { ...fallback, error: 'spot not found on either side' } }); continue; }
-        const picture = await sheet([live.files.length ? live.files : [], copy.files.length ? copy.files : []].filter((r) => r.length), path.join(pd, 'sheet.png'));
-        const facts = { liveSite: live.facts, preserve: copy.facts };
-        if (dry) { out.push({ ...p, ai: { dry: true, facts, picture, menu } }); continue; }
-        const pick = await ask(client, p, facts, picture, menu);
+        if (live && !live.files.length && !copy.files.length) { out.push({ ...p, ai: { ...fallback, error: 'spot not found on either side' } }); continue; }
+        const picture = live ? await sheet([live.files, copy.files].filter((r) => r.length), path.join(pd, 'sheet.png')) : null;
+        const facts = live ? { liveSite: live.facts, preserve: copy.facts } : { found: 'not measured: ' + lookErr };
+        // Moves by itself live, still in the Preserve: a photograph can't fix that, so it's never on the menu.
+        const lm = live?.facts.changesOverTimePct, cm = copy?.facts.changesOverTimePct;
+        const moves = lm != null && lm >= 2 && (cm == null || cm < lm / 2);
+        let m = moves ? menu.filter((a) => a !== 'still') : menu;
+        if (!m.length) m = ['none'];
+        if (dry) { out.push({ ...p, ai: { dry: true, facts, picture, menu: m, moves } }); continue; }
+        const pick = await ask(client, p, facts, picture, m, moves);
         // A picture in place of a widget can't be undone within the Preserve: only when the model is fairly sure.
-        if (pick.action === 'still' && pick.confidence === 'low') pick.action = menu.find((a) => a !== 'still' && ACTION_IDS.includes(a)) || 'none';
-        out.push({ ...p, ai: pick });
+        if (pick.action === 'still' && pick.confidence === 'low') pick.action = m.find((a) => a !== 'still' && ACTION_IDS.includes(a)) || 'none';
+        // Movement issues never get a photograph, whatever the pictures showed.
+        if (pick.action === 'still' && pick.kind === 'motion') pick.action = 'none';
+        out.push({ ...p, ai: { ...pick, ...(moves ? { moves } : {}), ...(lookErr && !live ? { look_error: lookErr } : {}) } });
       } catch (e) {
         out.push({ ...p, ai: { ...fallback, error: String(e.message || e).split('\n')[0].slice(0, 200) } });
       }
