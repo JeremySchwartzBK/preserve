@@ -274,7 +274,9 @@ export async function probeGalleries(browser, url, profileName, { isCopy = false
 // change is "moving". Galleries are left to probeGalleries. Keyed by block id so gate.mjs can hold the copy to the
 // live page. Run without __pvStill, as visitors see it.
 const MOTION_SCREENS = 3, MOTION_GAP_MS = 2000, MOTION_MIN = 0.02;
-export async function probeMotion(browser, url, profileName, { isCopy = false } = {}) {
+// focus: block ids (the person's pins) watched wherever they are on the page, not only within the first screens: on
+// Xanadu the undulating pictures a person pinned sat far below them, so this never looked at them (2026-11-27).
+export async function probeMotion(browser, url, profileName, { isCopy = false, focus = [] } = {}) {
   const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true });
   if (isCopy) await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); return /^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol) ? r.continue() : r.abort(); });
   await ctx.addInitScript(ANCHOR);
@@ -286,9 +288,7 @@ export async function probeMotion(browser, url, profileName, { isCopy = false } 
     if (!isCopy) await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }).catch(() => {});
     await page.mouse.move(0, 0);
     const vh = await page.evaluate(() => innerHeight), h = await page.evaluate(() => document.documentElement.scrollHeight);
-    for (let i = 0; i < MOTION_SCREENS && i * vh < h; i++) {
-      // Long enough for entrance animations to finish: only motion that keeps going counts.
-      await page.evaluate((y) => scrollTo(0, y), i * vh); await sleep(2500);
+    const watch = async () => {
       const blocks = await page.evaluate((gSel) => {
         for (const e of document.querySelectorAll('body *')) { const p = getComputedStyle(e).position; if ((p === 'fixed' || p === 'sticky') && !e.dataset.pvHid) { e.dataset.pvHid = e.style.visibility || '-'; e.style.visibility = 'hidden'; } }
         const sel = '[id^="block-"],[data-block-id]';
@@ -315,6 +315,21 @@ export async function probeMotion(browser, url, profileName, { isCopy = false } 
         if (!prev || frac > prev.frac) out[id] = { moving: frac >= MOTION_MIN, frac: +frac.toFixed(3), at: bl.at };
       }
       await page.evaluate(() => { for (const e of document.querySelectorAll('[data-pv-hid]')) { e.style.visibility = e.dataset.pvHid === '-' ? '' : e.dataset.pvHid; delete e.dataset.pvHid; } });
+    };
+    for (let i = 0; i < MOTION_SCREENS && i * vh < h; i++) {
+      // Long enough for entrance animations to finish: only motion that keeps going counts.
+      await page.evaluate((y) => scrollTo(0, y), i * vh); await sleep(2500);
+      await watch();
+    }
+    for (const id of focus) {
+      if (out[id]) continue;
+      const ok = await page.evaluate((id) => {
+        const el = id.indexOf('section:') === 0 ? document.querySelector('section[data-section-id="' + id.slice(8) + '"]') : document.getElementById(id) || document.querySelector('[data-block-id="' + id + '"]');
+        if (!el) return false; el.scrollIntoView({ block: 'center' }); return true;
+      }, id).catch(() => false);
+      if (!ok) continue;
+      await sleep(2500);
+      await watch();
     }
   } catch (e) { out.__error = String(e.message).split('\n')[0]; }
   finally { await ctx.close(); }

@@ -447,6 +447,73 @@ o.im.style.transform='translate('+(dx/k*r.width).toFixed(2)+'px,'+(-dy/k*r.heigh
 var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(function(){q=0;upd()})}},{passive:true});addEventListener('resize',upd);upd();
 })();</script>`;
 
+// Squarespace's "liquid" image effect (capture.mjs mediaBackgrounds, data-pv-liquid; Xanadu, 2026-11-27): the picture
+// ripples slowly, as if seen through moving water. Our own drawing, not Squarespace's: smooth noise that drifts along
+// "rotation" at "speed" and changes shape at "morphSpeed" bends the picture by "intensity", in blobs sized by "scale",
+// rougher as "smoothness" drops, with "shadow" darkening the troughs. The picture is drawn as the page lays it out
+// (cover, around its focal point), in a canvas laid over it; the picture stays underneath and shows whenever the drawing
+// can't (no WebGL, picture not readable). Draws only on screen; one still frame while our checks compare pictures; the
+// plain picture for visitors who ask for less motion. Matched to the live effect by how much the picture changes over
+// 0.3 and 1.5 seconds on Xanadu (speed 50, intensity 10) and The Garret Group (speed 20, intensity 5): speed counts
+// twice over (squared), as on the live sites.
+const LIQUID_SCRIPT = `<script id="preserve-liquid">(function(){
+if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+var VS='attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}';
+var FS='precision highp float;varying vec2 v;uniform sampler2D T;uniform vec2 R,I,F;uniform float t,amp,frq,ang,spd,mor,shd,oct,sd;'+
+'float h(vec3 q){q=fract(q*.1031+sd*.013);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}'+
+'float n(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*f*(f*(f*6.-15.)+10.);'+
+'return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);}'+
+'float fb(vec3 x){float a=.5,s=0.,w=0.;for(int k=0;k<4;k++){if(float(k)>=oct)break;s+=a*n(x);w+=a;x=x*2.03+vec3(1.7,9.2,3.1);a*=.5;}return s/w;}'+
+'void main(){vec2 u=vec2(v.x,1.-v.y);float ar=R.x/R.y;vec2 d=vec2(cos(ang),-sin(ang));'+
+'vec2 q=vec2(u.x*ar,u.y)*frq-d*spd*t;float m=mor*t;'+
+'float a=fb(vec3(q,m)),b=fb(vec3(q+vec2(5.2,1.3),m+4.7));vec2 o=(vec2(a,b)-.5)*2.*amp;'+
+'vec2 w=(u-.5)*(1.-2.*amp)+.5+o;'+
+'float ri=I.x/I.y;vec2 sc=ri>ar?vec2(ar/ri,1.):vec2(1.,ri/ar);vec2 tu=F+(w-F)*sc;tu=clamp(tu,0.,1.);'+
+'vec4 c=texture2D(T,tu);c.rgb*=1.-shd*(.5-a);gl_FragColor=c;}';
+var L=[].slice.call(document.querySelectorAll('img[data-pv-liquid]'));if(!L.length)return;
+L.forEach(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-liquid'))}catch(e){return}
+var src=new Image();src.crossOrigin='anonymous';src.decoding='async';
+src.onload=function(){go(im,c,src)};
+function load(){src.src=im.currentSrc||im.src}
+if(im.complete&&(im.currentSrc||im.src))load();else im.addEventListener('load',load,{once:true});});
+function go(im,c,src){
+var cv=document.createElement('canvas');cv.setAttribute('aria-hidden','true');cv.setAttribute('data-pv-runtime','');
+cv.setAttribute('style','position:absolute;pointer-events:none;display:block;margin:0;padding:0;border:0');
+var gl=cv.getContext('webgl',{premultipliedAlpha:false,antialias:false,preserveDrawingBuffer:true});if(!gl)return;
+function sh(t,s){var o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
+var pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);
+if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return;gl.useProgram(pr);
+var bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+var pl=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pl);gl.vertexAttribPointer(pl,2,gl.FLOAT,false,0,0);
+var tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);
+try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src)}catch(e){return}
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+var U={};['T','R','I','F','t','amp','frq','ang','spd','mor','shd','oct','sd'].forEach(function(k){U[k]=gl.getUniformLocation(pr,k)});
+function cl(x,a,b){return Math.max(a,Math.min(b,x))}
+gl.uniform1i(U.T,0);gl.uniform2f(U.I,src.naturalWidth,src.naturalHeight);gl.uniform2f(U.F,cl(c.fx==null?.5:c.fx,0,1),cl(c.fy==null?.5:c.fy,0,1));
+gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0008);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,20)*0.55);gl.uniform1f(U.ang,(c.r||0)*Math.PI/180);
+gl.uniform1f(U.spd,cl(c.v||0,0,100)*cl(c.v||0,0,100)*0.0005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.003);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
+gl.uniform1f(U.oct,1+Math.round((100-cl(c.sm==null?100:c.sm,0,100))/34));gl.uniform1f(U.sd,(c.sd||0)%997);
+var box=im.parentNode;if(getComputedStyle(box).position==='static')box.style.position='relative';box.insertBefore(cv,im.nextSibling);
+var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),b=box.getBoundingClientRect(),cs=getComputedStyle(im);
+cv.style.left=(a.left-b.left-box.clientLeft)+'px';cv.style.top=(a.top-b.top-box.clientTop)+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
+cv.style.borderRadius=cs.borderRadius;cv.style.zIndex=cs.zIndex==='auto'?'':cs.zIndex;
+var dp=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(a.width*dp)),h=Math.max(1,Math.round(a.height*dp));
+if(w!==W||h!==H){W=w;H=h;cv.width=w;cv.height=h;gl.viewport(0,0,w,h);gl.uniform2f(U.R,w,h)}}
+var t0=performance.now(),on=false,raf=0,shown=false;
+function draw(){fit();gl.uniform1f(U.t,window.__pvStill?0:(performance.now()-t0)/1000);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+if(!shown){shown=true;im.style.visibility='hidden'}}
+function step(){raf=0;if(!on||document.hidden)return;draw();if(!window.__pvStill)raf=requestAnimationFrame(step)}
+draw();
+if('IntersectionObserver' in window)new IntersectionObserver(function(es){on=es[es.length-1].isIntersecting;if(on&&!raf)raf=requestAnimationFrame(step)},{rootMargin:'100px'}).observe(box);
+else{on=true;raf=requestAnimationFrame(step)}
+document.addEventListener('visibilitychange',function(){if(on&&!document.hidden&&!raf)raf=requestAnimationFrame(step)});
+addEventListener('resize',function(){if(!on)draw()});
+cv.addEventListener('webglcontextlost',function(){on=false;cv.remove();im.style.visibility=''});
+}
+})();</script>`;
+
 // Background videos hosted on Vimeo or YouTube (capture.mjs mediaBackgrounds, data-pv-bgvideo; Jeremy 2026-11-17): the
 // still from the video shows first; once the page has loaded, the provider's own background player (muted, looping, no
 // controls) goes in over it, sized to cover the section as live, and fades in only when it reports that it is playing.
@@ -722,10 +789,13 @@ var t;addEventListener('resize',function(){clearTimeout(t);t=setTimeout(fit,60)}
 // page switching on its own raced it and left the wrong layout showing.
 const BREAKPOINT = 768;
 const LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<script>location.replace(((document.documentElement.clientWidth||innerWidth)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
+<script>location.replace((Math.min(document.documentElement.clientWidth||innerWidth,screen.width||1e9)<${BREAKPOINT}?'mobile':'desktop')+'.html'+location.search+location.hash)</script></head>
 <body><noscript><a href="desktop.html">Open the preview</a></noscript></body></html>`;
+// The width that picks a layout is never more than the screen's: on a phone, something reaching past the screen's edge
+// makes the page wider than the screen (the browser zooms out to fit it), which once flipped Honeybelle's phone copy
+// to its computer layout (2026-11-27). A computer's screen is at least as wide as its window, so there nothing changes.
 const widthScript = (layout) => `<script id="preserve-width">(function(){if(window.top!==window)return;var m=${layout === 'mobile' ? 'true' : 'false'},t;
-function w(){return document.documentElement.clientWidth||innerWidth}
+function w(){return Math.min(document.documentElement.clientWidth||innerWidth,screen.width||1e9)}
 addEventListener('resize',function(){clearTimeout(t);t=setTimeout(function(){if((w()<${BREAKPOINT})===m)return;
 var k='pv-switch',last=0;try{last=+sessionStorage.getItem(k)||0;sessionStorage.setItem(k,String(Date.now()))}catch(e){var n=/pv-switch:(\\d+)/.exec(window.name);last=n?+n[1]:0;window.name='pv-switch:'+Date.now()}
 if(Date.now()-last<5000)return;location.replace((m?'desktop':'mobile')+'.html'+location.search+location.hash)},250)})})();</script>`;
@@ -760,22 +830,34 @@ function classifyScript($, el) {
 // The site owner's own code (code blocks, footer injection): small inline scripts in the page body that only move
 // things on the page, such as counters, carousels and scrolling rows. They're kept in script-free copies when they
 // make no network calls and don't depend on Squarespace's or jQuery's scripts, which those copies don't load.
-function isOwnerScript($, el) {
-  if ($(el).attr('src') || !$(el).parents('body').length) return false;
+function isOwnerScript($, el) { return ownerScriptKind($, el) === 'plain'; }
+
+// Custom code stage two (Jeremy 2026-11-27): owner code written for jQuery (Xanadu's buttons that open sections, Naughty
+// Nancy's stacked pictures, Hello World's moved block) runs too, on our own copy of jQuery (harness/vendor, MIT
+// licence), never the site's or Squarespace's. It still may make no network calls and may not use Squarespace's own
+// scripts (Y, Static, Squarespace), which no copy loads. -> null (not owner code we keep), 'plain' or 'jquery'.
+const JQUERY_USE = /(^|[^\w.$])jQuery\s*[.(]|(^|[^\w.])\$\s*[.(]/;
+function ownerScriptKind($, el) {
+  if ($(el).attr('src') || !$(el).parents('body').length) return null;
   const type = ($(el).attr('type') || '').toLowerCase();
-  if (type && !/javascript|module|ecmascript/.test(type)) return false;
+  if (type && !/javascript|module|ecmascript/.test(type)) return null;
   const t = $(el).html() || '';
-  if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return false;
-  if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return false;
+  if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return null;
+  if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return null;
+  // Code that sends the visitor to another page skips the "snapshot" notice links get (REPLICA_SCRIPT) and lands on a
+  // page the Preserve doesn't have. Scrambled code (_0x names) is a paid plugin's, not the owner's; we don't ship it.
+  if (/(^|[^\w$])(window\.|document\.|top\.)?location(\.href)?\s*=[^=]|location\.(assign|replace)\s*\(|\b_0x[0-9a-f]{3,}/.test(t)) return null;
+  // jQuery's own ways of asking a server (and of loading another script) are network calls too.
+  if (/\$\.(get|post|getJSON|getScript|ajax)\s*\(|jQuery\.(get|post|getJSON|getScript|ajax)\s*\(|\.load\(\s*['"`]/.test(t)) return null;
   // Loaders for outside code (tag managers, referral widgets, ad pixels): they inject a script or image from another
   // host, which a copy blocks, leaving a failed request on every load. Owner code that only moves things has none.
   // Tag-manager-injected tags carry an empty id and a charset attribute.
-  if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return false;
-  if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return false;
-  if (/(^|[^\w.$])(Y|Static|Squarespace|jQuery|SQS)\s*\.|(^|[^\w.])\$\s*\(|window\.Static|fbq|gtag/.test(t)) return false;
+  if ($(el).attr('id') === '' && $(el).attr('charset') !== undefined) return null;
+  if (/createElement\(\s*[\w'"]+\s*\)[\s\S]{0,400}\.(src|async)\s*=|new\s+Image\s*\(|AnalyticsObject/.test(t)) return null;
+  if (/(^|[^\w.$])(Y|Static|Squarespace|SQS)\s*\.|window\.Static|fbq|gtag/.test(t)) return null;
   // Prototype Shopify adapter: theme and app code (anything naming Shopify, its apps' settings) is the platform's, not the owner's.
-  if (process.env.PRESERVE_PLATFORM === 'shopify' && /shopify|appstle|_ABConfig|klaviyo|judgeme|yotpo|rebuy|bold_|loox|okendo|stamped|theme\.|window\.theme/i.test(t)) return false;
-  return true;
+  if (process.env.PRESERVE_PLATFORM === 'shopify' && /shopify|appstle|_ABConfig|klaviyo|judgeme|yotpo|rebuy|bold_|loox|okendo|stamped|theme\.|window\.theme/i.test(t)) return null;
+  return JQUERY_USE.test(t) ? 'jquery' : 'plain';
 }
 
 // Kept owner code runs the same on every load (custom code stage one, Jeremy 2026-10-29): it sees a clock that reads
@@ -788,9 +870,10 @@ function PvDate(){if(!(this instanceof PvDate))return new D(now()).toString();va
 PvDate.prototype=D.prototype;PvDate.now=now;PvDate.parse=D.parse;PvDate.UTC=D.UTC;
 var s=${seed}>>>0;function rnd(){s=(s+0x6D2B79F5)>>>0;var t=s;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}
 var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M})();</script>`;
+const JQUERY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'vendor', 'jquery-3.7.1.min.js');
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript, ownerScriptKind };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -810,10 +893,14 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
     $('iframe').filter((_, el) => /recaptcha|doubleclick|facebook\.com\/tr|googletagmanager/.test($(el).attr('src') || '')).remove();
     $('.grecaptcha-badge, [class*="recaptcha"]').remove();
     // Scripts.
-    let owners = 0;
+    let owners = 0, jq = 0;
     $('script').each((_, el) => {
-      const c = v.scripts === 'none' ? (/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : isOwnerScript($, el) ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
+      const ok = v.scripts === 'none' && !/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? ownerScriptKind($, el) : null;
+      const c = v.scripts === 'none' ? (/ld\+json|application\/json|application\/x-preserve-acts/.test($(el).attr('type') || '') ? { keep: true, kind: 'data' } : ok === 'plain' ? { keep: true, kind: 'site owner code (self-contained)', what: ($(el).html() || '').trim().slice(0, 100) } : ok === 'jquery' ? { keep: true, kind: 'site owner code (uses jQuery)', what: ($(el).html() || '').trim().slice(0, 100) } : { keep: false, kind: 'all scripts dropped' }) : classifyScript($, el);
       if (c.kind === 'site owner code (self-contained)') { $(el).html(ownerWrap($(el).html())).attr('data-pv-owner', String(owners++)); }
+      // jQuery comes in after the page is read (deferred, so it never holds up the first screen), so code written for it
+      // waits for that moment; by then the page is all there, as it was when the owner's code ran on the live site.
+      if (c.kind === 'site owner code (uses jQuery)') { $(el).html(`document.addEventListener('DOMContentLoaded',function(){${ownerWrap($(el).html())}});`).attr('data-pv-owner', String(owners++)).attr('data-pv-lib', 'jquery'); jq++; }
       if (outName !== 'mobile.html') report.scripts.push({ keep: c.keep, kind: c.kind, what: (c.what || '').slice(0, 140) });
       if (!c.keep) $(el).remove();
     });
@@ -822,6 +909,11 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       const t0 = Math.round(fs.statSync(path.join(siteDir, src)).mtimeMs);
       const seed = [...(siteHost || name)].reduce((h, ch) => Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0, 2166136261);
       $('head').prepend(STEADY_SCRIPT(t0, seed));
+    }
+    if (jq) {
+      fs.mkdirSync(path.join(outDir, 'pv-lib'), { recursive: true });
+      fs.copyFileSync(JQUERY_FILE, path.join(outDir, 'pv-lib', path.basename(JQUERY_FILE)));
+      $('head').append(`<script id="preserve-lib-jquery" defer src="pv-lib/${path.basename(JQUERY_FILE)}"></script>`);
     }
     if (v.scripts === 'none') {
       $('noscript').remove();
@@ -884,6 +976,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-scrollshow]').length) $('body').append(SCROLL_SHOW_SCRIPT);
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
       if ($('img[data-pv-parallax]').length) $('body').append(PARALLAX_SCRIPT);
+      if ($('img[data-pv-liquid]').length) $('body').append(LIQUID_SCRIPT);
       if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);
       if ($('[data-pv-appear]').length) $('body').append(APPEAR_SCRIPT);
       if ($('[data-pv-tick]').length) $('body').append(TICKER_SCRIPT);

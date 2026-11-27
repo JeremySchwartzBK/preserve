@@ -54,6 +54,8 @@ const BEHAVIOR_TEXT = {
   'drag-lost': 'something that can be dragged or swiped on the live page doesn\u2019t move',
   'scroll-effect-lost': 'an effect that plays as you scroll on the live page doesn\u2019t',
 };
+// The pinned parts, which the motion check watches wherever they sit on the page.
+const pinIds = () => [...new Set(loadPins().map((p) => p.block_id).filter(Boolean))];
 const withBrowser = async (f) => { const b = await launch(); try { return await f(b); } finally { await b.close(); } };
 
 async function liveSelfDiff(url, siteDir) {
@@ -77,7 +79,7 @@ async function liveSelfDiff(url, siteDir) {
         if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
-        out[prof].motion = await probeMotion(browser, url, prof); // and the parts that move by themselves
+        out[prof].motion = await probeMotion(browser, url, prof, { focus: pinIds() }); // and the parts that move by themselves
         if (BEHAVIOR_CHECK) out[prof].behavior = await probeBehavior(browser, url, prof); // and what reacts to hover, drag, scroll
       } catch (e) { out[prof] = { error: String(e.message).split('\n')[0] }; }
       await ctx.close();
@@ -294,18 +296,22 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
       {
         mark(`${prof}-motion`);
         const liveM = info.liveSelfDiff[prof]?.motion || {};
-        const copyM = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+        const copyM = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true, focus: pinIds() }));
         info.motion = { ...(info.motion || {}), [prof]: { live: Object.values(liveM).filter((m) => m?.moving).length, copy: Object.values(copyM).filter((m) => m?.moving).length } };
         let frozen = Object.entries(liveM).filter(([k, m]) => m?.moving && copyM[k] && !copyM[k].moving);
         // Confirm before holding: a second look at both pages. Small changes that come and go (a block caught mid
         // entrance, a blinking caret, a picture still loading) made this flaky: in the Nov 16 showcase re-run the same
         // seven sites flagged different blocks, or none, when looked at again (2026-11-18).
+        let copy2 = {};
         if (frozen.length) {
-          const live2 = await withBrowser((b) => probeMotion(b, url, prof));
-          const copy2 = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true }));
+          const live2 = await withBrowser((b) => probeMotion(b, url, prof, { focus: pinIds() }));
+          copy2 = await withBrowser((b) => probeMotion(b, `${base}/${id}/${prof}`, prof, { isCopy: true, focus: pinIds() }));
           frozen = frozen.filter(([k]) => live2[k]?.moving && copy2[k] && !copy2[k].moving);
         }
         frozen = frozen.map(([, m]) => m.at);
+        // For the person's pins about movement (judged at the end): what moves live, and what was seen moving here. A pin
+        // only reads "looks fixed" when its part was actually seen moving in the copy.
+        (info.pinMotion ||= {})[prof] = { moving: Object.keys(liveM).filter((k) => liveM[k]?.moving), copyMoving: Object.keys(copyM).filter((k) => copyM[k]?.moving || copy2[k]?.moving) };
         if (frozen.length) { layoutSpots['widget-frozen'] = frozen.slice(0, 3); fail('widget-frozen', L(`${frozen.length} part(s) move by themselves on the live page but stay still: ${frozen.map((f) => f.blockId).slice(0, 3).join(', ')}`), 5); }
       }
       // What the live page does when hovered, dragged or scrolled, the copy must do too (behavior.mjs).
@@ -464,7 +470,13 @@ export async function runGate({ id, url, siteDir, copyDir, exportReport, scrubOu
     const found = [...reasons, ...notes].filter((r) => MOVE_FAMILY[r.code]);
     info.pins = info.pins.map((p) => {
       const fam = MOVE_FAMILY[codeOf(p)];
-      if (!fam) return p;
+      // The person's own pin on a part that moves by itself on the live page: judged by whether it moves here too, not by
+      // a picture, which can't show movement (Xanadu, 2026-11-27: a photo of an undulating picture read "looks fixed").
+      if (!fam) {
+        const mv = info.pinMotion?.[p.layout || 'desktop'];
+        if (codeOf(p) || !mv?.moving.includes(p.block_id)) return p;
+        return { ...p, result: mv.copyMoving.includes(p.block_id) ? 'looks-fixed' : 'still-different', how: 'tried-movement' };
+      }
       const still = found.some((r) => MOVE_FAMILY[r.code] === fam && (!r.spots?.length || r.spots.some((x) => x.blockId === p.block_id)));
       return { ...p, result: still ? 'still-different' : 'looks-fixed', how: 'tried-movement' };
     });

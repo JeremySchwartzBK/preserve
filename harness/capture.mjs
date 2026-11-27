@@ -963,7 +963,7 @@ async function grabVideoFrame(page, v) {
   }).catch(() => null);
 }
 async function mediaBackgrounds(page, request, outDir, manifest) {
-  const found = { parallax: 0, videos: [] };
+  const found = { parallax: 0, liquid: 0, videos: [] };
   found.parallax = await page.evaluate(() => {
     let n = 0;
     for (const c of document.querySelectorAll('[data-controller="BackgroundImageFXParallax"]')) {
@@ -975,6 +975,31 @@ async function mediaBackgrounds(page, request, outDir, manifest) {
       c.querySelectorAll('canvas').forEach((cv) => (cv.closest('.background-fx-canvas') || cv).remove());
       im.style.visibility = 'visible';
       n++;
+    }
+    return n;
+  }).catch(() => 0);
+  // Squarespace's "liquid" image effect, on image blocks and section backgrounds (Xanadu, The Garret Group; 2026-11-27):
+  // the picture ripples slowly. Live draws it with WebGL, which a snapshot can't keep, so the copy showed a still photo
+  // of one moment. Keep the picture itself, note the effect's settings (data-pv-liquid) and drop the drawing; our own
+  // stand-in (build.mjs LIQUID_SCRIPT) redraws the ripple over the picture from those settings.
+  found.liquid = await page.evaluate(() => {
+    let n = 0;
+    const mark = (im, fx, box) => {
+      if (!im || !fx || fx.type !== 'liquid') return;
+      const f = (im.getAttribute('data-image-focal-point') || '0.5,0.5').split(',').map(Number);
+      const num = (v, d) => (Number.isFinite(+v) ? +v : d);
+      im.setAttribute('data-pv-liquid', JSON.stringify({ i: num(fx.intensity, 10), s: num(fx.scale, 2), r: num(fx.rotation, 0), v: num(fx.speed, 50), m: num(fx.morphSpeed, 5), sh: num(fx.shadow, 0), sm: num(fx.smoothness, 100), sd: num(fx.seed, 1), fx: Number.isFinite(f[0]) ? f[0] : 0.5, fy: Number.isFinite(f[1]) ? f[1] : 0.5 }));
+      box.querySelectorAll('canvas').forEach((cv) => (cv.closest('.background-fx-canvas') || cv).remove());
+      im.style.visibility = 'visible';
+      n++;
+    };
+    for (const c of document.querySelectorAll('.imageEffectContainer[data-effect]')) {
+      let fx = null; try { fx = JSON.parse(c.getAttribute('data-effect')); } catch {}
+      mark(c.parentElement && c.parentElement.querySelector('img'), fx, c);
+    }
+    for (const c of document.querySelectorAll('[data-controller="BackgroundImageFXLiquid"]')) {
+      let fx = null; try { fx = JSON.parse(c.closest('[data-current-context]').getAttribute('data-current-context')).backgroundMediaEffect; } catch {}
+      mark(c.querySelector('img.background-image-fx'), fx, c);
     }
     return n;
   }).catch(() => 0);
@@ -1272,7 +1297,10 @@ export async function capture(url, outDir) {
     manifest[u] = { status, ct: r.headers()['content-type'] || '', file, size: body.length, type: r.request().resourceType() };
   });
 
-  for (const prof of ['desktop', 'mobile']) {
+  // A page that leaves itself while we work on it (Xanadu's signup widget sent the computer layout to /newsletter in two
+  // of three captures, 2026-11-27) would be saved as the wrong page: that layout is captured again, once.
+  const profs = ['desktop', 'mobile'], again = new Set();
+  for (const prof of profs) {
     const ctx = await browser.newContext({ ...PROFILES[prof].context, ignoreHTTPSErrors: true });
     // WebGL canvases clear their pixels after each frame unless asked to keep them; keep them so canvasStills can read
     // what the canvas shows (only drawing is affected, not what the visitor sees).
@@ -1295,6 +1323,9 @@ export async function capture(url, outDir) {
     if (!resp) { await ctx.close(); continue; }
     info.finalUrl = page.url();
     info.status = resp.status();
+    const home = new URL(page.url()); let left = null;
+    // A new document only (a gallery or quick view that rewrites the address in place stays on the page).
+    page.on('domcontentloaded', () => { if (left) return; const u = new URL(page.url()); if (u.pathname !== home.pathname || u.host !== home.host) left = u.pathname; });
     if (prof === 'desktop') fs.writeFileSync(path.join(outDir, 'server.html'), await resp.body());
     await sleep(2000);
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
@@ -1338,6 +1369,10 @@ export async function capture(url, outDir) {
     // are part of its design, not a popup: marked so the quality check doesn't count them as a popup left on the page
     // (check.mjs; six of seven such holds in the Nov 16 showcase re-run). Looked for with the marketing overlays
     // hidden, and never anything with an email box or popup wording, so a signup popup is still caught.
+    if (left) {
+      info.errors.push(`${prof}: the page went to ${left} during capture${again.has(prof) ? '; saved as it was' : '; captured again'}`);
+      if (!again.has(prof)) { again.add(prof); profs.push(prof); await ctx.close(); continue; }
+    }
     (info.fixedLayers ||= {})[prof] = await page.evaluate((sels) => {
       const st = document.createElement('style'); st.textContent = sels.join(',') + '{display:none!important}'; document.head.appendChild(st);
       const vis = (e) => { const s = getComputedStyle(e), r = e.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.05 && r.width > 0 && r.height > 0; };
