@@ -453,7 +453,9 @@ var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(fu
 // rougher as "smoothness" drops, with "shadow" darkening the troughs. The picture is drawn as the page lays it out
 // (cover, around its focal point), in a canvas laid over it; the picture stays underneath and shows whenever the drawing
 // can't (no WebGL, picture not readable). Draws only on screen; one still frame while our checks compare pictures; the
-// plain picture for visitors who ask for less motion.
+// plain picture for visitors who ask for less motion. Matched to the live effect by how much the picture changes over
+// 0.3 and 1.5 seconds on Xanadu (speed 50, intensity 10) and The Garret Group (speed 20, intensity 5): speed counts
+// twice over (squared), as on the live sites.
 const LIQUID_SCRIPT = `<script id="preserve-liquid">(function(){
 if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
 var VS='attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}';
@@ -490,8 +492,8 @@ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParamet
 var U={};['T','R','I','F','t','amp','frq','ang','spd','mor','shd','oct','sd'].forEach(function(k){U[k]=gl.getUniformLocation(pr,k)});
 function cl(x,a,b){return Math.max(a,Math.min(b,x))}
 gl.uniform1i(U.T,0);gl.uniform2f(U.I,src.naturalWidth,src.naturalHeight);gl.uniform2f(U.F,cl(c.fx==null?.5:c.fx,0,1),cl(c.fy==null?.5:c.fy,0,1));
-gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0024);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,20)*0.55);gl.uniform1f(U.ang,(c.r||0)*Math.PI/180);
-gl.uniform1f(U.spd,cl(c.v||0,0,100)*0.005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.02);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
+gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0008);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,20)*0.55);gl.uniform1f(U.ang,(c.r||0)*Math.PI/180);
+gl.uniform1f(U.spd,cl(c.v||0,0,100)*cl(c.v||0,0,100)*0.0005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.003);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
 gl.uniform1f(U.oct,1+Math.round((100-cl(c.sm==null?100:c.sm,0,100))/34));gl.uniform1f(U.sd,(c.sd||0)%997);
 var box=im.parentNode;if(getComputedStyle(box).position==='static')box.style.position='relative';box.insertBefore(cv,im.nextSibling);
 var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),b=box.getBoundingClientRect(),cs=getComputedStyle(im);
