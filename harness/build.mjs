@@ -774,6 +774,9 @@ function ownerScriptKind($, el) {
   const t = $(el).html() || '';
   if (!t.trim() || DROP_INLINE.some((r) => r.test(t))) return null;
   if (/fetch\(|XMLHttpRequest|sendBeacon|\$\.ajax|WebSocket|importScripts|document\.write|\.src\s*=\s*['"]https?:/.test(t)) return null;
+  // Code that sends the visitor to another page skips the "snapshot" notice links get (REPLICA_SCRIPT) and lands on a
+  // page the Preserve doesn't have. Scrambled code (_0x names) is a paid plugin's, not the owner's; we don't ship it.
+  if (/(^|[^\w$])(window\.|document\.|top\.)?location(\.href)?\s*=[^=]|location\.(assign|replace)\s*\(|\b_0x[0-9a-f]{3,}/.test(t)) return null;
   // jQuery's own ways of asking a server (and of loading another script) are network calls too.
   if (/\$\.(get|post|getJSON|getScript|ajax)\s*\(|jQuery\.(get|post|getJSON|getScript|ajax)\s*\(|\.load\(\s*['"`]/.test(t)) return null;
   // Loaders for outside code (tag managers, referral widgets, ad pixels): they inject a script or image from another

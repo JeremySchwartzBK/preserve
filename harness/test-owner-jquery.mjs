@@ -18,6 +18,10 @@ assert.equal(kind(`$.getJSON('/api', function(){})`), null, 'jQuery network call
 assert.equal(kind(`$('.x').load('/other-page .y')`), null);
 assert.equal(kind(`$(function(){ Y.use('node') })`), null, 'Squarespace scripts are not in copies');
 assert.equal(kind(`Squarespace.afterBodyLoad(Y);`), null);
+assert.equal(kind(`$('#b').click(function(){ window.location.href = '/shop'; })`), null, 'sending the visitor elsewhere stays out');
+assert.equal(kind(`$('.r').click(function(){ window.location=$(this).attr('href'); return false; })`), null);
+assert.equal(kind(`if (location.hash === '#x') { document.body.classList.add('x') }`), 'plain');
+assert.equal(kind(`var _0x270b=['a','b']; (function(_0x1d2e){})(_0x270b)`), null, 'scrambled paid-plugin code is not shipped');
 
 // A stage as the copy step leaves it: Samuel Sparrow-style code that adds links once (already in the copy), and
 // Xanadu-style code that opens a section on a click.
