@@ -206,6 +206,7 @@ h3.semi{text-transform:none;letter-spacing:0;font-size:.95rem;font-weight:600;co
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .font .spin{display:inline-block;width:12px;height:12px;border-width:2px;border-color:var(--line);border-top-color:var(--accent);vertical-align:-1px;margin-right:4px}
 .pins small.ok{display:block;color:var(--ok)}.pins small.warn{display:block}
+.pins small.fnote{display:block;margin-top:4px;color:var(--sub,#666)}
 /* Phones and tablets. iOS zooms the page when a field under 16px gets focus, and the page stays zoomed afterwards,
    which also pushes the top bar off both edges. Every typed field is 16px on touch screens and narrow windows. */
 @media (pointer:coarse),(max-width:860px){input:not([type=checkbox]):not([type=radio]):not([type=range]),textarea,select{font-size:16px!important}}
@@ -233,3 +234,11 @@ details.dismissed{margin:4px 0 12px}details.dismissed summary{cursor:pointer;col
 .adobe #adkey { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--line, #ccc); border-radius: 8px; margin-top: 4px; }
 .adobebox { margin-top: 24px; }
 .fgroup{margin:14px 0 8px;font-size:.9rem;color:var(--ink)}.fgroup:first-of-type{margin-top:4px}
+/* Pending card: progress bar and time left instead of the steps (2026-11-24). The picture is a button: it opens nothing. */
+button.shot{width:100%;padding:0;border:0;font:inherit;color:inherit;cursor:default;text-align:inherit}
+.copy .eta{padding:12px 14px 0}.copy .eta p.sub{padding:6px 0 0;font-size:.82rem}
+button.shot .noshot{color:transparent}  /* the spinner takes the place of the name, which is just below */
+.eta .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.eta .bar i{display:block;height:100%;background:var(--busy);border-radius:2px;transition:width .6s ease}
+.copy .fail{margin:0;padding:10px 14px 0;font-size:.88rem;color:var(--sub)}.copy .fail b{display:block;color:var(--bad);font-weight:600}
+.copy .note.small{font-size:.82rem;margin:10px 14px 0}

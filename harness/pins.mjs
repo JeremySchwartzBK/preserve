@@ -48,6 +48,31 @@ export async function markPinStills(page, prof, pins = loadPins()) {
   return n;
 }
 
+// Pins whose pick is about how a slideshow moves (fix-menu.mjs): after capture has recorded the galleries, change what
+// it recorded for the galleries inside the pinned block. add-drag: they follow a drag or swipe even where capture's own
+// test on the live page said they don't. play-on-timer: they play by themselves, on their recorded timing or every five
+// seconds. Returns how many galleries changed.
+export async function applyGalleryFixes(page, prof, pins = loadPins()) {
+  let n = 0;
+  for (const p of forLayout(pins).filter((p) => ['add-drag', 'play-on-timer'].includes(p.ai?.action))) {
+    n += await page.evaluate(([find, id, act]) => {
+      const el = eval(`(${find})`)(id); if (!el) return 0;
+      const gs = [...el.querySelectorAll('[data-pv-gal]')]; if (el.hasAttribute('data-pv-gal')) gs.push(el);
+      let k = 0;
+      for (const g of gs) {
+        let c; try { c = JSON.parse(g.getAttribute('data-pv-gal')); } catch { continue; }
+        if (act === 'add-drag') { if (c.strip) c.strip.drag = true; else c.swipe = 1; }
+        else if (!c.auto) c.auto = (c.dt && Math.max(...c.dt)) || 5000;
+        g.setAttribute('data-pv-gal', JSON.stringify(c)); k++;
+      }
+      return k;
+    }, [FIND.toString(), p.block_id, p.ai.action]).catch(() => 0);
+  }
+  return n;
+}
+// record-longer: the galleries are watched and stepped through for much longer (capture.mjs recordGalleries options).
+export const recordLonger = (pins = loadPins()) => pins.some((p) => p.ai?.action === 'record-longer');
+
 // A picture of each pinned block on this page (live or copy), at most 1500 px tall.
 export async function shootPins(page, prof, dir, prefix, pins = loadPins()) {
   for (const p of forLayout(pins)) {

@@ -17,9 +17,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runGate } from './gate.mjs';
+import { runGate, serve } from './gate.mjs';
 import { loadPins } from './pins.mjs';
-import { aiEnabled, triagePins } from './ai-pins.mjs';
+import { triagePins } from './ai-pins.mjs';
+import { vetFindings } from './ai-vet.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -116,10 +117,11 @@ function mergeVerdicts(vs) {
 let verdict;
 try {
   for (const p of pages) { verdict = await checkUrl(p); if (verdict) break; }
-  // A refinement with AI turned on: a model picks a fix for each of the person's pins first (ai-pins.mjs); capture and
-  // the quality check then read the picks from the same pins file.
-  if (!verdict && aiEnabled() && process.env.PRESERVE_VIEW_BASE && loadPins().length) {
-    const picked = await step('read-pins', () => triagePins(loadPins(), { liveUrl: url, preserveBase: process.env.PRESERVE_VIEW_BASE, dir: path.join(siteDir, 'pin-evidence') }));
+  // A refinement: each confirmed issue gets a targeted, untried fix first (fix-menu.mjs, ai-pins.mjs; with AI on, a model
+  // picks among several and reads the person's own pins); capture and the quality check then read the picks from the
+  // same pins file.
+  if (!verdict && loadPins().length) {
+    const picked = await step('read-pins', () => triagePins(loadPins(), { liveUrl: url, preserveBase: process.env.PRESERVE_VIEW_BASE || '', dir: path.join(siteDir, 'pin-evidence') }));
     const f = path.join(siteDir, 'pins-picked.json');
     fs.writeFileSync(f, JSON.stringify(picked, null, 1));
     process.env.PRESERVE_PINS = f;
@@ -128,6 +130,13 @@ try {
   if (!verdict) {
     for (const p of pages) await pageTask(p);
     verdict = await finish();
+    // The AI looks at each suspected issue before the person does: false alarms out, real ones in plain words (ai-vet.mjs).
+    if (pages.length === 1 && verdict.reasons?.some((r) => r.spots?.length)) {
+      const srv = await serve(path.dirname(pages[0].stage));
+      try { verdict = await step('vet-findings', () => vetFindings(verdict, { liveUrl: pages[0].url, copyBase: `http://127.0.0.1:${srv.address().port}/${path.basename(pages[0].stage)}`, dir: path.join(pages[0].siteDir, 'vet-evidence') })); }
+      catch (e) { log('vetting skipped', String(e.message).slice(0, 200)); }
+      finally { srv.close(); }
+    }
   }
 } catch (e) {
   verdict = { result: 'fail', reasons: [{ code: 'job-error', detail: String(e.message).slice(0, 500) }], notes: [], warnings: [] };

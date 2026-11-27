@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
 import { captureVideos } from './video.mjs';
-import { loadPins, focusPins, markPinStills } from './pins.mjs';
+import { loadPins, focusPins, markPinStills, applyGalleryFixes, recordLonger } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
 import { LISTEN_INIT, recordInteractions } from './interact.mjs';
 import { PARALLAX_SCRIPT } from './build.mjs';
@@ -24,7 +24,9 @@ function snapshotDom() {
   // Swiper slideshows: how the site set them up (fade or slide, speed, autoplay, loop), for our slider script.
   for (const el of document.querySelectorAll('.swiper, .swiper-container')) {
     const w = el.swiper; if (!w || !w.params) continue;
-    const p = w.params, ap = p.autoplay && w.autoplay && w.autoplay.running ? p.autoplay.delay || 3000 : 0;
+    // Autoplay as the site set it up, not whether it is running now: a touch during capture stops it on phones
+    // (Studiomama's hero, 2026-11-23, then stayed static in the phone Preserve).
+    const p = w.params, a = p.autoplay, ap = a && (a === true || a.enabled !== false) && (a.delay || a === true) ? a.delay || 3000 : 0;
     el.setAttribute('data-pv-swiper', JSON.stringify({ effect: p.effect, speed: p.speed, loop: !!p.loop, autoplay: ap, autoHeight: !!p.autoHeight, spv: typeof p.slidesPerView === 'number' ? p.slidesPerView : null, gap: typeof p.spaceBetween === 'number' ? p.spaceBetween : null }));
   }
   // Record live form/input state and the current src chosen from srcset.
@@ -196,9 +198,13 @@ export async function recordGalleries(page, opts = {}) {
       for (const dx of [-45, -30, -15, 0]) { await move(dx); await sleep(30); }
       await upp(); await sleep(900);
       const xs2 = await page.evaluate(() => window.__pvXs());
-      const d = xs1.map((x, j) => x - xs0[j]).filter((v, j) => Math.abs(xs0[j]) < 4000 && Math.abs(xs1[j]) < 4000);
-      // Most slides came along (one may have changed places with its double as the drag began).
-      d.sort((a, b) => a - b); const md = d.length ? d[d.length >> 1] : 0;
+      // The slides on show came along with the pointer. Compared as places on screen, not slide by slide: an endless
+      // carousel keeps doubles of its slides and may swap which copy is on show as a drag begins (maria dubin's list
+      // carousel, 2026-11-24: its real slides jumped off screen and their doubles took over, so it read "no drag").
+      const vis = (xs) => xs.filter((x) => Math.abs(x) < 4000).sort((a, b) => a - b);
+      const v0 = vis(xs0), d = vis(xs1).map((x) => { const n = v0.reduce((m, y) => (Math.abs(x - y) < Math.abs(x - m) ? y : m), Infinity); return Math.abs(x - n) < 150 ? x - n : null; }).filter((v) => v !== null && Math.abs(v) > 2);
+      // (Doubles left behind where a slide was don't move, so only places that moved count; at least two must have.)
+      d.sort((a, b) => a - b); const md = d.length >= 2 ? d[d.length >> 1] : 0;
       r.strip.drag = md < -35 && md > -75;
       r.strip.dragRest = xs2.every((x, j) => Math.abs(x - xs0[j]) < 2);
       await page.evaluate(([drag, back, xs0]) => {
@@ -313,6 +319,11 @@ async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxM
       // Its own timer: the block's setting, else what it does untouched for a few seconds.
       let cfg = {}; try { cfg = JSON.parse(g.closest('[data-block-json]')?.getAttribute('data-block-json') || '{}'); } catch {}
       let auto = cfg.autoplay ? Math.round((+cfg['autoplay-duration'] || 3) * 1000) : 0;
+      // 7.1 gallery sections keep theirs in data-props on the gallery (autoplayEnabled, slideDurationMs). Without it,
+      // watching guessed 1.5 s for a 6 s fullscreen slideshow (a fade changes the page more than once) and the
+      // recording stopped after one step, leaving the Preserve's hero still (Arts & Parts, 2026-11-23).
+      if (!auto) { let pr = {}; try { pr = JSON.parse(g.closest('[data-props]')?.getAttribute('data-props') || '{}'); } catch {}
+        if (pr.autoplayEnabled && +pr.slideDurationMs > 0) auto = Math.round(+pr.slideDurationMs); }
       const inst = insts.find((x) => { try { const n = x.get('container'); const d = n && (n._node || n.getDOMNode?.()); return d && (d === g || g.contains(d) || d.contains(g)); } catch { return false; } });
       if (!auto) {
         let last = await settle(); const t0 = performance.now(), seen = [];
@@ -329,7 +340,8 @@ async function recordGalleriesInPage(page, { watchMs = 9000, maxSteps = 30, maxM
       const total = inst ? +(inst._getNumberOfSlides?.() || 0) : 0;
       let step = inst && typeof inst.nextSlide === 'function' ? async () => { await idle(); const i0 = inst.get('currentIndex'); inst.nextSlide(); for (let t = 0; t < 40 && inst.get('currentIndex') === i0; t++) await sleep(100); await idle(); } : next ? async () => { next.click(); await sleep(700); } : null;
       // One that plays by itself is recorded by letting it play: clicking as well would mix its steps with ours.
-      if (auto && !inst) step = async () => { const a = snap(), t = performance.now(); while (performance.now() - t < auto + 2500) { await sleep(200); if (!same(snap(), a)) return; } };
+      // Wait at least as long as the first watch did: a guessed interval can be too short, and stopping early ends the recording.
+      if (auto && !inst) step = async () => { const a = snap(), t = performance.now(); while (performance.now() - t < Math.max(auto, watchMs) + 2500) { await sleep(200); if (!same(snap(), a)) return; } };
       res.auto = auto; res.how = inst ? 'gallery' : auto ? 'timer' : next ? 'arrow' : 'none';
       if (!step) continue;
       if (inst) await idle();
@@ -759,7 +771,8 @@ async function pointerFollowers(page) {
       const cs = getComputedStyle(el);
       if (cs.pointerEvents !== 'none') continue;
       const par = el.parentElement && getComputedStyle(el.parentElement);
-      if (cs.position !== 'fixed' && !(cs.position === 'absolute' && par && par.position === 'fixed' && par.pointerEvents === 'none')) continue;
+      const onPage = cs.position === 'absolute' && (!el.offsetParent || el.offsetParent === document.body || el.offsetParent === document.documentElement) && (!par || par.position === 'static');
+      if (cs.position !== 'fixed' && !onPage && !(cs.position === 'absolute' && par && par.position === 'fixed' && par.pointerEvents === 'none')) continue;
       if (el.querySelectorAll('*').length > 30 || el.textContent.trim().length > 60) continue;
       el.setAttribute('data-preserve-fc', String(k++));
     }
@@ -768,7 +781,7 @@ async function pointerFollowers(page) {
   if (!n) return [];
   const snap = () => page.evaluate(() => [...document.querySelectorAll('[data-preserve-fc]')].map((e) => {
     const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
-    return { k: +e.getAttribute('data-preserve-fc'), vis: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none', x: r.left, y: r.top };
+    return { k: +e.getAttribute('data-preserve-fc'), vis: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none', x: r.left, y: r.top, w: r.width, h: r.height };
   }));
   const cursorAt = (x, y) => page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? getComputedStyle(e).cursor : ''; }, [x, y]);
   const moved = (a, b, dx, dy) => a && b && a.vis && b.vis && Math.abs((b.x - a.x) - dx) < Math.abs(dx) * 0.25 + 4 && Math.abs((b.y - a.y) - dy) < Math.abs(dy) * 0.25 + 4;
@@ -781,7 +794,7 @@ async function pointerFollowers(page) {
   const s2 = await snap();
   for (const b of s2) {
     const a = s1.find((x) => x.k === b.k);
-    if (moved(a, b, 400, 200)) found.push({ k: b.k, t: 'page', dx: Math.round(b.x - 700), dy: Math.round(b.y - 500), cur: await cursorAt(700, 500) === 'none' ? 'none' : '' });
+    if (moved(a, b, 400, 200)) found.push({ k: b.k, t: 'page', dx: Math.round(b.x - 700), dy: Math.round(b.y - 500), cx: Math.round(b.x + b.w / 2 - 700), cy: Math.round(b.y + b.h / 2 - 500), cur: await cursorAt(700, 500) === 'none' ? 'none' : '' });
   }
   // Only over a block: hover each block and see which hidden follower appears and moves with the pointer.
   const hidden = s2.filter((x) => !x.vis && !found.some((f) => f.k === x.k)).map((x) => x.k);
@@ -811,11 +824,34 @@ async function pointerFollowers(page) {
       }
     }
   }
-  await page.mouse.move(1, 1); await sleep(300);
+  // The look of each page-wide one at rest and over a link: some grow or change colour over links.
+  const look = (k) => page.evaluate((k) => { const e = document.querySelector(`[data-preserve-fc="${k}"]`); if (!e) return null; const cs = getComputedStyle(e); return { w: cs.width, h: cs.height, bg: cs.backgroundColor, cls: e.className }; }, k);
+  const pageWide = found.filter((f) => f.t === 'page');
+  if (pageWide.length) {
+    await page.evaluate(() => scrollTo(0, 0)); await sleep(200);
+    const spot = await page.evaluate(() => {
+      const plain = (x, y) => { const e = document.elementFromPoint(x, y); return e && !e.closest('a,button,[role="button"],input,select,textarea,label'); };
+      const link = [...document.querySelectorAll('a[href]')].map((a) => a.getBoundingClientRect()).find((r) => r.width > 8 && r.height > 8 && r.top > 0 && r.bottom < innerHeight);
+      let rest = null; for (let y = 120; y < innerHeight - 40 && !rest; y += 60) for (let x = 80; x < innerWidth - 80 && !rest; x += 120) if (plain(x, y)) rest = { x, y };
+      return { rest, link: link ? { x: link.left + link.width / 2, y: link.top + link.height / 2 } : null };
+    });
+    if (spot.rest) {
+      await page.mouse.move(spot.rest.x, spot.rest.y, { steps: 4 }); await sleep(900);
+      for (const f of pageWide) f.rest = await look(f.k);
+      if (spot.link) {
+        await page.mouse.move(spot.link.x, spot.link.y, { steps: 4 }); await sleep(900);
+        for (const f of pageWide) { const l = await look(f.k); if (l && f.rest && (l.w !== f.rest.w || l.h !== f.rest.h || l.bg !== f.rest.bg)) f.link = l; }
+      }
+      // Leave it as it looks at rest, so the saved page doesn't keep a link's look.
+      await page.mouse.move(spot.rest.x, spot.rest.y, { steps: 4 }); await sleep(900);
+    }
+  }
   await page.evaluate((found) => {
     for (const f of found) {
       const e = document.querySelector(`[data-preserve-fc="${f.k}"]`); if (!e) continue;
-      const c = { dx: f.dx, dy: f.dy, cur: f.cur };
+      const c = { dx: f.dx, dy: f.dy, cur: f.cur, ...(f.cx != null ? { cx: f.cx, cy: f.cy } : {}) };
+      if (getComputedStyle(e).position === 'absolute' && getComputedStyle(e.parentElement).position === 'static') c.pg = 1;
+      if (f.rest && f.link) c.hov = { w: f.rest.w, h: f.rest.h, bg: f.rest.bg, lw: f.link.w, lh: f.link.h, lbg: f.link.bg };
       if (f.t === 'block') { const b = document.querySelector(`[data-preserve-pb="${f.b}"]`); if (!b) continue; b.setAttribute('data-pv-ptrig', String(f.k)); c.on = String(f.k); }
       e.setAttribute('data-pv-pointer', JSON.stringify(c));
     }
@@ -823,8 +859,9 @@ async function pointerFollowers(page) {
     document.querySelectorAll('[data-preserve-pb]').forEach((e) => e.removeAttribute('data-preserve-pb'));
     scrollTo(0, 0);
   }, found);
+  await page.mouse.move(1, 1); await sleep(300);
   await sleep(500);
-  return found.map((f) => ({ t: f.t, dx: f.dx, dy: f.dy, cur: f.cur }));
+  return found.map((f) => ({ t: f.t, dx: f.dx, dy: f.dy, cur: f.cur, link: !!f.link }));
 }
 
 // Squarespace's block animations set to play on hover (not crispy enough's boxes tilt a little, 2026-11-13): the
@@ -1275,7 +1312,9 @@ export async function capture(url, outDir) {
     (info.placeholders ||= {})[prof] = await loadPlaceholders(page);
     // Back to where the page was scrolled: the header's look (shrunk or not) is saved with the page.
     const y0 = await page.evaluate(() => scrollY);
-    (info.galleries ||= {})[prof] = await recordGalleries(page);
+    (info.galleries ||= {})[prof] = await recordGalleries(page, recordLonger(pins) ? { watchMs: 24000, maxSteps: 40, maxMs: 120000 } : {});
+    // A refinement's targeted fixes for how slideshows move (fix-menu.mjs): drag, or playing by themselves.
+    if (pins.length) (info.galleryFixes ||= {})[prof] = await applyGalleryFixes(page, prof, pins);
     await page.evaluate((y) => scrollTo(0, y), y0); await sleep(500);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     if (pins.length) (info.pinStills ||= {})[prof] = await markPinStills(page, prof, pins);

@@ -27,7 +27,7 @@ const CASES = JSON.parse(fs.readFileSync(path.join(HERE, 'check-cases.json'), 'u
 
 // The kind of problem each finding names. Pixel findings say something differs, not what: they count as vague.
 export const KIND = {
-  'widget-frozen': 'behavior', 'gallery-does-not-advance': 'behavior', 'gallery-does-not-autoplay': 'behavior', 'phone-menu-broken': 'behavior',
+  'widget-frozen': 'behavior', 'gallery-does-not-advance': 'behavior', 'gallery-dots-broken': 'behavior', 'gallery-drag-broken': 'behavior', 'pointer-missing': 'behavior', 'gallery-does-not-autoplay': 'behavior', 'phone-menu-broken': 'behavior',
   'dropdown-broken': 'behavior', 'blocks-stay-invisible': 'behavior', 'replica-notice-missing': 'behavior',
   'motion-lost': 'behavior', 'video-hidden': 'behavior', 'animation-flattened': 'behavior', 'hover-effect-lost': 'behavior', 'drag-lost': 'behavior', 'scroll-effect-lost': 'behavior',
   'broken-images': 'content', 'blank-images': 'content', 'gallery-blank-slide': 'content', 'page-length-differs': 'content',

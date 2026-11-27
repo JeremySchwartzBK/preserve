@@ -316,7 +316,7 @@
         } else {
           // Two groups (2026-11-18): people (individuals, agencies) and tools (type 'tool'). Older entries are people.
           // Headings only when both groups have entries.
-          var groups = [['People', tour.credits.filter(function (c) { return c.type !== 'tool'; })], ['Tools', tour.credits.filter(function (c) { return c.type === 'tool'; })]];
+          var groups = [['Talent', tour.credits.filter(function (c) { return c.type !== 'tool'; })], ['Tools', tour.credits.filter(function (c) { return c.type === 'tool'; })]];
           var both = groups[0][1].length && groups[1][1].length;
           groups.forEach(function (g) {
             if (!g[1].length) return;

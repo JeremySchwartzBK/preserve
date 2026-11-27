@@ -8,6 +8,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
+import { MOVE_FAMILY, codeOf } from './fix-menu.mjs';
 import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, useOriginalFontsInCopy } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
@@ -321,18 +322,24 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
       // Each gallery against the same one on the live page (by block): an arrow that moves it there must move it here,
       // one that plays by itself there must play here, and every slide shown must draw its picture.
       const liveG = new Map((info.liveSelfDiff[prof]?.galleries || []).map((g) => [g.key, g]));
-      const gal = { 'gallery-does-not-advance': [], 'gallery-does-not-autoplay': [], 'gallery-blank-slide': [] };
+      const gal = { 'gallery-does-not-advance': [], 'gallery-does-not-autoplay': [], 'gallery-blank-slide': [], 'gallery-dots-broken': [], 'gallery-drag-broken': [] };
       for (const g of c.galleries || []) {
         const lv = liveG.get(g.key);
         if (g.next === 'fail' && lv?.next !== 'fail') gal['gallery-does-not-advance'].push(g.arrow || g.anchor);
         if (lv?.autoplay && !g.autoplay) gal['gallery-does-not-autoplay'].push(g.anchor);
         if (g.blankSlides > (lv?.blankSlides || 0)) gal['gallery-blank-slide'].push(g.anchor);
+        // Its dots and dragging it (Studiomama, 2026-11-23): what changes the picture live must change it here.
+        if (lv?.dots === 'pass' && g.dots === 'fail') gal['gallery-dots-broken'].push(g.dot || g.anchor);
+        if (lv?.drag === 'pass' && g.drag === 'fail') gal['gallery-drag-broken'].push(g.anchor);
       }
       for (const [code, list] of Object.entries(gal)) if (list.length) layoutSpots[code] = list.slice(0, 3);
       const n = (k) => (gal[k].length > 1 ? `${gal[k].length} galleries: ` : '');
       if (gal['gallery-does-not-advance'].length) fail('gallery-does-not-advance', L(n('gallery-does-not-advance') + 'gallery/slideshow "next" does nothing'), 9);
       if (gal['gallery-does-not-autoplay'].length) fail('gallery-does-not-autoplay', L(n('gallery-does-not-autoplay') + 'a slideshow that plays by itself on the live page stays still'), 9);
       if (gal['gallery-blank-slide'].length) fail('gallery-blank-slide', L(n('gallery-blank-slide') + 'a gallery shows a slide whose picture never draws'));
+      if (gal['gallery-dots-broken'].length) fail('gallery-dots-broken', L(n('gallery-dots-broken') + 'a slideshow dot that changes the picture on the live page does nothing'), 9);
+      if (gal['gallery-drag-broken'].length) fail('gallery-drag-broken', L(n('gallery-drag-broken') + 'dragging a slideshow that moves on the live page does nothing'), 9);
+      if (c.pointer === 'fail') fail('pointer-missing', L('the pointer is hidden and nothing follows the mouse'), 9);
       // A part that moves by itself on the live page must move in the copy too (galleries have their own check above).
       {
         mark(`${prof}-motion`);
@@ -359,7 +366,11 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
         if (liveB?.error) warnings.push(L(`behavior check on the live page: ${liveB.error}`));
         if (copyB.error) warnings.push(L(`behavior check on the copy: ${copyB.error}`));
         info.behavior = { ...(info.behavior || {}), [prof]: { live: liveB, copy: copyB } };
-        for (const [code, list] of Object.entries(compareBehavior(liveB, copyB, prof))) {
+        // A section holding a slideshow that plays by itself changes while the live page scrolls just from playing; the
+        // gallery check above judges that (Arts & Parts, 2026-11-23: its hero showed up as a lost scroll effect).
+        const playsLive = new Set((info.liveSelfDiff[prof]?.galleries || []).filter((g) => g.autoplay).map((g) => g.key));
+        for (const [code, all] of Object.entries(compareBehavior(liveB, copyB, prof))) {
+          const list = code === 'scroll-effect-lost' ? all.filter((x) => !playsLive.has(x.at?.blockId) && !(x.at?.comp && playsLive.size)) : all;
           if (!list.length) continue;
           layoutSpots[code] = list.slice(0, 3).map((x) => x.at);
           fail(code, L(`${list.length > 1 ? list.length + ' places: ' : ''}${BEHAVIOR_TEXT[code]} (${list.slice(0, 3).map((x) => x.detail).join('; ')})`));
@@ -509,6 +520,20 @@ async function runGateInner({ id, url, siteDir, copyDir, exportReport, scrubOutp
   for (const [n, what] of Object.entries(info.detected)) {
     if (NOTE[n]) notes.push({ limitation: +n, text: NOTE[n], detail: what });
     else warnings.push(`known limitation #${n} (ships): ${what}`);
+  }
+
+  // A confirmed movement issue (a drag, a timer, dots) is rechecked by this round's own movement tests, which tried the
+  // movement on the live page and the copy, not by comparing pictures: a drag doesn't show in a still picture (Jeremy,
+  // 2026-11-24: the maria dubin carousel read "looks fixed" while it still didn't drag). Still there when any code of the
+  // same family is reported on the same part this round, or on no part at all.
+  if (info.pins) {
+    const found = [...reasons, ...notes].filter((r) => MOVE_FAMILY[r.code]);
+    info.pins = info.pins.map((p) => {
+      const fam = MOVE_FAMILY[codeOf(p)];
+      if (!fam) return p;
+      const still = found.some((r) => MOVE_FAMILY[r.code] === fam && (!r.spots?.length || r.spots.some((x) => x.blockId === p.block_id)));
+      return { ...p, result: still ? 'still-different' : 'looks-fixed', how: 'tried-movement' };
+    });
   }
 
   mark('end');

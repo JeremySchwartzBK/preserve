@@ -33,6 +33,9 @@ export const SPOT_MESSAGES = {
   'gallery-does-not-advance': () => 'The gallery’s arrows don’t move it here, but do on your site.',
   'gallery-does-not-autoplay': () => 'The gallery is static here, but plays on its own on your site.',
   'gallery-blank-slide': () => 'The gallery shows an empty frame here, but not on your site.',
+  'gallery-dots-broken': () => 'The slideshow’s dots don’t change the picture here, but do on your site.',
+  'gallery-drag-broken': () => 'Dragging the slideshow doesn’t move it here, but does on your site.',
+  'pointer-missing': () => 'The pointer disappears here, but on your site your own pointer follows the mouse.',
   'video-hidden': () => 'The video is hidden behind a picture here, but plays on your site.',
   'animation-flattened': () => 'The animated image is static here, but moves on your site.',
   'frame-missing': () => 'The embedded content (such as a sign-up form, booking tool or map) is missing here, but shows on your site.',
@@ -58,4 +61,17 @@ export const HIDDEN = new Set(['differs-at-other-widths', 'breaks-on-resize', 'o
 
 const part = (noun) => (noun || 'content').toLowerCase();
 export const spotMessage = (code, noun) => (SPOT_MESSAGES[code] || ((n) => `The ${n} looks different here than on your site.`))(part(noun));
+// One slideshow or gallery, several things wrong with how it moves: one marker, one sentence (Jeremy, 2026-11-23:
+// five findings on one hero slideshow read as five issues). What each kind says it doesn't do here.
+export const MOVES = {
+  'gallery-does-not-autoplay': 'play on its own', 'widget-frozen': 'play on its own', 'gallery-does-not-advance': 'move with its arrows',
+  'gallery-dots-broken': 'change with its dots', 'drag-lost': 'move when dragged', 'gallery-drag-broken': 'move when dragged',
+  'hover-effect-lost': 'change when you point at it',
+};
+export const groupMessage = (codes) => {
+  const ways = [...new Set(codes.map((c) => MOVES[c]).filter(Boolean))];
+  if (!ways.length) return spotMessage(codes[0], 'slideshow');
+  const list = ways.length === 1 ? ways[0] : ways.slice(0, -1).join(', ') + ' or ' + ways[ways.length - 1];
+  return `The slideshow doesn’t ${list} here, but does on your site.`;
+};
 export const pageMessage = (code) => PAGE_MESSAGES[code] || (SPOT_MESSAGES[code] ? SPOT_MESSAGES[code]('content') : 'Something looks different here than on your site.');

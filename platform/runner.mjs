@@ -23,8 +23,15 @@ import { cloudflareStore, uploadPages, setCopy, setNames, deleteCopyFiles } from
 import { storeCapture, deleteCapture, capturePrefix } from './capture-store.mjs';
 import { refuseAddress, jobEnv } from './address-guard.mjs';
 import { mintReviewToken } from './review-token.mjs';
-import { spotMessage, pageMessage, HIDDEN } from '../app/review-messages.js';
+import { spotMessage, pageMessage, groupMessage, MOVES, HIDDEN } from '../app/review-messages.js';
 import { adobe, ensureKit, syncFamilies, checkConnection } from './adobe.mjs';
+import { MOVE_FAMILY, codeOf } from '../harness/fix-menu.mjs';
+import { oneItemPerIssue, carryAnswers, sameKind } from './finding-items.mjs';
+
+// Our findings and the person's pins come back each round; a fix tried on one in an earlier round is never tried on it
+// again (fix-menu.mjs). A finding is the same issue as an earlier one on the same part when its kind is the same, or of
+// the same movement family (a drag found by two different tests).
+const triedFor = (rows, code, blockId) => [...new Set(rows.filter((r) => r.block_id === blockId && sameKind(r.code, code)).flatMap((r) => r.tried || []))];
 
 if (!process.env.NODE_USE_ENV_PROXY) {
   const r = spawn(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, NODE_USE_ENV_PROXY: '1' } });
@@ -98,7 +105,7 @@ async function main() {
     'password-protected': 'This page is password protected, so we couldn’t copy it.',
   };
   const GENERIC = 'This site contains elements our system can’t process yet. We’ve logged the gap and will be in touch when we can handle this site.';
-  const STEP = { 'check-url': 'check-url', 'capture-and-build': 'capture-and-build', export: 'export', 'own-stylesheet': 'export', 'subset-fonts': 'fonts', scrub: 'scrub', steady: 'scrub', 'quality-check': 'quality-check' };
+  const STEP = { 'check-url': 'check-url', 'capture-and-build': 'capture-and-build', export: 'export', 'own-stylesheet': 'export', 'subset-fonts': 'fonts', scrub: 'scrub', steady: 'scrub', 'quality-check': 'quality-check', 'vet-findings': 'quality-check' };
 
   // The review's Fonts step (schema-fonts.sql): one row per font family that needs the person's look, from the quality
   // check's font record (google-fonts.py, gate.mjs). Open fonts never do, nor fonts no layout shows.
@@ -182,7 +189,18 @@ async function main() {
     fs.mkdirSync(work, { recursive: true });
     const notesFile = path.join(work, `${j.copy_id}.user-notes.json`);
     fs.rmSync(notesFile, { force: true });
-    if (j.user_context?.length) fs.writeFileSync(notesFile, JSON.stringify(j.user_context, null, 1));
+    if (j.user_context?.length) {
+      // What was already tried on each pin in earlier rounds, so this round tries something else.
+      const rows = await sql(`select kind, block_id, meta->>'code' as code, created_at, coalesce(meta->'tried', '[]'::jsonb) as tried from copy_pin
+        where copy_id = ${lit(j.copy_id)} and kind in ('finding', 'issue')`).catch(() => []);
+      const pins = j.user_context.map((p) => {
+        const code = codeOf(p);
+        const tried = code ? triedFor(rows.filter((r) => r.kind === 'finding'), code, p.block_id)
+          : [...new Set(rows.filter((r) => r.kind === 'issue' && r.block_id === p.block_id && +new Date(r.created_at) === +new Date(p.at)).flatMap((r) => r.tried || []))];
+        return tried.length ? { ...p, tried } : p;
+      });
+      fs.writeFileSync(notesFile, JSON.stringify(pins, null, 1));
+    }
     const jobFile = path.join(work, j.copy_id, 'job.json');
     fs.rmSync(jobFile, { force: true });
     let lastStep = null;
@@ -227,7 +245,16 @@ async function main() {
     if (job.state === 'failed') {
       const r0 = (v.reasons || [])[0] || {};
       const msg = FAILED[r0.code] || GENERIC;
-      await sql(`update copy_job set state = 'failed', step = null, finished_at = now(), verdict = ${lit(JSON.stringify(v))}::jsonb, error = ${lit(msg)}, internal_error = ${lit(((v.reasons || []).map((r) => `${r.code}: ${r.detail || ''}`).join('; ') + ' | steps: ' + JSON.stringify(job.steps || [])).slice(0, 1000))} where id = ${lit(j.id)};
+      const why = ((v.reasons || []).map((r) => `${r.code}: ${r.detail || ''}`).join('; ') + ' | steps: ' + JSON.stringify(job.steps || [])).slice(0, 1000);
+      // A failure on our side (a crash or a time limit, not the address) gets one more try before the person hears about
+      // it: every such failure up to 2026-11-24 copied fine on another run (thread "Replace progress screen with dashboard
+      // progress"). The claim counts tries; the second failure is reported.
+      if (!FAILED[r0.code] && j.tries < 2) {
+        await sql(`update copy_job set state = 'queued', step = null, worker_id = null, lease_until = null, internal_error = ${lit('tried again after: ' + why)} where id = ${lit(j.id)} and worker_id = ${lit(WORKER)}`);
+        log('trying again', j.copy_id, r0.code);
+        return;
+      }
+      await sql(`update copy_job set state = 'failed', step = null, finished_at = now(), verdict = ${lit(JSON.stringify(v))}::jsonb, error = ${lit(msg)}, internal_error = ${lit(why)} where id = ${lit(j.id)};
         update copy set status = case when live_version is null and not exists (select 1 from copy_version where copy_id = ${lit(j.copy_id)}) then 'failed' else 'review' end, updated_at = now() where id = ${lit(j.copy_id)};`);
       await notify(j.copy_id, 'copy-failed', `We couldn’t copy ${new URL(j.url).hostname.replace(/^www\./, '')}.`);
       log('failed', j.copy_id, r0.code);
@@ -249,8 +276,18 @@ async function main() {
     // They replace the previous version's findings.
     // Lettered top to bottom within each layout (the app lists one layout at a time).
     const pageHtml = Object.fromEntries(['desktop', 'mobile'].map((l) => { try { return [l, fs.readFileSync(path.join(dir, `${l}.html`), 'utf8')]; } catch { return [l, '']; } }));
-    const findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: spotMessage(r.code, noun) }; }))
-      .sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0));
+    let findingPins = shown.flatMap((r) => (r.spots || []).map((p) => { const noun = nounOf(pageHtml[p.layout] || pageHtml.desktop, p.blockId); return { ...p, code: r.code, noun, text: p.vet?.say || spotMessage(r.code, noun), ...(p.vet?.say ? { say: p.vet.say } : {}) }; }));
+    // Everything about how one slideshow moves is one issue with one marker, placed on the part of it that shows
+    // (Jeremy, 2026-11-23). Other kinds of finding on it (sizes, images) stay their own.
+    { const groups = new Map(), rest = [];
+      for (const p of findingPins) { const k = p.comp?.key && MOVES[p.code] ? p.layout + '|' + p.comp.key : null; if (!k) { rest.push(p); continue; } if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+      for (const list of groups.values()) {
+        const codes = [...new Set(list.map((p) => p.code))], at = list.find((p) => p.comp.at)?.comp.at || list[0];
+        rest.push({ ...list[0], blockId: at.blockId, x: at.x, y: at.y, pageY: at.pageY ?? list[0].pageY, code: codes[0], codes, noun: 'slideshow', text: groupMessage(codes) });
+      }
+      findingPins = rest.sort((a, b) => (a.layout || '').localeCompare(b.layout || '') || (a.pageY ?? 0) - (b.pageY ?? 0)); }
+    // One issue is one item on both layouts (finding-items.mjs).
+    findingPins = oneItemPerIssue(findingPins);
     // What the check couldn't place on the page is answered like any other suspected issue (Jeremy, 2026-11-21: all
     // issues under Suspected issues): a pin with no block and no layout, which the app lists in both views, unlettered.
     for (const r of shown) if (!r.spots?.length) findingPins.push({ blockId: null, layout: null, code: r.code, text: pageMessage(r.code) });
@@ -262,33 +299,25 @@ async function main() {
     const answered = await sql(`select meta->>'code' as code, block_id, layout, coalesce(meta->>'verdict', '') as verdict, resolved_at is null as current,
         coalesce((meta->>'carried')::boolean, false) as carried from copy_pin
       where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)} and kind = 'finding' order by created_at desc, id desc`);
-    const fine = (v) => ['not-a-problem', 'fine', 'ignore'].includes(v);
-    for (const p of findingPins) {
-      const same = answered.filter((x) => x.code === p.code && x.block_id === p.blockId);
-      const here = same.find((x) => x.current && x.layout === p.layout && x.verdict);
-      const last = same.find((x) => x.verdict || x.carried);   // the newest answer, or a cleared one
-      if (here) p.verdict = here.verdict;
-      else if (last && fine(last.verdict)) p.verdict = last.verdict;
-    }
-    // The "Your site" and "Preserve" pictures for each finding (finding-crops.mjs), kept with this version and shown
-    // in review through the viewer (findings/ route, owner's signed link only). Missing pictures never stop a copy.
-    try {
-      const cropDir = path.join(work, j.copy_id, 'finding-crops'), pinsFile = path.join(work, j.copy_id, 'finding-pins.json');
-      fs.rmSync(cropDir, { recursive: true, force: true });
-      fs.writeFileSync(pinsFile, JSON.stringify(findingPins.map((p, i) => ({ i, layout: p.layout, blockId: p.blockId, pageY: p.pageY, firstScreen: p.code === 'first-screen-differs' }))));
-      const { stdout } = await promisify(execFile)('node', ['finding-crops.mjs', path.join(work, j.copy_id), dir, j.url, pinsFile, cropDir], { cwd: HARNESS, timeout: 300e3, env: jobEnv() });
-      for (const i of JSON.parse(stdout.slice(stdout.indexOf('[')))) {
-        for (const w of ['site', 'preserve']) await store.put(`copies/${j.copy_id}/v${next}/p/${j.page_id}/findings/${i}-${w}.webp`, fs.readFileSync(path.join(cropDir, `${i}-${w}.webp`)), 'image/webp');
-        findingPins[i].crop = `v${next}/${i}`;
-      }
-    } catch (e) { log('finding pictures not made', j.copy_id, e.message.slice(0, 200)); }
+    // Answers carry to the same issue in later rounds (finding-items.mjs).
+    carryAnswers(findingPins, answered);
+    // No "Your site" / "Preserve" pictures any more: the review relies on the markers and a short description
+    // (Jeremy, 2026-11-23). finding-crops.mjs stays in the harness, unused.
     // How each of the person's pins came out this round (pins.mjs): shown on the pin in review. With AI on, also the fix
     // it picked and the kind of problem (ai-pins.mjs), kept on the pin so we can count which kinds come up.
     const aiMeta = (a) => (!a ? {} : a.error ? { ai_error: a.error } : { ai_kind: a.kind, ai_action: a.action, ai_by_design: a.by_design === 'none' ? null : a.by_design, ai_confidence: a.confidence, ai_reason: a.reason, ai_model: a.model, ai_tokens: a.tokens });
     const pinResults = (v.info?.pins || []).filter((r) => r.from === 'person' && r.at);
+    // The fixes tried so far on each finding, carried to this round's row for the same issue (with this round's own).
+    { const rows = await sql(`select block_id, meta->>'code' as code, coalesce(meta->'tried', '[]'::jsonb) as tried from copy_pin
+        where copy_id = ${lit(j.copy_id)} and kind = 'finding'`).catch(() => []);
+      const now = (v.info?.pins || []).filter((r) => codeOf(r) && r.ai?.action && r.ai.action !== 'none').map((r) => ({ block_id: r.block_id, code: codeOf(r), tried: [r.ai.action] }));
+      for (const p of findingPins) { const t = triedFor([...rows, ...now], p.code, p.blockId); if (t.length) p.tried = t; } }
     const notes = (v.notes || []).map((n) => ({ limitation: n.limitation, text: n.text }));
     const pages = [{ page_id: j.page_id, path: '', verdict: v.result, findings: findings.length, files: up.files }];
     const fonts = fontRows(v.info?.fonts || v.pages?.[0]?.info?.fonts);
+    // In the pin updates below, the list of tried actions is built under the alias t(action): copy_pin has its own column
+    // x, so a bare x would name the pin's column and Postgres refuses the update ("aggregate functions are not allowed in
+    // UPDATE"). Comments go here, never inside the SQL text: Postgres reads // as an error.
     await sql(`insert into copy_version (copy_id, version, job_id, verdict, findings, notes, file_count, bytes, pages, pipeline_version, storage_format, fonts)
         values (${lit(j.copy_id)}, ${next}, ${lit(j.id)}, ${lit(v.result)}, ${lit(JSON.stringify(findings))}::jsonb, ${lit(JSON.stringify(notes))}::jsonb, ${up.files}, ${up.bytes}, ${lit(JSON.stringify(pages))}::jsonb, ${lit(PIPELINE)}, 2, ${lit(JSON.stringify(fonts))}::jsonb);
       update copy_job set state = ${lit(job.state)}, step = null, finished_at = now(), version = ${next}, verdict = ${lit(JSON.stringify(v))}::jsonb where id = ${lit(j.id)};
@@ -296,8 +325,9 @@ async function main() {
       update copy_page set title = coalesce(title, ${lit(title)}) where copy_id = ${lit(j.copy_id)} and page_id = ${lit(j.page_id)};
       update copy_pin set resolved_at = now() where copy_id = ${lit(j.copy_id)} and kind = 'finding' and resolved_at is null;
       ${findingPins.map((p, i) => `insert into copy_pin (copy_id, page_id, kind, block_id, x, y, layout, body, meta, version, sort)
-        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
+        values (${lit(j.copy_id)}, ${lit(j.page_id)}, 'finding', ${lit(p.blockId)}, ${+p.x || 0}, ${+p.y || 0}, ${lit(p.layout)}, ${lit(p.text)}, ${lit(JSON.stringify({ code: p.code, ...(p.codes?.length > 1 ? { codes: p.codes } : {}), pageY: p.pageY ?? null, noun: p.noun, ...(p.crop ? { crop: p.crop } : {}), ...(p.verdict ? { verdict: p.verdict, carried: true } : {}), ...(p.tried ? { tried: p.tried } : {}), ...(p.spots ? { spots: p.spots } : {}), ...(p.say && !p.codes ? { say: p.say } : {}) }))}::jsonb, ${next}, ${i});`).join('\n')}
       ${pinResults.map((r) => `update copy_pin set meta = coalesce(meta, '{}'::jsonb) || ${lit(JSON.stringify({ round_result: r.result, round_diff: r.diff ?? null, round_version: next, ...aiMeta(r.ai) }))}::jsonb
+          || jsonb_build_object('tried', (select coalesce(jsonb_agg(distinct t.action), '[]'::jsonb) from jsonb_array_elements_text(coalesce(meta->'tried', '[]'::jsonb) || ${lit(JSON.stringify(r.ai?.action && !['none', 'fonts', 'by-design', 'live-same'].includes(r.ai.action) ? [r.ai.action] : []))}::jsonb) as t(action)))
         where copy_id = ${lit(j.copy_id)} and kind = 'issue' and block_id = ${lit(r.block_id)} and created_at = ${lit(r.at)}::timestamptz;`).join('\n')}`);
     await notify(j.copy_id, 'copy-needs-review', j.attempt >= 2 ? `Refinement ${j.attempt - 1} of ${title || 'your copy'} is ready to review.` : `Your copy of ${title || new URL(j.url).hostname} is ready to review.`);
     log('ready for review', j.copy_id, 'v' + next, v.result, up.files, 'files');
