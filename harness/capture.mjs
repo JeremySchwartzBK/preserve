@@ -1272,7 +1272,10 @@ export async function capture(url, outDir) {
     manifest[u] = { status, ct: r.headers()['content-type'] || '', file, size: body.length, type: r.request().resourceType() };
   });
 
-  for (const prof of ['desktop', 'mobile']) {
+  // A page that leaves itself while we work on it (Xanadu's signup widget sent the computer layout to /newsletter in two
+  // of three captures, 2026-11-27) would be saved as the wrong page: that layout is captured again, once.
+  const profs = ['desktop', 'mobile'], again = new Set();
+  for (const prof of profs) {
     const ctx = await browser.newContext({ ...PROFILES[prof].context, ignoreHTTPSErrors: true });
     // WebGL canvases clear their pixels after each frame unless asked to keep them; keep them so canvasStills can read
     // what the canvas shows (only drawing is affected, not what the visitor sees).
@@ -1295,6 +1298,9 @@ export async function capture(url, outDir) {
     if (!resp) { await ctx.close(); continue; }
     info.finalUrl = page.url();
     info.status = resp.status();
+    const home = new URL(page.url()); let left = null;
+    // A new document only (a gallery or quick view that rewrites the address in place stays on the page).
+    page.on('domcontentloaded', () => { if (left) return; const u = new URL(page.url()); if (u.pathname !== home.pathname || u.host !== home.host) left = u.pathname; });
     if (prof === 'desktop') fs.writeFileSync(path.join(outDir, 'server.html'), await resp.body());
     await sleep(2000);
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
@@ -1338,6 +1344,10 @@ export async function capture(url, outDir) {
     // are part of its design, not a popup: marked so the quality check doesn't count them as a popup left on the page
     // (check.mjs; six of seven such holds in the Nov 16 showcase re-run). Looked for with the marketing overlays
     // hidden, and never anything with an email box or popup wording, so a signup popup is still caught.
+    if (left) {
+      info.errors.push(`${prof}: the page went to ${left} during capture${again.has(prof) ? '; saved as it was' : '; captured again'}`);
+      if (!again.has(prof)) { again.add(prof); profs.push(prof); await ctx.close(); continue; }
+    }
     (info.fixedLayers ||= {})[prof] = await page.evaluate((sels) => {
       const st = document.createElement('style'); st.textContent = sels.join(',') + '{display:none!important}'; document.head.appendChild(st);
       const vis = (e) => { const s = getComputedStyle(e), r = e.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && +s.opacity > 0.05 && r.width > 0 && r.height > 0; };
