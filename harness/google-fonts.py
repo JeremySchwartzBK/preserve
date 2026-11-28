@@ -143,10 +143,12 @@ for u, e in wanted.items():
     need.setdefault(f['family'], {})[u] = f
 
 def google_css(family, tuples):
+    # A lookalike-pool name for one width of a family (Anybody Extra Expanded) is asked for as the family at that width.
+    base, wdth = (POOL.get(family) or {}).get('width') or (family, None)
     spec = []
     for ital, w in sorted(tuples):
-        spec.append(f'{ital},{w.replace(" ", "..")}')
-    q = urllib.parse.urlencode({'family': f'{family}:ital,wght@' + ';'.join(spec), 'display': 'swap'})
+        spec.append(f'{ital},{wdth},{w.replace(" ", "..")}' if wdth else f'{ital},{w.replace(" ", "..")}')
+    q = urllib.parse.urlencode({'family': f'{base}:ital,{"wdth," if wdth else ""}wght@' + ';'.join(spec), 'display': 'swap'})
     return get('https://fonts.googleapis.com/css2?' + q)
 
 # A face Google doesn't have gets a lookalike from Google Fonts in its place (Jeremy, 2026-10-19), never Squarespace's
@@ -391,6 +393,8 @@ def lookalike(u, f, path=None):
         rec = take(fam, load(fam, {(1 if style == 'italic' else 0, w)}), f, w, style)
     if rec:
         rec.update(lookalike_for=f['family'], kind=kind)
+        # Named for the family it comes from, where its license is and where a designer would find it.
+        if (POOL.get(fam) or {}).get('width'): rec['family'] = POOL[fam]['width'][0]
         if orig: fit(rec, path)
     return rec
 
