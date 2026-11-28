@@ -18,6 +18,7 @@ body{margin:0;font:16px sans-serif} nav{height:60px;background:#eee} .menu{displ
 <button id="dead" type="button">Does nothing</button>
 <button id="away" type="button">Goes to another page</button>
 <a id="book" href="/book" style="display:inline-block;padding:20px;background:#ccc">Book</a>
+<button id="grow" type="button">Grow</button><div id="big"></div><div id="track" style="height:40px;width:400px;background:#963"></div>
 <div class="quiet"></div>
 <script src="https://plugin.test/p.js"></script></body></html>`;
 const PLUGIN = `
@@ -30,6 +31,9 @@ document.getElementById('tipper').addEventListener('click', () => { const b = do
 document.getElementById('dead').addEventListener('click', () => {});
 document.getElementById('away').addEventListener('click', () => { location.href = '/elsewhere'; });
 document.getElementById('book').addEventListener('click', (e) => { e.currentTarget.style.background = '#000'; });
+// Opens a large area that nothing closes; the Escape key (one of the recorder's tries at closing it) moves a strip on.
+document.getElementById('grow').addEventListener('click', () => { const b = document.getElementById('big'); b.style.height = '500px'; b.style.background = '#c93'; });
+let n = 0; document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.getElementById('track').style.transform = 'translateX(-' + (++n * 100) + 'px)'; });
 `;
 
 const browser = await launch();
@@ -45,6 +49,10 @@ try {
   assert.ok(await page.evaluate(() => !!document.getElementById('toggle')), 'a script sending the page elsewhere leaves it in place');
   assert.equal(rec.skipped['goes to another page'], 1, 'a click a script sends elsewhere is left to the snapshot note: ' + JSON.stringify(rec.skipped));
   assert.equal(await page.evaluate(() => document.getElementById('book').hasAttribute('data-pv-at')), false, 'clicking a link is never recorded');
+  assert.equal(rec.skipped['opens over the page and does not close'], 1, JSON.stringify(rec.skipped));
+  // What the tries at closing it changed is put back too (Breathpod's reviews carousel was left on its second card).
+  assert.equal(await page.evaluate(() => document.getElementById('track').style.transform), '', 'the strip is back where it started');
+  assert.equal(await page.evaluate(() => document.getElementById('big').style.height), '', 'the area that opened is closed again');
   const kinds = rec.states.map((s) => s.k).sort().join('');
   assert.equal(rec.kept, 3, JSON.stringify(rec));
   assert.equal(kinds, 'cch', JSON.stringify(rec));
