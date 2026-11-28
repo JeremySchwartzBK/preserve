@@ -87,3 +87,6 @@ jobs:
       - name: Owner code written for jQuery runs on our own jQuery, never twice
         working-directory: harness
         run: node test-owner-jquery.mjs
+      - name: Our liquid-image ripple draws over the picture only and never leaves it blank
+        working-directory: harness
+        run: node test-liquid.mjs
