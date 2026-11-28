@@ -93,6 +93,9 @@ jobs:
       - name: Our liquid-image ripple draws over the picture only and never leaves it blank
         working-directory: harness
         run: node test-liquid.mjs
+      - name: Our refracted circles and lines bend the picture, follow the pointer or scroll, and rest plain
+        working-directory: harness
+        run: node test-refract.mjs
       - name: Whole-page pictures stay as wide as the window
         working-directory: harness
         run: node test-full-width.mjs
