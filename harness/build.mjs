@@ -519,6 +519,88 @@ cv.addEventListener('webglcontextlost',function(){on=false;cv.remove();im.style.
 }
 })();</script>`;
 
+// Squarespace's "refracted circles" and "refracted lines" image effects (capture.mjs mediaBackgrounds, data-pv-refract):
+// the picture seen through rings or strips of glass, each ring or strip turned, scaled or shifted a little more than the
+// last, and nudged toward the pointer (or along with the scroll) when the site asks for it. Our own drawing, not
+// Squarespace's, from the effect's settings as saved in the page. The picture is drawn as the page lays it out (cover,
+// around its focal point) in a canvas laid over it; the picture stays underneath and shows whenever the drawing can't
+// (no WebGL, picture not readable), and for visitors who ask for less motion (as on the live site). Phones follow the
+// scroll instead of a pointer, as on the live site.
+const REFRACT_SCRIPT = `<script id="preserve-refract">(function(){
+var L=[].slice.call(document.querySelectorAll('img[data-pv-refract]'));
+L.forEach(function(im){if(im.style.visibility==='hidden')im.style.visibility=''});
+if(!L.length||window.__pvNoRefract||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))return;
+var touch=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+var VS='attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}';
+var COM='precision highp float;varying vec2 v;uniform sampler2D T;uniform vec2 R,I,F,S;uniform float A,B,C,D,E,G,H,J,K,M,N,O;'+
+'vec2 turn(vec2 q,float a){float c=cos(a),s=sin(a);return vec2(q.x*c+q.y*s,-q.x*s+q.y*c);}'+
+'vec4 pic(vec2 w){w=abs(mod(w+1.,2.)-1.);w.y=1.-w.y;float ar=R.x/R.y,ri=I.x/I.y;vec2 sc=ri>ar?vec2(ar/ri,1.):vec2(1.,ri/ar);return texture2D(T,clamp(F+(w-F)*sc,0.,1.));}';
+// Rings: A centre radius, B ring width (device pixels), C last ring, D turn, E/G scale on odd/even rings, H/J taper on
+// odd/even rings, K how far the pointer pulls, M/N/O 1 when turn / x / y alternate from ring to ring.
+var RINGS=COM+'void main(){vec2 u=v,c=(u-.5)*R;float ar=R.x/R.y;'+
+'float k=min(floor(max(0.,length(c)-A)/B),C),odd=mod(k,2.),alt=odd>.5?-1.:1.;'+
+'float pr=sin(1.5707963*(k+1.)/(C+1.)),pt=C>0.?sin(1.5707963*k/C):0.;'+
+'float rot=pt*D*(M>.5?alt:1.);vec2 fl=vec2(N>.5?alt:1.,O>.5?alt:1.);'+
+'float s=odd>.5?G:E,tp=odd>.5?J:H;vec2 q=u-.5;q.x*=ar;q=turn(q,rot);q.x/=ar;'+
+'q=(q+S*K*pr)*fl*s*(1.+(1.-pr)*tp)+.5;gl_FragColor=pic(q);}';
+// Strips: A strip width (device pixels), B strip count, C turn, D bulge, E scale, G/H offset along x/y, K shift.
+var LINES=COM+'void main(){vec2 u=v,c=(u-.5)*R;float ar=R.x/R.y;'+
+'float x=turn(c,C).x,k=1.+floor(abs(x)/A),sg=x<0.?-1.:1.;'+
+'vec2 mid=(sg*k-sg*.5)*A*vec2(ar,1.)*vec2(G,H)*vec2(cos(C),sin(C));'+
+'float e=(k+1.)/B-1.;c+=S*R*K*(e*e*e+1.);c=(c-mid)*(2.-E+k/(B*.5)*D)+mid;gl_FragColor=pic(c/R+.5);}';
+L.forEach(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-refract'))}catch(e){return}
+var src=new Image();src.crossOrigin='anonymous';src.decoding='async';src.onload=function(){go(im,c,src)};
+function load(){src.src=im.currentSrc||im.src}
+if(im.complete&&(im.currentSrc||im.src))load();else im.addEventListener('load',load,{once:true});});
+function n(v,d){v=+v;return isFinite(v)?v:d}
+function go(im,c,src){
+var lines=c.type==='refractedLines';
+var cv=document.createElement('canvas');cv.setAttribute('aria-hidden','true');cv.setAttribute('data-pv-runtime','');
+cv.setAttribute('style','position:absolute;pointer-events:none;display:block;margin:0;padding:0;border:0');
+var gl=cv.getContext('webgl',{premultipliedAlpha:false,antialias:false,preserveDrawingBuffer:true});if(!gl)return;
+function sh(t,s){var o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
+var pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,VS));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,lines?LINES:RINGS));gl.linkProgram(pr);
+if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return;gl.useProgram(pr);
+var bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+var pl=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pl);gl.vertexAttribPointer(pl,2,gl.FLOAT,false,0,0);
+var tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);
+var mx=Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE)||2048,2048),pic=src,k=Math.min(1,mx/Math.max(src.naturalWidth,src.naturalHeight));if(k<1){pic=document.createElement('canvas');pic.width=Math.max(1,Math.floor(src.naturalWidth*k));pic.height=Math.max(1,Math.floor(src.naturalHeight*k));pic.getContext('2d').drawImage(src,0,0,pic.width,pic.height)}try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,pic)}catch(e){return}if(gl.getError())return;
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+var U={};['T','R','I','F','S','A','B','C','D','E','G','H','J','K','M','N','O'].forEach(function(k){U[k]=gl.getUniformLocation(pr,k)});
+gl.uniform1i(U.T,0);gl.uniform2f(U.I,src.naturalWidth,src.naturalHeight);gl.uniform2f(U.F,Math.max(0,Math.min(1,n(c.fx,.5))),Math.max(0,Math.min(1,n(c.fy,.5))));
+var box=im.parentNode,sec=im.closest('section')||box;box.insertBefore(cv,im.nextSibling);
+var W=0,H=0,dp=1;
+function sizes(){if(lines){var ls=Math.max(1,n(c.size,0)*dp),cnt=Math.max(1,Math.ceil(Math.sqrt(W*W+H*H)/ls));
+gl.uniform1f(U.A,ls);gl.uniform1f(U.B,cnt);gl.uniform1f(U.C,n(c.rotation,0)*Math.PI/180);gl.uniform1f(U.D,n(c.intensity,0)*.01);gl.uniform1f(U.E,n(c.scale,0)*.01);
+gl.uniform1f(U.G,n(c.offsetScaleX,0)*.01);gl.uniform1f(U.H,n(c.offsetScaleY,0)*.01);gl.uniform1f(U.K,n(c.shiftIntensity,0)*.01)}
+else{var rs=Math.max(1,n(c.size,0)*dp),off=n(c.centerOffsetSize,0),cr=.5*Math.min(W,H)*off*.01*dp,most=Math.ceil((.5*Math.sqrt(W*W+H*H)-off*dp)/rs);
+gl.uniform1f(U.A,cr);gl.uniform1f(U.B,rs);gl.uniform1f(U.C,Math.max(0,c.isLimitRings?Math.min(n(c.numRings,0),most):most));gl.uniform1f(U.D,n(c.rotation,0)*Math.PI/180);
+gl.uniform1f(U.E,n(c.scaleOdd,0)*.01);gl.uniform1f(U.G,n(c.scaleEven,0)*.01);gl.uniform1f(U.H,n(c.scaleTaperEven,0)*.01);gl.uniform1f(U.J,n(c.scaleTaperOdd,0)*.01);
+gl.uniform1f(U.K,n(c.shiftIntensity,0)*.002);gl.uniform1f(U.M,c.isStepFlipRotation?1:0);gl.uniform1f(U.N,c.isStepFlipX?1:0);gl.uniform1f(U.O,c.isStepFlipY?1:0)}}
+function fit(){var a=im.getBoundingClientRect(),cs=getComputedStyle(im);if(cs.objectFit==='contain'&&a.width&&a.height){var ri=src.naturalWidth/src.naturalHeight,w0=a.width,h0=a.height;if(w0/h0>ri)w0=h0*ri;else h0=w0/ri;var pp=(cs.objectPosition||'50% 50%').split(' '),px=parseFloat(pp[0])/100,py=parseFloat(pp[1]||pp[0])/100;if(!isFinite(px))px=.5;if(!isFinite(py))py=.5;a={left:a.left+(a.width-w0)*px,top:a.top+(a.height-h0)*py,width:w0,height:h0}}
+var op=cv.offsetParent,x,y;if(!op||op===document.body&&getComputedStyle(op).position==='static'){x=a.left+scrollX;y=a.top+scrollY}else{var o=op.getBoundingClientRect();x=a.left-o.left-op.clientLeft+op.scrollLeft;y=a.top-o.top-op.clientTop+op.scrollTop}cv.style.left=x+'px';cv.style.top=y+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
+cv.style.borderRadius=cs.borderRadius;cv.style.zIndex=cs.zIndex==='auto'?'':cs.zIndex;
+dp=Math.min(window.devicePixelRatio||1,2);var w=Math.max(1,Math.round(a.width*dp)),h=Math.max(1,Math.round(a.height*dp));
+if(w!==W||h!==H){W=w;H=h;cv.width=w;cv.height=h;gl.viewport(0,0,w,h);gl.uniform2f(U.R,w,h);sizes()}}
+// The pull: toward the pointer, back to rest 2 seconds after it stops; or, following the scroll, how far the section
+// has come through the window. Eased each frame by "shiftSpeed".
+var how=c.interactionType==='mouse'&&touch?'scroll':c.interactionType,sp=Math.max(0,n(c.shiftSpeed,0)),S=[0,0],goal=[0,0],tid=0,raf=0,shown=false,first=true;
+function draw(){fit();gl.uniform2f(U.S,S[0],S[1]);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);if(!shown){shown=true;im.style.visibility='hidden'}}
+function scrollGoal(){var r=sec.getBoundingClientRect(),vh=innerHeight||1;var p=Math.max(0,Math.min(1,(vh-r.top)/(vh+r.height)));goal=[0,p];if(first){S=[0,p];first=false}}
+function step(){raf=0;var dx=goal[0]-S[0],dy=goal[1]-S[1];if(window.__pvStill){S=[goal[0],goal[1]];draw();return}
+if(how==='scroll'){var r2=Math.abs(dy)<.01?dy:dy*.01*sp;S=[0,S[1]+r2]}else{S=[S[0]+dx*.002*sp,S[1]+dy*.002*sp];if(Math.abs(dx)<1e-4&&Math.abs(dy)<1e-4)S=[goal[0],goal[1]]}
+draw();if(S[0]!==goal[0]||S[1]!==goal[1])raf=requestAnimationFrame(step)}
+function kick(){if(!raf)raf=requestAnimationFrame(step)}
+if(how==='mouse'){sec.addEventListener('mousemove',function(e){var r=sec.getBoundingClientRect();goal=[-2*(e.clientX-r.left)/r.width+1,2*(e.clientY-r.top)/r.height-1];clearTimeout(tid);tid=setTimeout(function(){goal=[0,0];kick()},2000);kick()});
+sec.addEventListener('mouseleave',function(){clearTimeout(tid);tid=setTimeout(function(){goal=[0,0];kick()},2000)})}
+else if(how==='scroll'){scrollGoal();addEventListener('scroll',function(){scrollGoal();kick()},{passive:true})}
+draw();
+addEventListener('resize',function(){draw()});
+cv.addEventListener('webglcontextlost',function(){cv.remove();im.style.visibility=''});
+}
+})();</script>`;
+
 // Background videos hosted on Vimeo or YouTube (capture.mjs mediaBackgrounds, data-pv-bgvideo; Jeremy 2026-11-17): the
 // still from the video shows first; once the page has loaded, the provider's own background player (muted, looping, no
 // controls) goes in over it, sized to cover the section as live, and fades in only when it reports that it is playing.
@@ -878,7 +960,7 @@ var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M}
 const JQUERY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'vendor', 'jquery-3.7.1.min.js');
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, LIQUID_SCRIPT, isOwnerScript, ownerScriptKind };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, LIQUID_SCRIPT, REFRACT_SCRIPT, isOwnerScript, ownerScriptKind };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
@@ -982,6 +1064,7 @@ export function buildVariant(siteDir, name, { hosts, siteHost }) {
       if ($('[data-pv-scroll]').length) $('body').append(SCROLL_FX_SCRIPT);
       if ($('img[data-pv-parallax]').length) $('body').append(PARALLAX_SCRIPT);
       if ($('img[data-pv-liquid]').length) $('body').append(LIQUID_SCRIPT);
+      if ($('img[data-pv-refract]').length) $('body').append(REFRACT_SCRIPT);
       if ($('[data-pv-bgvideo]').length) $('body').append(BGVIDEO_SCRIPT);
       if ($('[data-pv-appear]').length) $('body').append(APPEAR_SCRIPT);
       if ($('[data-pv-tick]').length) $('body').append(TICKER_SCRIPT);
