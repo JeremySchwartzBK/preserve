@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 import { LIQUID_SCRIPT } from './build.mjs';
 import { launch } from './lib.mjs';
 
@@ -22,12 +23,16 @@ const fx = JSON.stringify({ i: 30, s: 2, r: 0, v: 50, m: 5, sh: 0, sm: 100, sd: 
 fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><body style="margin:0">
 <div id="box" style="position:relative;width:600px;height:600px;background:#fff"><div class="fit"><img id="im" src="p.png" width="6000" height="2000" data-pv-liquid="${fx}" style="position:absolute;left:0;top:0;display:block;width:100%;height:100%;object-fit:contain;object-position:50% 50%;visibility:hidden"></div></div>
 ${LIQUID_SCRIPT}</body></html>`);
+// A photo of a churning background drawing (capture.mjs canvasStills: The Garret Group's gradient), stretched to its box.
+fs.writeFileSync(path.join(dir, 'fill.html'), `<!doctype html><html><body style="margin:0">
+<div id="box" style="position:relative;width:600px;height:600px"><img id="im" src="p.png" data-pv-canvas="1" data-pv-liquid="${fx.replace('30', '1')}" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:fill"></div>
+${LIQUID_SCRIPT}</body></html>`);
 const srv = http.createServer((q, r) => { const f = path.join(dir, q.url.split('?')[0] === '/' ? 'index.html' : q.url.split('?')[0]); if (!fs.existsSync(f)) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-type': f.endsWith('.png') ? 'image/png' : 'text/html' }); r.end(fs.readFileSync(f)); }).listen(0);
 const url = `http://127.0.0.1:${srv.address().port}/`;
 const open = async (opts = {}, init) => {
-  const ctx = await browser.newContext({ viewport: { width: 800, height: 700 }, ...opts });
+  const { file, ...o } = opts; const ctx = await browser.newContext({ viewport: { width: 800, height: 700 }, ...o });
   if (init) await ctx.addInitScript(init);
-  const page = await ctx.newPage(); await page.goto(url); await page.waitForTimeout(1500);
+  const page = await ctx.newPage(); await page.goto(url + (opts.file || '')); await page.waitForTimeout(1500);
   const r = await page.evaluate(() => { const im = document.getElementById('im'), cv = document.querySelector('canvas[data-pv-runtime]'); const b = cv && cv.getBoundingClientRect(); return { imH: im.getBoundingClientRect().height, vis: getComputedStyle(im).visibility, cv: b && { top: b.top, height: b.height, width: b.width } }; });
   const shot = r.cv ? await page.screenshot({ clip: { x: 0, y: r.cv.top, width: r.cv.width, height: r.cv.height } }) : null;
   await ctx.close(); return { ...r, shot };
@@ -43,5 +48,12 @@ try {
   assert.equal(calm.cv, null); assert.equal(calm.vis, 'visible', 'less motion: the picture shows, though saved hidden');
   const off = await open({}, () => { window.__pvNoLiquid = true; });
   assert.equal(off.cv, null); assert.equal(off.vis, 'visible', 'our stylesheet step: the picture shows');
+  // Stretched like the photo itself, not cropped: all 30 stripes across, over the whole box.
+  const fill = await open({ file: 'fill.html' }, () => { window.__pvStill = true; });
+  assert.ok(fill.cv && Math.abs(fill.cv.width - 600) <= 2 && Math.abs(fill.cv.height - 600) <= 2, `a stretched photo: drawn over its whole box: ${JSON.stringify(fill.cv)}`);
+  const { data, info } = await sharp(fill.shot).raw().toBuffer({ resolveWithObject: true });
+  let edges = 0; const y = Math.floor(info.height / 2);
+  for (let x = 1; x < info.width; x++) { const a = (y * info.width + x - 1) * info.channels, b = a + info.channels; if (Math.abs(data[a] - data[b]) > 100) edges++; }
+  assert.ok(edges >= 25 && edges <= 35, `a stretched photo: stretched, not cropped (${edges} stripe edges, 29 expected)`);
   console.log('liquid stand-in: ok');
 } finally { srv.close(); await browser.close(); }

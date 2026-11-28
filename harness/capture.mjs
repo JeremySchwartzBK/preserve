@@ -1152,6 +1152,13 @@ async function canvasStills(page, outDir, prof, info) {
           const c0 = col(g.startColor), c1 = col(g.endColor);
           if (c0 && c1) c.setAttribute('data-preserve-follow', JSON.stringify({ c0, c1, r: g.radialGradientRadius ?? 30, x: g.radialGradientPositionX ?? 50, y: g.radialGradientPositionY ?? 50, s: g.radialGradientFollowSpeed ?? 100, inv: !!g.invertColors }));
         }
+        // Squarespace's gradient background that slowly churns ("distortion": The Garret Group, 2026-11-28). The photo
+        // of one moment stays, and our own liquid stand-in (build.mjs LIQUID_SCRIPT) keeps it churning from the
+        // section's own distortion settings: how much, which way, how fast it drifts and changes shape.
+        const num = (v) => (Number.isFinite(+v) ? +v : 0);
+        if (g && g.type === 'gradient' && !(g.gradientType === 'radial' && g.radialGradientFollowCursor) && num(g.distortionIntensity) > 0 && (num(g.distortionSpeed) > 0 || num(g.distortionMorphSpeed) > 0)) {
+          c.setAttribute('data-preserve-liquid', JSON.stringify({ i: num(g.distortionIntensity), s: num(g.distortionComplexity) / 2, r: num(g.distortionDirection), v: num(g.distortionSpeed), m: num(g.distortionMorphSpeed), sh: 0, sm: g.distortionSmoothness == null ? 100 : num(g.distortionSmoothness), sd: num(g.distortionSeed), fx: 0.5, fy: 0.5 }));
+        }
       } catch {}
       // Squarespace's image effects (film grain, liquid, refracted...): the effect's name, for a stand-in where we have one.
       const fx = c.closest('[data-controller^="BackgroundImageFX"]');
