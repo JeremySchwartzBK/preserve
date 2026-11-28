@@ -76,6 +76,10 @@ export const OVERLAY_SELECTORS = [
   '[data-ff-type="popup"]',
   '.mc-modal', '.mc-modal-bg', '.mc-banner',
   '.formkit-modal', 'form[data-format="modal"]', 'form[data-format="slide in"]', 'form[data-format="sticky bar"]',
+  // Klaviyo's popup locks the page's scroll while it is open and says so (Honeybelle's "Join the Honey Club", 2026-11-28:
+  // it opened a few seconds in, after capture had looked for popups, and the check took it, sitting still while the
+  // page scrolled under it, for a scroll effect the copy had lost). Its inline forms (.klaviyo-form) stay.
+  '[data-kl-scroll-locking-modal]',
   // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
   ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',

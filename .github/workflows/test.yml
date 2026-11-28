@@ -108,3 +108,6 @@ jobs:
       - name: Animated pictures, and parts laid over them, count as moving
         working-directory: harness
         run: node test-motion-animated.mjs
+      - name: A signup popup that opens late isn't taken for a lost scroll effect
+        working-directory: harness
+        run: node test-behavior-popup.mjs
