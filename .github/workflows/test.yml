@@ -90,3 +90,6 @@ jobs:
       - name: Our liquid-image ripple draws over the picture only and never leaves it blank
         working-directory: harness
         run: node test-liquid.mjs
+      - name: Our own stylesheet's check leaves out parts the owner's code would build again
+        working-directory: harness
+        run: node test-own-css-owner.mjs

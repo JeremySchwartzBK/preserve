@@ -535,6 +535,15 @@ async function shots(base, layout, name) {
     // a few pixels taller under one of them moves the whole page down and reads as a big difference. The size check
     // compares the copy, padding script on, with the live site at other widths.
     await ctx.addInitScript(() => { window.__pvNoHeaderPad = true; });
+    // The owner's own code off in both photos: the copy already shows what it did on the live site. Code that builds
+    // parts when the page opens would build them again here, and those new parts carry none of our stylesheet's classes,
+    // so the two photos would differ over parts no visitor sees (Samuel Sparrow's phone-menu links, which the copy keeps
+    // and steady.mjs then freezes; 58-site re-run 2026-11-28). steady.mjs looks after code that builds parts.
+    await ctx.route(/\.html(\?|$)/, async (route) => {
+      const res = await route.fetch();
+      const body = (await res.text()).replace(/<script\b[^>]*data-pv-owner="\d+"[^>]*>[\s\S]*?<\/script>/g, '');
+      await route.fulfill({ response: res, body });
+    });
     const page = await ctx.newPage();
     await page.goto(`${base}/${name}`, { waitUntil: 'load', timeout: 60000 });
     // Every image loaded before the photo, so lazy loading can't make the two differ.
