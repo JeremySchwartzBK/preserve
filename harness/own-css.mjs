@@ -102,7 +102,9 @@ async function layoutCss(base, stage, layout, report) {
   try {
     const ctx = await browser.newContext({ ...PROFILES[layout].context });
     // Our slideshow script holds still (no autoplay) while states are recorded.
-    await ctx.addInitScript(() => { window.__pvStill = true; });
+    // Our liquid-image stand-in off: it hides the picture under its drawing, and that hiding would be written into the
+    // copy's own styles (Xanadu's orbit logo went blank, 58-site re-run 2026-11-28).
+    await ctx.addInitScript(() => { window.__pvStill = true; window.__pvNoLiquid = true; });
     const page = await ctx.newPage();
     await page.goto(`${base}/.oc-${layout}.html`, { waitUntil: 'load', timeout: 60000 });
     await page.evaluate(() => document.fonts.ready);

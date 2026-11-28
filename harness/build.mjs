@@ -457,7 +457,9 @@ var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(fu
 // 0.3 and 1.5 seconds on Xanadu (speed 50, intensity 10) and The Garret Group (speed 20, intensity 5): speed counts
 // twice over (squared), as on the live sites.
 const LIQUID_SCRIPT = `<script id="preserve-liquid">(function(){
-if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+var L0=[].slice.call(document.querySelectorAll('img[data-pv-liquid]'));
+L0.forEach(function(im){if(im.style.visibility==='hidden')im.style.visibility=''});
+if(window.__pvNoLiquid||(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches))return;
 var VS='attribute vec2 p;varying vec2 v;void main(){v=p*0.5+0.5;gl_Position=vec4(p,0.,1.);}';
 var FS='precision highp float;varying vec2 v;uniform sampler2D T;uniform vec2 R,I,F;uniform float t,amp,frq,ang,spd,mor,shd,oct,sd;'+
 'float h(vec3 q){q=fract(q*.1031+sd*.013);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}'+
@@ -470,7 +472,7 @@ var FS='precision highp float;varying vec2 v;uniform sampler2D T;uniform vec2 R,
 'vec2 w=(u-.5)*(1.-2.*amp)+.5+o;'+
 'float ri=I.x/I.y;vec2 sc=ri>ar?vec2(ar/ri,1.):vec2(1.,ri/ar);vec2 tu=F+(w-F)*sc;tu=clamp(tu,0.,1.);'+
 'vec4 c=texture2D(T,tu);c.rgb*=1.-shd*(.5-a);gl_FragColor=c;}';
-var L=[].slice.call(document.querySelectorAll('img[data-pv-liquid]'));if(!L.length)return;
+var L=L0;if(!L.length)return;
 L.forEach(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-liquid'))}catch(e){return}
 var src=new Image();src.crossOrigin='anonymous';src.decoding='async';
 src.onload=function(){go(im,c,src)};
@@ -486,7 +488,7 @@ if(!gl.getProgramParameter(pr,gl.LINK_STATUS))return;gl.useProgram(pr);
 var bf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,bf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
 var pl=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pl);gl.vertexAttribPointer(pl,2,gl.FLOAT,false,0,0);
 var tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);
-try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src)}catch(e){return}
+var mx=Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE)||2048,2048),pic=src,k=Math.min(1,mx/Math.max(src.naturalWidth,src.naturalHeight));if(k<1){pic=document.createElement('canvas');pic.width=Math.max(1,Math.floor(src.naturalWidth*k));pic.height=Math.max(1,Math.floor(src.naturalHeight*k));pic.getContext('2d').drawImage(src,0,0,pic.width,pic.height)}try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,pic)}catch(e){return}if(gl.getError())return;
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
 var U={};['T','R','I','F','t','amp','frq','ang','spd','mor','shd','oct','sd'].forEach(function(k){U[k]=gl.getUniformLocation(pr,k)});
@@ -495,9 +497,9 @@ gl.uniform1i(U.T,0);gl.uniform2f(U.I,src.naturalWidth,src.naturalHeight);gl.unif
 gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0008);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,20)*0.55);gl.uniform1f(U.ang,(c.r||0)*Math.PI/180);
 gl.uniform1f(U.spd,cl(c.v||0,0,100)*cl(c.v||0,0,100)*0.0005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.003);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
 gl.uniform1f(U.oct,1+Math.round((100-cl(c.sm==null?100:c.sm,0,100))/34));gl.uniform1f(U.sd,(c.sd||0)%997);
-var box=im.parentNode;if(getComputedStyle(box).position==='static')box.style.position='relative';box.insertBefore(cv,im.nextSibling);
-var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),b=box.getBoundingClientRect(),cs=getComputedStyle(im);
-cv.style.left=(a.left-b.left-box.clientLeft)+'px';cv.style.top=(a.top-b.top-box.clientTop)+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
+var box=im.parentNode;box.insertBefore(cv,im.nextSibling);
+var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),cs=getComputedStyle(im);if(cs.objectFit==='contain'&&a.width&&a.height){var ri=src.naturalWidth/src.naturalHeight,w0=a.width,h0=a.height;if(w0/h0>ri)w0=h0*ri;else h0=w0/ri;var pp=(cs.objectPosition||'50% 50%').split(' '),px=parseFloat(pp[0])/100,py=parseFloat(pp[1]||pp[0])/100;if(!isFinite(px))px=.5;if(!isFinite(py))py=.5;a={left:a.left+(a.width-w0)*px,top:a.top+(a.height-h0)*py,width:w0,height:h0}}
+var op=cv.offsetParent,x,y;if(!op||op===document.body&&getComputedStyle(op).position==='static'){x=a.left+scrollX;y=a.top+scrollY}else{var o=op.getBoundingClientRect();x=a.left-o.left-op.clientLeft+op.scrollLeft;y=a.top-o.top-op.clientTop+op.scrollTop}cv.style.left=x+'px';cv.style.top=y+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
 cv.style.borderRadius=cs.borderRadius;cv.style.zIndex=cs.zIndex==='auto'?'':cs.zIndex;
 var dp=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(a.width*dp)),h=Math.max(1,Math.round(a.height*dp));
 if(w!==W||h!==H){W=w;H=h;cv.width=w;cv.height=h;gl.viewport(0,0,w,h);gl.uniform2f(U.R,w,h)}}
@@ -873,7 +875,7 @@ var M=Object.create(Math);M.random=rnd;window.__pvDate=PvDate;window.__pvMath=M}
 const JQUERY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'vendor', 'jquery-3.7.1.min.js');
 const ownerWrap = (code) => `{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{${code}\n}catch(e){}}`;
 
-export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, isOwnerScript, ownerScriptKind };
+export { MENU_SCRIPT, SLIDER_SCRIPT, GALLERY_SCRIPT, SHAPES_SCRIPT, FOLLOW_SCRIPT, POINTER_SCRIPT, SCROLL_SHOW_SCRIPT, SCROLL_FX_SCRIPT, TICKER_SCRIPT, ACT_SCRIPT, GRAIN_SCRIPT, LIQUID_SCRIPT, isOwnerScript, ownerScriptKind };
 
 export function buildVariant(siteDir, name, { hosts, siteHost }) {
   const v = VARIANTS[name];
