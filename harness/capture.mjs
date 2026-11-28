@@ -539,6 +539,10 @@ export async function scrollShown(page) {
       if (cs.position !== 'fixed' || e.closest('[data-preserve-ss]')) continue;
       if (e.querySelectorAll('*').length > 20 || e.textContent.trim().length > 40) continue;
       const r = e.getBoundingClientRect();
+      // A backdrop filling most of the screen (Naughty Nancy's section backgrounds, 2026-11-28: a plugin pins each one
+      // behind the page and fades it in as its section comes up) is not a button: it fades in step with the scroll,
+      // which scrollLinked replays, rather than popping on.
+      if (r.width * r.height > 0.5 * innerWidth * innerHeight) continue;
       if (r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden' && +cs.opacity > 0.05) continue;
       e.setAttribute('data-preserve-ss', String(k++));
     }

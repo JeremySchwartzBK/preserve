@@ -111,3 +111,6 @@ jobs:
       - name: A signup popup that opens late isn't taken for a lost scroll effect
         working-directory: harness
         run: node test-behavior-popup.mjs
+      - name: A section background that fades in with the scroll is replayed with the scroll, not popped on
+        working-directory: harness
+        run: node test-capture-backdrop.mjs
