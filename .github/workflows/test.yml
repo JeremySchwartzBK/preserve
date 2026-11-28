@@ -87,6 +87,9 @@ jobs:
       - name: A page that scrolls itself during capture is pictured from the top
         working-directory: harness
         run: node test-capture-scroll.mjs
+      - name: A churning gradient caught flat is photographed again on screen
+        working-directory: harness
+        run: node test-capture-gradient.mjs
       - name: Owner code written for jQuery runs on our own jQuery, never twice
         working-directory: harness
         run: node test-owner-jquery.mjs

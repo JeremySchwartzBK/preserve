@@ -1133,6 +1133,7 @@ async function canvasStills(page, outDir, prof, info) {
         if (q.width > 0 && q.height > 0) c.setAttribute('data-preserve-cbox', [r.left - q.left, r.top - q.top].map((v, i) => (100 * v / (i ? q.height : q.width)).toFixed(3)).concat([(100 * r.width / q.width).toFixed(3), (100 * r.height / q.height).toFixed(3)]).join(','));
       }
       out.push({ url, w: Math.round(r.width), h: Math.round(r.height) });
+      const last = out[out.length - 1];
       // Squarespace's radial gradient background that follows the pointer: its settings, with colours resolved, so
       // our stand-in (build.mjs FOLLOW_SCRIPT) can move the glow the way the site does.
       try {
@@ -1158,6 +1159,7 @@ async function canvasStills(page, outDir, prof, info) {
         const num = (v) => (Number.isFinite(+v) ? +v : 0);
         if (g && g.type === 'gradient' && !(g.gradientType === 'radial' && g.radialGradientFollowCursor) && num(g.distortionIntensity) > 0 && (num(g.distortionSpeed) > 0 || num(g.distortionMorphSpeed) > 0)) {
           c.setAttribute('data-preserve-liquid', JSON.stringify({ i: num(g.distortionIntensity), s: num(g.distortionComplexity) / 2, r: num(g.distortionDirection), v: num(g.distortionSpeed), m: num(g.distortionMorphSpeed), sh: 0, sm: g.distortionSmoothness == null ? 100 : num(g.distortionSmoothness), sd: num(g.distortionSeed), fx: 0.5, fy: 0.5 }));
+          last.liquid = true;
         }
       } catch {}
       // Squarespace's image effects (film grain, liquid, refracted...): the effect's name, for a stand-in where we have one.
@@ -1170,9 +1172,22 @@ async function canvasStills(page, outDir, prof, info) {
   fs.mkdirSync(path.join(outDir, 'stills'), { recursive: true });
   info.canvasStills = info.canvasStills || {};
   for (let i = 0; i < shots.length; i++) {
-    const buf = Buffer.from(shots[i].url.split(',')[1], 'base64');
+    let buf = Buffer.from(shots[i].url.split(',')[1], 'base64');
     // A canvas that drew nothing (or one flat colour) is left as it is.
     let ok = false; try { const st = await sharp(buf).stats(); ok = st.channels.some((c) => c.max - c.min > 6); } catch {}
+    // A churning gradient background can be caught at a moment when it is one flat colour (The Garret Group's top
+    // section, 2026-11-28: the copy showed a plain grey band where the live page shows the gradient most of the time).
+    // Our stand-in churns the photo it is given, so look again for a moment with the gradient in it, with the section
+    // on screen (off screen the drawing stops on whatever it showed last), then put the page back where it was.
+    const y0 = !ok && shots[i].liquid ? await page.evaluate((i) => { const y = scrollY; document.querySelector(`[data-preserve-canvas="${i}"]`)?.scrollIntoView({ block: 'center' }); return y; }, i).catch(() => null) : null;
+    for (let k = 0; !ok && k < 10 && shots[i].liquid; k++) {
+      await sleep(400);
+      const url = await page.evaluate((i) => { try { return document.querySelector(`[data-preserve-canvas="${i}"]`).toDataURL('image/png'); } catch { return null; } }, i).catch(() => null);
+      if (!url) break;
+      const b2 = Buffer.from(url.split(',')[1], 'base64');
+      try { const st = await sharp(b2).stats(); if (st.channels.some((c) => c.max - c.min > 6)) { buf = b2; ok = true; } } catch {}
+    }
+    if (y0 != null) await page.evaluate((y) => scrollTo(0, y), y0).catch(() => {});
     const file = `${prof}-canvas-${i}.png`;
     if (ok) { fs.writeFileSync(path.join(outDir, 'stills', file), buf); info.canvasStills[file] = { w: shots[i].w, h: shots[i].h }; }
     await page.evaluate(([i, f]) => { const c = document.querySelector(`[data-preserve-canvas="${i}"]`); if (!c) return; if (f) c.setAttribute('data-preserve-canvas', f); else c.removeAttribute('data-preserve-canvas'); }, [i, ok ? file : null]);
