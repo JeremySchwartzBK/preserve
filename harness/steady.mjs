@@ -4,7 +4,7 @@
 // links) is compared. If the two loads differ, the kept owner scripts (build.mjs, data-pv-owner) are tried one at a time
 // without each; one whose removal makes the loads agree is frozen: taken out, so the page keeps the look it had at
 // capture. If none alone explains it, all of them are frozen. Our own scripts are never touched.
-// Runs after scrub, before the quality check. Usage: node steady.mjs <stageDir>   (prints a JSON report)
+// Runs after scrub, before the quality check. Usage: node steady.mjs <stageDir> [siteDir]   (prints a JSON report)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -44,7 +44,50 @@ function kinds() {
   return n;
 }
 
-export async function steady(stage) {
+// Where each built part sits on the page, with every animation held at its start: a part rebuilt by the owner's code
+// has to land where the copy showed it, at the same size (Breathpod's hints, rebuilt without their styling, came out as
+// large hands covering the phone pictures; 58-site re-run, 2026-11-28).
+function boxes(list) {
+  for (const a of document.getAnimations()) { try { a.pause(); a.currentTime = 0; } catch {} }
+  const out = {};
+  for (const k of list) {
+    const [t, c] = k.split('.');
+    out[k] = [...document.querySelectorAll(t + '.' + CSS.escape(c))].filter((e) => !e.closest('[id^="preserve-"]')).map((e) => { const r = e.getBoundingClientRect(); return [r.left + scrollX, r.top + scrollY, r.width, r.height].map(Math.round); });
+  }
+  return out;
+}
+const sameBoxes = (a, b) => Object.keys(a).every((k) => a[k].length === (b[k] || []).length && a[k].every((x, j) => x.every((v, n) => Math.abs(v - b[k][j][n]) <= Math.max(8, 0.1 * Math.max(x[2], x[3], b[k][j][2], b[k][j][3])))));
+
+// The owner's own style rules for parts their code builds (Breathpod's swipe hints: placed over each phone picture, a
+// small faded hand). Our own stylesheet (own-css.mjs) styles only the parts the copy had when it was made, so parts the
+// code builds again from scratch would otherwise show unstyled. Rules that name one of the built kinds, inside any
+// @media or @supports they sit in, and the animations they play; never a rule that names Squarespace.
+function pickCss({ texts, classes }) {
+  const hit = new RegExp('\\.(' + classes.map((c) => c.replace(/[^\w-]/g, '\\$&')).join('|') + ')(?![\\w-])');
+  const bad = /sqs|squarespace/i, names = new Set();
+  const walk = (rules) => {
+    const keep = [];
+    for (const r of rules) {
+      if (r.type === 1) {
+        if (!hit.test(r.selectorText) || bad.test(r.cssText)) continue;
+        keep.push(r.cssText);
+        for (const n of (r.style.getPropertyValue('animation-name') || '').split(',')) if (n.trim() && n.trim() !== 'none') names.add(n.trim());
+      } else if ((r.type === 4 || r.type === 12) && r.cssRules) {
+        const inner = walk(r.cssRules);
+        if (inner.length) keep.push(r.cssText.slice(0, r.cssText.indexOf('{')) + '{' + inner.join('\n') + '}');
+      }
+    }
+    return keep;
+  };
+  const sheets = texts.map((t) => { const sh = new CSSStyleSheet(); try { sh.replaceSync(t); } catch {} return sh; });
+  const out = [];
+  for (const sh of sheets) out.push(...walk(sh.cssRules));
+  for (const sh of sheets) for (const r of sh.cssRules) if (r.type === 7 && names.has(r.name)) out.push(r.cssText);
+  return out.join('\n');
+}
+
+// siteDir: the capture (rendered-<layout>.html), for the owner's own style rules; optional.
+export async function steady(stage, siteDir = null) {
   const report = { layouts: {}, frozen: [] };
   const htmlOf = {}, trialOf = {};
   const srv = await new Promise((resolve) => {
@@ -124,11 +167,18 @@ export async function steady(stage) {
         if (!built.length) continue;
         const $ = cheerio.load(htmlOf[file]);
         for (const k of built) { const [tag, cls] = k.split('.'); $(`${tag}.${cls.replace(/([^\w-])/g, '\\$1')}`).filter((_, el) => !/^preserve-/.test($(el).attr('id') || '')).remove(); }
+        const texts = (() => { const f = siteDir && path.join(siteDir, `rendered-${layout}.html`); if (!f || !fs.existsSync(f)) return []; const c = cheerio.load(fs.readFileSync(f, 'utf8')); return c('style').map((_, e) => c(e).html()).get().filter(Boolean); })();
+        if (texts.length) {
+          const pg = await browser.newPage();
+          const css = await pg.evaluate(pickCss, { texts, classes: built.map((k) => k.split('.')[1]) }).finally(() => pg.close());
+          if (css) $('head').append(`<style id="preserve-owner-css-${i}">${css.replace(/</g, '\\3c ')}</style>`);
+        }
         trialOf[file] = $.html();
         if (await load(layout, [], true, { trial: true }) !== await load(layout, [i], true)) { delete trialOf[file]; continue; }
+        if (!sameBoxes(await load(layout, [i], built, { look: boxes }), await load(layout, [], built, { trial: true, look: boxes }))) { delete trialOf[file]; continue; }
         htmlOf[file] = trialOf[file]; delete trialOf[file];
         restarted.push(i);
-        const f = { script: i, why: 'starts from the page as it first arrived', built };
+        const f = { script: i, why: 'starts from the page as it first arrived', built, styled: new RegExp(`id="preserve-owner-css-${i}"`).test(htmlOf[file]) };
         (r.restarted ||= []).push(f); (report.restarted ||= []).push({ layout, ...f });
       }
       redo.splice(0, redo.length, ...redo.filter((i) => !restarted.includes(i)));
@@ -151,5 +201,5 @@ export async function steady(stage) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  console.log(JSON.stringify(await steady(path.resolve(process.argv[2])), null, 1));
+  console.log(JSON.stringify(await steady(path.resolve(process.argv[2]), process.argv[3] ? path.resolve(process.argv[3]) : null), null, 1));
 }
