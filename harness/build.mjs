@@ -454,7 +454,7 @@ var q=0;addEventListener('scroll',function(){if(!q){q=1;requestAnimationFrame(fu
 // ripples slowly, as if seen through moving water. Our own drawing, not Squarespace's: smooth noise that drifts along
 // "rotation" at "speed" and changes shape at "morphSpeed" bends the picture by "intensity", in blobs sized by "scale",
 // rougher as "smoothness" drops, with "shadow" darkening the troughs. The picture is drawn as the page lays it out
-// (cover, around its focal point), in a canvas laid over it; the picture stays underneath and shows whenever the drawing
+// (cover, around its focal point; stretched when it is a photo of a background drawing), in a canvas laid over it; the picture stays underneath and shows whenever the drawing
 // can't (no WebGL, picture not readable). Draws only on screen; one still frame while our checks compare pictures; the
 // plain picture for visitors who ask for less motion. Matched to the live effect by how much the picture changes over
 // 0.3 and 1.5 seconds on Xanadu (speed 50, intensity 10) and The Garret Group (speed 20, intensity 5): speed counts
@@ -501,7 +501,7 @@ gl.uniform1f(U.amp,cl(c.i||0,0,100)*0.0008);gl.uniform1f(U.frq,1.2+cl(c.s||0,0,2
 gl.uniform1f(U.spd,cl(c.v||0,0,100)*cl(c.v||0,0,100)*0.0005);gl.uniform1f(U.mor,cl(c.m||0,0,100)*0.003);gl.uniform1f(U.shd,cl(c.sh||0,0,100)*0.012);
 gl.uniform1f(U.oct,1+Math.round((100-cl(c.sm==null?100:c.sm,0,100))/34));gl.uniform1f(U.sd,(c.sd||0)%997);
 var box=im.parentNode;box.insertBefore(cv,im.nextSibling);
-var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),cs=getComputedStyle(im);if(cs.objectFit==='contain'&&a.width&&a.height){var ri=src.naturalWidth/src.naturalHeight,w0=a.width,h0=a.height;if(w0/h0>ri)w0=h0*ri;else h0=w0/ri;var pp=(cs.objectPosition||'50% 50%').split(' '),px=parseFloat(pp[0])/100,py=parseFloat(pp[1]||pp[0])/100;if(!isFinite(px))px=.5;if(!isFinite(py))py=.5;a={left:a.left+(a.width-w0)*px,top:a.top+(a.height-h0)*py,width:w0,height:h0}}
+var W=0,H=0;function fit(){var a=im.getBoundingClientRect(),cs=getComputedStyle(im);if(cs.objectFit==='fill'&&a.width&&a.height)gl.uniform2f(U.I,a.width,a.height);if(cs.objectFit==='contain'&&a.width&&a.height){var ri=src.naturalWidth/src.naturalHeight,w0=a.width,h0=a.height;if(w0/h0>ri)w0=h0*ri;else h0=w0/ri;var pp=(cs.objectPosition||'50% 50%').split(' '),px=parseFloat(pp[0])/100,py=parseFloat(pp[1]||pp[0])/100;if(!isFinite(px))px=.5;if(!isFinite(py))py=.5;a={left:a.left+(a.width-w0)*px,top:a.top+(a.height-h0)*py,width:w0,height:h0}}
 var op=cv.offsetParent,x,y;if(!op||op===document.body&&getComputedStyle(op).position==='static'){x=a.left+scrollX;y=a.top+scrollY}else{var o=op.getBoundingClientRect();x=a.left-o.left-op.clientLeft+op.scrollLeft;y=a.top-o.top-op.clientTop+op.scrollTop}cv.style.left=x+'px';cv.style.top=y+'px';cv.style.width=a.width+'px';cv.style.height=a.height+'px';
 cv.style.borderRadius=cs.borderRadius;cv.style.zIndex=cs.zIndex==='auto'?'':cs.zIndex;
 var dp=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(a.width*dp)),h=Math.max(1,Math.round(a.height*dp));

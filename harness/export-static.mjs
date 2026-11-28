@@ -387,7 +387,7 @@ for (const layout of ['desktop', 'mobile']) {
     if (!fs.existsSync(path.join(assetDir, name))) { fs.writeFileSync(path.join(assetDir, name), buf); bytes += buf.length; }
     const style = ($(el).attr('style') || '').replace(/display\s*:\s*none;?/g, '');
     const cls = $(el).attr('class');
-    const follow = $(el).attr('data-preserve-follow');
+    const follow = $(el).attr('data-preserve-follow'), liquid = $(el).attr('data-preserve-liquid');
     const fx = $(el).attr('data-preserve-fx');
     const ptr = $(el).attr('data-pv-pointer');
     // Laid over its section (the usual background effect): fill it at any width, not the capture width's pixels.
@@ -395,7 +395,7 @@ for (const layout of ['desktop', 'mobile']) {
     const fill = ptr || !/position\s*:\s*absolute/.test(style) ? ''
       : cbox.length === 4 && cbox.every(Number.isFinite) ? `;left:${cbox[0]}%;top:${cbox[1]}%;width:${cbox[2]}%;height:${cbox[3]}%`
       : ';left:0;top:0;width:100%;height:100%';
-    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}${ptr ? ` data-pv-pointer="${ptr.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);
+    $(el).replaceWith(`<img src="a/${name}" alt="" decoding="async" loading="lazy"${cls ? ` class="${cls}"` : ''} style="${style}${fill};object-fit:fill;pointer-events:none" data-pv-canvas="1"${fx ? ` data-pv-fx="${fx.replace(/[^a-z-]/g, '')}"` : ''}${follow ? ` data-pv-follow="${follow.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}${liquid ? ` data-pv-liquid="${liquid.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}${ptr ? ` data-pv-pointer="${ptr.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"` : ''}>`);
     stills.push({ layout, src: 'canvas', replaced: true });
   }
   // Safety net for loader placeholders saved with no src (capture.mjs loads them first; this catches what it missed):
