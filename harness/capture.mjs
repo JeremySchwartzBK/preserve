@@ -1328,6 +1328,9 @@ export async function capture(url, outDir) {
     page.on('domcontentloaded', () => { if (left) return; const u = new URL(page.url()); if (u.pathname !== home.pathname || u.host !== home.host) left = u.pathname; });
     if (prof === 'desktop') fs.writeFileSync(path.join(outDir, 'server.html'), await resp.body());
     await sleep(2000);
+    // Where a visitor arrives: the top, unless the address points into the page. Not read off the page itself, since a
+    // widget may already have scrolled it by now.
+    const yStart = new URL(url).hash.length > 1 ? await page.evaluate(() => scrollY).catch(() => 0) : 0;
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
     await page.screenshot({ path: path.join(outDir, `orig-asis-${prof}.png`) });
     await scrollThrough(page);
@@ -1389,6 +1392,11 @@ export async function capture(url, outDir) {
     // after the swipe test is not enough: a carousel still gliding after the drag (Flickity) keeps writing its own
     // position on the next frames, so Ela House's blog carousel was saved scrolled to its last slide (-3600 px) with
     // the first one still marked as shown.
+    // Back where a visitor arrives before the page is saved and photographed. A widget that puts the cursor in its own
+    // box (Xanadu's signup form, in the footer) scrolls the page to itself, which left the reference pictures of the
+    // live page showing the footer, so every comparison of the first screen failed.
+    const yEnd = await page.evaluate((y) => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); const was = scrollY; if (Math.abs(was - y) > 2) scrollTo(0, y); return was; }, yStart).catch(() => yStart);
+    if (Math.abs(yEnd - yStart) > 2) { info.errors.push(`${prof}: the page had scrolled itself to ${Math.round(yEnd)} during capture; put back`); await sleep(800); }
     await page.evaluate(() => { for (const h of Object.values(window.__pvHome || {})) { try { h(); } catch {} } }).catch(() => {});
     fs.writeFileSync(path.join(outDir, `rendered-${prof}.html`), await page.evaluate(snapshotDom));
     // Reference shots with marketing overlays hidden, to compare copies against.

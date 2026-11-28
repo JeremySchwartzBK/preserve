@@ -84,6 +84,9 @@ jobs:
       - name: A page that leaves itself during capture is captured again
         working-directory: harness
         run: node test-capture-leave.mjs
+      - name: A page that scrolls itself during capture is pictured from the top
+        working-directory: harness
+        run: node test-capture-scroll.mjs
       - name: Owner code written for jQuery runs on our own jQuery, never twice
         working-directory: harness
         run: node test-owner-jquery.mjs
