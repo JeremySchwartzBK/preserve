@@ -173,11 +173,28 @@ export async function recordInteractions(page, prof, { budgetMs = prof === 'desk
     const added = window.__pvM.added.filter((n) => n.isConnected && !window.__pvM.added.some((p) => p !== n && p.contains(n)));
     for (const n of added) { n.__pvParent = n.parentElement; n.__pvNext = n.nextSibling; }
     window.__pvLast = { ch, added };
+    // From here until revert, what our presses to close it again change too (Breathpod's reviews carousel: a second
+    // tap moved it on, and the copy began on its second card, where a swipe shows nothing new; Nov 28 re-run).
+    if (!noise) return { n: ch.length, added: added.length };
+    const U = window.__pvU = { at: new Map(), added: [] };
+    window.__pvUo = new MutationObserver((ms) => {
+      for (const m of ms) {
+        if (m.type === 'attributes') { const a = m.attributeName; if (/^data-(preserve|pv)-/.test(a)) continue; const o = U.at.get(m.target) || {}; if (!(a in o)) o[a] = m.oldValue; U.at.set(m.target, o); }
+        else for (const n of m.addedNodes) if (n.nodeType === 1 && !/^(SCRIPT|STYLE|LINK|IFRAME|NOSCRIPT)$/.test(n.tagName)) U.added.push(n);
+      }
+    });
+    window.__pvUo.observe(document.documentElement, { subtree: true, attributes: true, attributeOldValue: true, childList: true });
     return { n: ch.length, added: added.length };
   }, noise);
   const markNoise = () => page.evaluate(() => { for (const [e] of window.__pvLast.ch) e.setAttribute('data-preserve-noise', ''); });
   // Back to how the page was: attributes as they were, added elements taken out (kept aside for a kept state).
   const revert = () => page.evaluate(() => {
+    const U = window.__pvU;
+    if (U) {
+      window.__pvUo.takeRecords(); window.__pvUo.disconnect(); window.__pvU = null;
+      for (const [e, o] of U.at) for (const a in o) { if (o[a] === null) e.removeAttribute(a); else e.setAttribute(a, o[a]); }
+      for (const n of U.added) if (n.isConnected) n.remove();
+    }
     const L = window.__pvLast; if (!L) return;
     for (const [e, d] of L.ch) for (const a in d) { const v = d[a][0]; if (v === null) e.removeAttribute(a); else e.setAttribute(a, v); }
     for (const n of L.added) if (n.isConnected) n.remove();
