@@ -80,6 +80,13 @@ export const OVERLAY_SELECTORS = [
   // it opened a few seconds in, after capture had looked for popups, and the check took it, sitting still while the
   // page scrolled under it, for a scroll effect the copy had lost). Its inline forms (.klaviyo-form) stay.
   '[data-kl-scroll-locking-modal]',
+  // Mailchimp's newer forms put a popup in a wrapper they add straight to the page's body, its insides hidden from the
+  // page's own code (The Dial's "brings the world to you", 2026-11-28, opened partway through the check). Forms placed
+  // in the page's content stay.
+  'body > .mcforms-wrapper',
+  // inKind's rewards offer ("Get $20"), a sheet that slides up a few seconds in on phones (Borrachito, 2026-11-28), in an
+  // element of its own over a see-through layer, so the dimmed-layer test in markPromos doesn't catch it.
+  'inkind-modal-drawer',
   // Prototype Shopify adapter (PRESERVE_PLATFORM=shopify): theme announcement bars and email-signup / chat apps.
   ...(process.env.PRESERVE_PLATFORM === 'shopify' ? [
     '.shopify-section--announcement-bar', '.shopify-section-group-header-group[id*="announcement"]', 'announcement-bar', '.announcement-bar-section', '[id*="announcement-bar"]',
