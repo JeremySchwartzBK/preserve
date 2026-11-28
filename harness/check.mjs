@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import sharp from 'sharp';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL, fullPageShot } from './lib.mjs';
 
 
 
@@ -463,7 +463,7 @@ export async function check(url, profileName, { refDir, shotPrefix, isCopy }) {
   const blankCounted = await page.evaluate(() => [...document.images].filter((i) => { const r = i.getBoundingClientRect(); return r.height > 20 && r.width > 20 && !i.getAttribute('src') && !i.currentSrc; }).map((i) => window.__preserveAnchor(i)));
   out.blankImages = blankCounted.length;
   spot('blank-images', [...blankCounted, ...blankList]);
-  await page.screenshot({ path: `${shotPrefix}-full-${profileName}.png`, fullPage: true }).catch(() => {});
+  await fullPageShot(page, { path: `${shotPrefix}-full-${profileName}.png` }).catch(() => {});
   await page.evaluate(() => scrollTo(0, 0)); await sleep(600);
 
   // Mobile menu or desktop dropdown.
