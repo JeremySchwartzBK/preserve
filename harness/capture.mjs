@@ -1309,6 +1309,24 @@ async function foxPicture(page, outDir, f) {
   return ok ? file : null;
 }
 
+// Shape blocks (Minaa B's rounded box behind a quote, 2026-11-28): Squarespace's script draws the shape in pixels for
+// the size its block had, with no viewBox, and redraws it when the block changes size. The copy has no such script, so
+// at another window width the block changed size but the shape didn't: it ran past the photo beside it and stopped
+// short of the words it sits behind. Given the size it was drawn at as its viewBox, the shape stretches with its block,
+// as the live one is redrawn to. Run in the page before it is saved.
+export function fitShapes() {
+  let n = 0;
+  for (const s of document.querySelectorAll('svg.ps-shape, svg.sqs-shape')) {
+    if (s.hasAttribute('viewBox')) continue;
+    const r = s.getBoundingClientRect(), w = s.clientWidth || r.width, h = s.clientHeight || r.height;
+    if (w < 1 || h < 1) continue;
+    s.setAttribute('viewBox', `0 0 ${Math.round(w * 100) / 100} ${Math.round(h * 100) / 100}`);
+    if (!s.hasAttribute('preserveAspectRatio')) s.setAttribute('preserveAspectRatio', 'none');
+    n++;
+  }
+  return n;
+}
+
 export async function capture(url, outDir) {
   fs.mkdirSync(path.join(outDir, 'raw'), { recursive: true });
   const manifest = {}; // url -> { status, ct, file, size, type }
@@ -1425,6 +1443,7 @@ export async function capture(url, outDir) {
     // Back where a visitor arrives before the page is saved and photographed. A widget that puts the cursor in its own
     // box (Xanadu's signup form, in the footer) scrolls the page to itself, which left the reference pictures of the
     // live page showing the footer, so every comparison of the first screen failed.
+    await page.evaluate(fitShapes).catch(() => 0);
     const yEnd = await page.evaluate((y) => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); const was = scrollY; if (Math.abs(was - y) > 2) scrollTo(0, y); return was; }, yStart).catch(() => yStart);
     if (Math.abs(yEnd - yStart) > 2) { info.errors.push(`${prof}: the page had scrolled itself to ${Math.round(yEnd)} during capture; put back`); await sleep(800); }
     await page.evaluate(() => { for (const h of Object.values(window.__pvHome || {})) { try { h(); } catch {} } }).catch(() => {});

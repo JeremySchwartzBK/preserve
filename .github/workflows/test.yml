@@ -114,3 +114,6 @@ jobs:
       - name: A section background that fades in with the scroll is replayed with the scroll, not popped on
         working-directory: harness
         run: node test-capture-backdrop.mjs
+      - name: A shape block stretches with its block at other window widths
+        working-directory: harness
+        run: node test-capture-shapes.mjs
