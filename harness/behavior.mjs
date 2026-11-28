@@ -35,7 +35,11 @@ function changed(a, b, r, dx = 0, dy = 0) {
   }
   return n ? c / n : 0;
 }
-const shot = async (page) => PNG.sync.read(await page.screenshot());
+// In the window's own units, as every box measured here is: a phone's picture is otherwise three times as wide as the
+// window (its screen's pixel density), so on phones each block's box picked out the wrong part of the picture and a
+// scroll moved the picture three times further than the box allowed for (Colorize, 2026-11-28: a still sign-up section
+// read as 56% changed by the scroll).
+const shot = async (page) => PNG.sync.read(await page.screenshot({ scale: 'css' }));
 const r3 = (v) => +v.toFixed(3);
 
 // Leaf blocks on screen (as probeMotion picks them), in viewport pixels.

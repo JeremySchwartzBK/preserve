@@ -120,3 +120,6 @@ jobs:
       - name: A heading over a slideshow's stacked pictures isn't called moved off them
         working-directory: harness
         run: node test-layout-stacked.mjs
+      - name: On phones, a still section isn't read as changing when the page scrolls
+        working-directory: harness
+        run: node test-behavior-phone.mjs

@@ -302,7 +302,8 @@ export async function probeMotion(browser, url, profileName, { isCopy = false, f
       }, GALLERY_SEL);
       // Three pictures a couple of seconds apart; a block moves if it changed between both pairs.
       const shots = [];
-      for (let k = 0; k < 3; k++) { if (k) await sleep(MOTION_GAP_MS); shots.push(PNG.sync.read(await page.screenshot())); }
+      // In the window's own units, like the blocks' boxes (a phone's picture is otherwise three times as wide).
+      for (let k = 0; k < 3; k++) { if (k) await sleep(MOTION_GAP_MS); shots.push(PNG.sync.read(await page.screenshot({ scale: 'css' }))); }
       const changedIn = (a, b, bl) => {
         let changed = 0;
         for (let y = bl.y; y < bl.y + bl.h && y < a.height; y += 2) for (let x = bl.x; x < bl.x + bl.w && x < a.width; x += 2) {
