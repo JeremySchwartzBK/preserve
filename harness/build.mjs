@@ -434,12 +434,15 @@ addEventListener('resize',function(){if(on)paint()})});
 // Squarespace's parallax background effect (capture.mjs mediaBackgrounds, data-pv-parallax): the section's picture
 // zooms by zoomStart..zoomEnd percent around its focal point, and drifts by "intensity" along "rotation", as the section
 // travels up the screen. Live draws it with WebGL; we move the picture itself with the same sums.
+// Every picture is placed on each update, on screen or not, so where one sits depends only on where the page is
+// scrolled to, not on which scroll positions were passed on the way (Xanadu's party section differed between two
+// photos of the same copy, 58-site re-run 2026-11-28).
 const PARALLAX_SCRIPT = `<script id="preserve-parallax">(function(){
 var L=[].slice.call(document.querySelectorAll('img[data-pv-parallax]')).map(function(im){var c={};try{c=JSON.parse(im.getAttribute('data-pv-parallax'))}catch(e){}
 var fx=c.fx==null?0.5:c.fx,fy=c.fy==null?0.5:c.fy;im.style.transformOrigin=(fx*100)+'% '+(fy*100)+'%';im.style.willChange='transform';
 var box=im.parentElement;if(box)box.style.overflow='hidden';return{im:im,c:c,fx:fx,fy:fy,box:box||im}});
 if(!L.length)return;
-function upd(){var vh=innerHeight;L.forEach(function(o){var r=o.box.getBoundingClientRect();if(r.bottom<-100||r.top>vh+100)return;
+function upd(){var vh=innerHeight;L.forEach(function(o){var r=o.box.getBoundingClientRect();
 var p=Math.min(1,Math.max(0,(vh-r.top)/(vh+r.height))),c=o.c,a=(c.a||0)*0.005,z0=(c.z0||0)*0.01,z1=(c.z1||0)*0.01;
 var k=Math.max(0.05,1-a-(z0+(z1-z0)*p)),t=(c.r||0)*Math.PI/180,ox=o.fx,oy=1-o.fy;
 var dx=Math.cos(t)*((1-ox)*-a+(ox*a-(1-ox)*-a)*p),dy=Math.sin(t)*((1-oy)*-a+(oy*a-(1-oy)*-a)*p);

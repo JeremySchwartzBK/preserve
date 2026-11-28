@@ -34,7 +34,7 @@ const page = `<!doctype html><html><head><script id="preserve-lib-jquery" defer 
 <a id="btn" href="#">Open</a><section id="s1" style="display:none"><p>Hidden part</p></section>
 ${wrap(0, `$('<div class="mobile-custom-info"><p><a href="tel:">+44(0)7707326000</a></p></div>').insertBefore('.actions');`)}
 ${wrap(1, `$('#btn').on('click', function(e){ e.preventDefault(); $('#s1').show(); });`)}
-<div class="card"><div class="wrap"><div class="hint">swipe</div></div></div><div class="card"><div class="wrap"><div class="hint">swipe</div></div></div>
+<style>.z9{position:absolute;pointer-events:none;opacity:.5}</style><div class="card"><div class="wrap"><div class="hint z9">swipe</div></div></div><div class="card"><div class="wrap"><div class="hint z9">swipe</div></div></div>
 <a id="next" href="#">Next</a><div id="track" data-at="0"></div>
 <script data-pv-owner="2">{const Date=window.__pvDate||window.Date,Math=window.__pvMath||window.Math;try{
 document.querySelectorAll('.card .wrap').forEach(function(w){ var h=document.createElement('div'); h.className='hint'; h.textContent='swipe'; w.appendChild(h); });
@@ -42,7 +42,17 @@ document.getElementById('next').addEventListener('click', function(e){ e.prevent
 }catch(e){}}</script>
 </body></html>`;
 for (const l of ['desktop', 'mobile']) fs.writeFileSync(path.join(stage, `${l}.html`), page);
-const rep = await steady(stage);
+// The capture, with the owner's own style rules (our own stylesheet has already replaced them in the copy).
+const site = fs.mkdtempSync(path.join(os.tmpdir(), 'pvjqs-'));
+const ownerCss = `.hint { position: absolute; pointer-events: none; opacity: .5; animation: nudge 2s infinite } .wrap .hint.on { opacity: 1 } @media (max-width: 600px) { .hint { left: 4px } } .sqs-block .hint { color: red } @keyframes nudge { to { transform: translateX(4px) } } @keyframes unused { to { opacity: 0 } } .card { border: 1px solid }`;
+for (const l of ['desktop', 'mobile']) fs.writeFileSync(path.join(site, `rendered-${l}.html`), `<html><head><style>${ownerCss}</style></head><body></body></html>`);
+// Without the owner's rules at hand, the rebuilt hints would not look like the copy's: that code is frozen instead.
+const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'pvjqb-'));
+fs.cpSync(stage, bare, { recursive: true });
+const repBare = await steady(bare);
+assert.ok(!repBare.restarted, 'not restarted when the rebuilt parts would look different');
+assert.ok(!/data-pv-owner="2"/.test(fs.readFileSync(path.join(bare, 'desktop.html'), 'utf8')), 'frozen instead');
+const rep = await steady(stage, site);
 const out = fs.readFileSync(path.join(stage, 'desktop.html'), 'utf8');
 assert.ok(!/data-pv-owner="0"/.test(out), 'code that would write the real phone number back in is frozen');
 assert.ok(/data-pv-owner="1"/.test(out), 'code that waits for a click keeps running');
@@ -52,6 +62,10 @@ assert.equal(rep.frozen.filter((f) => f.why).length, 2, 'frozen once per layout'
 // arrived (the hints it built at capture are taken out), so it builds them once and the carousel keeps working.
 assert.ok(/data-pv-owner="2"/.test(out), 'code that builds and drives is kept');
 assert.equal(rep.restarted?.length, 2, 'restarted once per layout');
+const kept = /<style id="preserve-owner-css-2">([\s\S]*?)<\/style>/.exec(out)?.[1] || '';
+assert.ok(/\.hint/.test(kept) && /\.wrap \.hint\.on/.test(kept) && /@media/.test(kept) && /@keyframes nudge/.test(kept), 'the owner\'s rules for the parts the code builds come along: ' + kept);
+assert.ok(!/sqs|unused|\.card \{/.test(kept), 'and nothing else: ' + kept);
+assert.ok(rep.restarted.every((f) => f.styled));
 
 // The kept click code works in a sealed page, on our jQuery.
 const browser = await launch();
@@ -66,6 +80,7 @@ assert.equal(await pg.isVisible('#s1'), false);
 await pg.click('#btn');
 assert.equal(await pg.isVisible('#s1'), true, 'click opens the section');
 assert.equal(await pg.locator('.hint').count(), 2, 'one hint per card');
+assert.equal(await pg.locator('.hint').first().evaluate((e) => getComputedStyle(e).position), 'absolute', 'the rebuilt hints carry the owner\'s styling');
 await pg.click('#next');
 assert.equal(await pg.getAttribute('#track', 'data-at'), '1', 'the carousel code still runs');
 await browser.close(); srv.close();
