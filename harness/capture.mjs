@@ -1328,7 +1328,9 @@ export async function capture(url, outDir) {
     page.on('domcontentloaded', () => { if (left) return; const u = new URL(page.url()); if (u.pathname !== home.pathname || u.host !== home.host) left = u.pathname; });
     if (prof === 'desktop') fs.writeFileSync(path.join(outDir, 'server.html'), await resp.body());
     await sleep(2000);
-    const yStart = await page.evaluate(() => scrollY).catch(() => 0);
+    // Where a visitor arrives: the top, unless the address points into the page. Not read off the page itself, since a
+    // widget may already have scrolled it by now.
+    const yStart = new URL(url).hash.length > 1 ? await page.evaluate(() => scrollY).catch(() => 0) : 0;
     // Reference shot of the first screen exactly as a visitor sees it (overlays included).
     await page.screenshot({ path: path.join(outDir, `orig-asis-${prof}.png`) });
     await scrollThrough(page);
