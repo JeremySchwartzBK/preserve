@@ -145,6 +145,10 @@ const measure = () => {
   }
   // Overlaps between leaf blocks of the same section: share of the smaller block's drawn area that the other covers.
   const overlaps = {};
+  // Each place a block draws counts once: a carousel stacks its slides' pictures in the same spot (The Lurk Shop's
+  // project slideshow, 2026-11-28), and counting each one made the heading over it read as wholly covered on the live
+  // page, where all the slides were, and half covered in the copy, which keeps one, as if the two had moved apart.
+  for (const b of Object.values(blocks)) if (b.paint) { const seen = new Set(); b.paint = b.paint.filter((q) => { const k = [q.x, q.y, q.w, q.h].join(); return !seen.has(k) && seen.add(k); }); }
   const leaves = Object.entries(blocks).filter(([, b]) => b.leaf && b.paint?.length);
   const area = (rs) => rs.reduce((s, q) => s + q.w * q.h, 0);
   const inter = (a, c) => Math.max(0, Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x)) * Math.max(0, Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y));

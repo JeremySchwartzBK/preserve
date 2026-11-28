@@ -117,3 +117,6 @@ jobs:
       - name: A shape block stretches with its block at other window widths
         working-directory: harness
         run: node test-capture-shapes.mjs
+      - name: A heading over a slideshow's stacked pictures isn't called moved off them
+        working-directory: harness
+        run: node test-layout-stacked.mjs
