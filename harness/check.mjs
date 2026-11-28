@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 import sharp from 'sharp';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL, fullPageShot } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, NEXT_SEL, GALLERY_SEL, fullPageShot, ANIMATED_IMAGE_BLOCKS } from './lib.mjs';
 
 
 
@@ -277,7 +277,9 @@ const MOTION_SCREENS = 3, MOTION_GAP_MS = 2000, MOTION_MIN = 0.02;
 // focus: block ids (the person's pins) watched wherever they are on the page, not only within the first screens: on
 // Xanadu the undulating pictures a person pinned sat far below them, so this never looked at them (2026-11-27).
 export async function probeMotion(browser, url, profileName, { isCopy = false, focus = [] } = {}) {
-  const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true });
+  // The copy's page rules forbid it from fetching (connect-src 'none'); set aside so the animated-picture step below can
+  // read the copy's own pictures.
+  const ctx = await browser.newContext({ ...PROFILES[profileName].context, ignoreHTTPSErrors: true, bypassCSP: isCopy });
   if (isCopy) await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); return /^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol) ? r.continue() : r.abort(); });
   await ctx.addInitScript(ANCHOR);
   const page = await ctx.newPage();
@@ -330,6 +332,11 @@ export async function probeMotion(browser, url, profileName, { isCopy = false, f
       if (!ok) continue;
       await sleep(2500);
       await watch();
+    }
+    // An animated picture moves, on the live page and in the copy alike, even when the photos above caught it holding
+    // a frame. (The live page's pictures can't always be read from the page; those keep the photo verdict.)
+    for (const id of await page.evaluate(ANIMATED_IMAGE_BLOCKS).catch(() => [])) {
+      if (out[id] && !out[id].moving) out[id] = { ...out[id], moving: true, animatedImage: true };
     }
   } catch (e) { out.__error = String(e.message).split('\n')[0]; }
   finally { await ctx.close(); }

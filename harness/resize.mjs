@@ -47,7 +47,9 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
   };
   const open = async (prof, w, target, { copy = false, startW } = {}) => {
     const c = PROFILES[prof].context;
-    const ctx = await browser.newContext({ ...c, viewport: { width: startW || w, height: c.viewport.height }, ignoreHTTPSErrors: true });
+    // The copy's page rules forbid it from fetching anything (connect-src 'none'), which also stopped the first-frame step
+    // below from reading its own pictures, so copies kept moving pictures in these photos; the rules are set aside here.
+    const ctx = await browser.newContext({ ...c, viewport: { width: startW || w, height: c.viewport.height }, ignoreHTTPSErrors: true, bypassCSP: copy });
     if (copy) {
       await ctx.route('**/*', (r) => { const u = new URL(r.request().url()); return /^(localhost|127\.0\.0\.1)$/.test(u.hostname) || !/^http/.test(u.protocol) ? r.continue() : r.abort(); });
       await ctx.addInitScript(() => { window.__pvStill = true; });
@@ -58,9 +60,10 @@ export async function resizeCheck(url, copyBase, outDir, { widths = WIDTHS } = {
     await sleep(2000);
     if (startW) { await page.setViewportSize({ width: w, height: c.viewport.height }); await sleep(1500); }
     await scrollThrough(page);
-    // The copy's animated pictures on their first frame, the same in both of its photos (opened at the width and
-    // resized to it), so a moving GIF doesn't read as a resize fault (Ken Edits, Nov 18 showcase re-run).
-    if (copy) await page.evaluate(FREEZE_ANIMATED_IMAGES).catch(() => 0);
+    // Animated pictures on their first frame, in the copy and on the live page alike, so a moving GIF doesn't read as a
+    // resize fault (Ken Edits, Nov 18 showcase re-run) or as the copy differing from the live page because each photo
+    // caught a different frame (Jamesy World's hero, Nov 28 showcase re-run).
+    await page.evaluate(FREEZE_ANIMATED_IMAGES).catch(() => 0);
     // Endless animations (Second Story's sliding strip of pictures) at their start, on the live page and in the copy:
     // otherwise each photo catches them at a different moment and the pages read as different (Nov 18 showcase re-run).
     await page.evaluate(PAUSE_LOOPS, 'start').catch(() => null);

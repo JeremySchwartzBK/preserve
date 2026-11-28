@@ -161,6 +161,36 @@ export const FREEZE_ANIMATED_IMAGES = async () => {
   return n;
 };
 
+// Blocks holding a picture that is itself animated (a GIF, an animated WebP): ids of the innermost blocks, as the motion
+// check names them. Such a picture moves by design, whatever moment two photos of it happen to catch: one that holds a
+// frame for a few seconds read as still on one look and moving on the next (Ken Edits, Jamesy World, Nov 28 re-run).
+export const ANIMATED_IMAGE_BLOCKS = async () => {
+  if (!('ImageDecoder' in window)) return [];
+  const TYPES = { webp: 'image/webp', gif: 'image/gif', png: 'image/png', apng: 'image/apng', avif: 'image/avif' };
+  const sel = '[id^="block-"],[data-block-id]', ids = new Set();
+  await Promise.all([...document.images].map(async (i) => {
+    const b = i.closest(sel); if (!b) return;
+    const u = i.currentSrc || i.src; const ext = (u.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+    if (!TYPES[ext]) return;
+    try {
+      const r = await fetch(u); const type = /^image\//.test(r.headers.get('content-type') || '') ? r.headers.get('content-type').split(';')[0] : TYPES[ext];
+      const d = new ImageDecoder({ data: r.body, type }); await d.tracks.ready;
+      const animated = !!(d.tracks.selectedTrack && d.tracks.selectedTrack.animated); d.close();
+      if (animated) ids.add(b.id || b.getAttribute('data-block-id'));
+    } catch {}
+  }));
+  // And the blocks laid over one of those (Jamesy World's sticker on its moving hero picture): what changes in their
+  // box is the picture behind them.
+  const box = (e) => { const r = e.getBoundingClientRect(); return { x0: r.left + scrollX, y0: r.top + scrollY, x1: r.right + scrollX, y1: r.bottom + scrollY }; };
+  const moving = [...ids].map((id) => document.getElementById(id) || document.querySelector('[data-block-id="' + id + '"]')).filter(Boolean).map(box);
+  for (const b of document.querySelectorAll(sel)) {
+    if (b.querySelector(sel)) continue;
+    const r = box(b), area = Math.max(1, (r.x1 - r.x0) * (r.y1 - r.y0));
+    if (moving.some((m) => Math.max(0, Math.min(r.x1, m.x1) - Math.max(r.x0, m.x0)) * Math.max(0, Math.min(r.y1, m.y1) - Math.max(r.y0, m.y0)) > area * 0.3)) ids.add(b.id || b.getAttribute('data-block-id'));
+  }
+  return [...ids];
+};
+
 // Animations that play forever (a strip of pictures sliding along, a spinning badge) paused, so two photos of a page
 // don't catch them at different moments: at their start ('start'), at given moments (one per animation, in the order
 // the page lists them), or where they are now. Returns the moments they were paused at. Entrance animations, which

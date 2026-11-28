@@ -105,3 +105,6 @@ jobs:
       - name: Our own stylesheet's check leaves out parts the owner's code would build again
         working-directory: harness
         run: node test-own-css-owner.mjs
+      - name: Animated pictures, and parts laid over them, count as moving
+        working-directory: harness
+        run: node test-motion-animated.mjs
