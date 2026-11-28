@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, SQS_GALLERY_SEL, NEXT_SEL, PREV_SEL, fullPageShot } from './lib.mjs';
 import { captureVideos } from './video.mjs';
 import { loadPins, focusPins, markPinStills, applyGalleryFixes, recordLonger } from './pins.mjs';
 import { saveFrames } from './frames.mjs';
@@ -1403,7 +1403,7 @@ export async function capture(url, outDir) {
     await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' });
     await sleep(300);
     await page.screenshot({ path: path.join(outDir, `ref-${prof}.png`) });
-    await page.screenshot({ path: path.join(outDir, `ref-full-${prof}.png`), fullPage: true }).catch(() => {});
+    await fullPageShot(page, { path: path.join(outDir, `ref-full-${prof}.png`) }).catch(() => {});
     await fontSamples(page, outDir, info);
     if (prof === 'desktop') {
       Object.assign(info, await page.evaluate(() => ({

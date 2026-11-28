@@ -116,6 +116,18 @@ export function markPromos() {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A whole-page picture as wide as the window, never wider. Something that sticks out past the right edge for a
+// moment (State of Sage's spaced-out header title, 2026-11-27) made the picture of the live phone page four times
+// as wide as the window; shrunk to the comparison width, the live page then looked a quarter as long as the copy
+// and was held for "page length differs". A visitor reads the page in the window's width, so that is what is compared.
+export async function fullPageShot(page, opts = {}) {
+  // The window's set width, not innerWidth: a phone browser zooms out to fit what sticks out, and innerWidth grows with it.
+  const w = page.viewportSize()?.width;
+  const h = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0)).catch(() => 0);
+  if (!w || !h) return page.screenshot({ ...opts, fullPage: true });
+  return page.screenshot({ ...opts, fullPage: true, clip: { x: 0, y: 0, width: w, height: h } });
+}
+
 // Galleries, carousels and slideshows, and their "next" / "previous" arrows (check.mjs probeGalleries, capture.mjs
 // recordGalleries). Only buttons and links count: 7.1 fullscreen slideshows also mark slides data-next. Squarespace 7.0 gallery and summary blocks, 7.1 gallery and list sections, and generic names.
 export const GALLERY_SEL = '.sqs-gallery-container, .gallery-slideshow, .gallery-reel, .gallery-fullscreen-slideshow, .gallery-strips, .user-items-list-carousel, .user-items-list-banner-slideshow, .user-items-list-simple, .summary-carousel, .sqs-gallery-block-slideshow, .sqs-gallery-block-carousel, .swiper, .ps-gallery, [class*="slideshow" i], [class*="carousel" i]';

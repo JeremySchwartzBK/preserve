@@ -9,7 +9,7 @@ import http from 'node:http';
 import { check, diffPct, probeGalleries, probeMotion, probeStuck } from './check.mjs';
 import { loadPins, shootPins, comparePins } from './pins.mjs';
 import { MOVE_FAMILY, codeOf } from './fix-menu.mjs';
-import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos } from './lib.mjs';
+import { PROFILES, launch, sleep, OVERLAY_SELECTORS, markPromos, fullPageShot } from './lib.mjs';
 import { timeCopy, TARGET_MS } from './loadtime.mjs';
 import { resizeCheck } from './resize.mjs';
 import { probeBehavior, compareBehavior } from './behavior.mjs';
@@ -75,7 +75,7 @@ async function liveSelfDiff(url, siteDir) {
         await page.evaluate(markPromos).catch(() => 0);
         await page.addStyleTag({ content: OVERLAY_SELECTORS.join(',') + '{display:none!important}' }); await sleep(300);
         await page.screenshot({ path: path.join(siteDir, `live2-${prof}.png`) });
-        await page.screenshot({ path: path.join(siteDir, `live2-full-${prof}.png`), fullPage: true });
+        await fullPageShot(page, { path: path.join(siteDir, `live2-full-${prof}.png`) });
         if (loadPins().length) await shootPins(page, prof, siteDir, 'live');
         out[prof] = { firstScreen: await diffPct(path.join(siteDir, `ref-${prof}.png`), path.join(siteDir, `live2-${prof}.png`)), fullPage: await diffPct(path.join(siteDir, `ref-full-${prof}.png`), path.join(siteDir, `live2-full-${prof}.png`)) };
         out[prof].galleries = await probeGalleries(browser, url, prof); // what the copy's galleries are held to
